@@ -14,6 +14,27 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Stratified model (spec v11): `strategy/` as a first-class kind
+  (`status: aspirational|committed|retired` — only committed induces), the
+  founding map (`problem/README.md`: needs as `## N-{slug}` anchors,
+  technology-free), `induced-by:` provenance edges on subdomains with
+  classification per edge, spec rule 11, and the Pivot / Stratified alternation /
+  Classification inversion patterns. Decision records 0013–0017.
+- Lint rules 13–17 (strategy validity, orphan detection, core-ranking,
+  technology-free founding map, incomplete pivot) and a rewritten rule 3
+  (derivation edges).
+- Derivation sweep: a third steward ritual escalating downstream artifacts when
+  the founding map or a strategy changes, and flagging orphaned subdomains.
+- Template: `strategy/first-strategy.md` stub; scaffold order now founding map →
+  first strategy → induced subdomains.
+
+### Changed
+
+- Subdomain classification moved from the node (`class:`) to the
+  (subdomain, strategy) edge; effective automation policy is the strictest class
+  across committed edges, orphans defaulting to core. No migration path — pre-1.0,
+  zero usage-hours.
+
 - Initial Trellis plugin prototype — the specification (`spec/trellis.md`), the
   domain scaffold (`template/`), the `trellis:conventions` skill, the
   `trellis:steward` agent, the shared lint checklist (`checks/conventions-lint.md`),

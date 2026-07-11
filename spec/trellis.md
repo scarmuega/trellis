@@ -1,18 +1,53 @@
-# Trellis — specification (v10)
+# Trellis — specification (v11)
 
 > **The structure your business grows along.**
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
 ## Rationale
 
-1. **A business is a search for problem-solution fit under economic constraints.**
-   Not optimization of a fixed objective: the problem itself is being discovered,
-   and the search must sustain itself economically to continue. Problem and solution
-   are therefore the two first-class spaces of the framework, and viability is
-   knowledge in its own right.
-   *Grounds: `problem/`, `solution/`, `economics.md`, `brand.md`.*
+1. **Needs are primitive; a business is a search for a viable strategy to fulfill
+   them.** Needs exist in the market independently of any business — external,
+   slow-changing, technology-free: the model's only invariant layer. A strategy is
+   a committed solution to a need — the business model as actually operated, not
+   as aspired to. Only commitments induce consequences; intentions do not. The
+   search is not optimization of a fixed objective: strategy is chosen, versioned,
+   and revocable, and the search must sustain itself economically to continue —
+   viability is knowledge in its own right.
+   *Grounds: `problem/README.md` (the founding map), `strategy/` and its status
+   lifecycle, `economics.md`, `brand.md`.*
 
-2. **The search runs on imperfect information.** The problem space is a set of
+2. **The domain is induced, not found — and derived artifacts carry their
+   derivation.** `need × strategy → domain`: the domain is everything the business
+   must become expert at *because of how* it chose to fulfill the need. Aircraft
+   maintenance is in an airline's domain because the strategy put it there. A
+   derived map must be attributable: an untagged subdomain is a modeling error —
+   it either belongs to the technology-free need layer or it owes its existence to
+   a strategy and must say which.
+   *Grounds: `induced-by:` edges, rule 11, orphan lint, the derivation sweep,
+   garbage collection on pivot.*
+
+3. **Problem and solution are roles, not territories.** The model is stratified: a
+   solution at level N becomes the problem context at level N+1. Strategy is a
+   solution at the level of the market and a problem-generator at the level of
+   operations. `problem/` and `solution/` name the roles at the top stratum, not
+   two fixed regions.
+   *Grounds: `strategy/` between the strata, the stratified-alternation pattern,
+   fractal recursion via rules 8–9.*
+
+4. **Subdomain classification is relative to strategy, and induced subdomains are
+   real.** Core is where the strategy claims differentiation; supporting is what
+   the strategy drags in but doesn't compete on; generic is where the induced
+   problems coincide with everyone else's, so the market already solved them. The
+   same problem classifies oppositely under different strategies (payments:
+   generic for almost everyone, core for Stripe). And once induced, subdomains are
+   genuine problem spaces — their own experts, language, failure modes, and
+   economics — never mere implementation detail: banning technology-flavored
+   subdomains from the map hides real operational problems that consume real
+   expertise.
+   *Grounds: class-on-edge, the strictest-wins effective policy, `core-ranking:`,
+   admission of technology-flavored subdomains.*
+
+5. **The search runs on imperfect information.** The problem space is a set of
    beliefs to be continually re-evaluated; the solution space is a set of
    experiments to be improved. The framework is therefore an epistemic machine, not
    a filing system: knowledge must be revisable with an audit trail, beliefs at
@@ -21,31 +56,31 @@
    *Grounds: versioned artifacts, `decisions/`, `metrics/`, `rituals.md`,
    plan lifecycle.*
 
-3. **AI agents collapse two costs at once**: the cost of executing business
+6. **AI agents collapse two costs at once**: the cost of executing business
    processes previously limited to humans, and the cost of maintaining the
    structured knowledge that disciplined operation requires. The second matters
    most — methodologies of this fidelity have always died of documentation
    ceremony. When the documentation is the execution medium (the artifact an agent
    loads *is* the process), upkeep stops being overhead.
-   *Grounds: automation policy via subdomain class, `skills/`, holder packages,
-   agent-executed rituals.*
+   *Grounds: automation policy derived from strategy edges, `skills/`, holder
+   packages, agent-executed rituals.*
 
-4. **Under agents, the entire solution space becomes software-shaped.** Every
+7. **Under agents, the entire solution space becomes software-shaped.** Every
    function — marketing, sales, support, finance — is operationalized through
    agents, tools, and contracts. This is what licenses borrowing DDD wholesale:
    DDD is software engineering's mature discipline for partitioning *meaning* at
    scale, and once every function is software, its applicability is total, not
    partial.
-   *Grounds: glossaries, bounded contexts, `context-map.md`, core/supporting/generic
-   classification, the absence of a functions branch.*
+   *Grounds: glossaries, bounded contexts, `context-map.md`, per-strategy
+   core/supporting/generic classification, the absence of a functions branch.*
 
-5. **Versioned natural language is the shared medium.** Code is native to machines;
+8. **Versioned natural language is the shared medium.** Code is native to machines;
    conversation is native to humans; versioned natural-language text is the
    intersection both can read, write, diff, and review. A filesystem of markdown is
    therefore the organizational substrate.
    *Grounds: the substrate choice itself.*
 
-6. **Structure substitutes for memory.** Agents are stateless — each session
+9. **Structure substitutes for memory.** Agents are stateless — each session
    reconstructs its world from what it can retrieve. Humans onboard, forget, and
    leave. A well-known, stable shape makes retrieval predictable for both: every
    participant knows where any kind of knowledge lives without being told. The
@@ -53,10 +88,10 @@
    *Grounds: the fixed hierarchy, the naming principle, kinds-vs-tags,
    one schema for humans and agents.*
 
-7. **Delegated execution requires explicit authority.** Automating what humans did
-   means deciding what agents may decide. Bounded, local, auditable mandates make
-   delegation safe rather than implicit.
-   *Grounds: `mandate.md`, the mandate/holder split, always-local authority.*
+10. **Delegated execution requires explicit authority.** Automating what humans did
+    means deciding what agents may decide. Bounded, local, auditable mandates make
+    delegation safe rather than implicit.
+    *Grounds: `mandate.md`, the mandate/holder split, always-local authority.*
 
 Corollary: every element of the framework must be grounded by some premise above;
 an element grounded by none is a candidate for deletion.
@@ -70,10 +105,18 @@ an element grounded by none is a candidate for deletion.
 │                                      escalation SLAs — executed by mandated agents
 ├── glossary.md                     => ubiquitous language; agents must cite terms from here
 ├── problem/
-│   ├── README.md                   => domain problem statement
-│   └── {subdomain}.md              => frontmatter: class: core|supporting|generic
-│                                      business functions live here, classified per-business
-├── brand.md                        => promise to customers
+│   ├── README.md                   => founding map: needs (anchored ## N-{slug}), jobs-to-be-done,
+│   │                                  market, personas — technology-free; endures pivots
+│   └── {subdomain}.md              => induced problem space; frontmatter: induced-by edges naming
+│                                      the strategy that put it here, class per edge — business
+│                                      functions live here, classified per strategy
+├── strategy/
+│   └── {strategy}.md               => a committed solution to a need — the business model as
+│                                      operated, not as aspired to; frontmatter: status (only
+│                                      committed induces), need ref, differentiation claim,
+│                                      core-ranking
+├── brand.md                        => promise to customers — the customer-facing voice of the
+│                                      committed strategy's differentiation claim
 ├── economics.md                    => pricing, revenue model, unit economics
 ├── metrics/
 │   ├── definitions.md              => authored: metric defs, targets, owners (via mandates)
@@ -121,11 +164,27 @@ tags: [mktg, growth]                # groupings are tags; views over tags are ge
 ### problem/{subdomain}.md
 ```yaml
 provenance: authored
-class: core | supporting | generic
-# automation policy derives from this — and applies to business functions too:
+induced-by:                              # >=1 edge; no edge to a committed
+  - strategy: strategy/{strategy}.md     #   strategy => orphan (lint)
+    class: core | supporting | generic   # classification is a property of the edge
+# effective automation policy = strictest class across edges to COMMITTED
+# strategies (core > supporting > generic; orphans default to core) — this
+# mapping is canonical here; it applies to business functions too:
 #   generic    => full agent autonomy (or buy it)
 #   supporting => agent executes, human samples
 #   core       => human review gate on every change
+```
+
+### strategy/{strategy}.md
+```yaml
+provenance: authored
+status: aspirational | committed | retired   # only committed induces
+need: problem/README.md#n-{slug}             # the market need this fulfills
+differentiation: one line — why we win, against which alternative
+core-ranking: [problem/{a}.md, problem/{b}.md]  # required iff >1 core edge under
+                                                # this strategy; a total order,
+                                                # scarcest attention first
+supersedes: strategy/{previous}.md           # optional; set on pivot
 ```
 
 ### plans/{plan}.md
@@ -187,6 +246,12 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     subdomains, contexts, skills, and roles — lands in an agent's context window.
     Prefer distinctive tokens over ambient ones; expand, don't abbreviate: no opaque
     acronyms.
+11. **The domain map carries its derivation.** Every `problem/{subdomain}.md`
+    declares the strategy edges that induced it; classification lives on the edge;
+    only `committed` strategies induce. Retiring a strategy orphans the subdomains
+    it induced — each must be re-parented to a surviving commitment or archived.
+    Needs edits are rare and cascade everywhere; strategy edits are the normal
+    unit of pivot.
 
 ## Patterns & practices (non-normative)
 
@@ -197,10 +262,10 @@ independent lifecycle in your instance, rule 7 tells you when it earns promotion
 ### Business functions
 Marketing, sales, support, finance are not a branch — they dissolve into the
 ontology. The function's problem is a subdomain, classified core/supporting/generic
-per business, which is what puts business functions under the automation policy. Its
-solution is a bounded context. Its campaigns and initiatives are plans. Its standing
-processes are rituals. Its ownership is a mandate. "Everything mktg" is a generated
-view over tags, per rule 7.
+per strategy edge, which is what puts business functions under the automation
+policy. Its solution is a bounded context. Its campaigns and initiatives are plans.
+Its standing processes are rituals. Its ownership is a mandate. "Everything mktg"
+is a generated view over tags, per rule 7.
 
 ### Requirements
 Requirements are a genre, not a kind — they dissolve into the ontology by nature.
@@ -217,11 +282,13 @@ a requirement on an agent made testable. The methodology's pressure is to hatch 
 into `contracts/` and `evals/`, not to accumulate it.
 
 ### Personas & market
-Personas are problem-space knowledge: sections within `problem/README.md` or the
-relevant subdomain file — who they are, needs, context, willingness to pay — each
-under a stable anchor so brand, plans, and metric definitions can ref them. Persona
-names enter `glossary.md` as ubiquitous language: when an agent writes "the indie
-dev," it must resolve to one canonical definition.
+Personas are founding-map knowledge — demand-side and technology-free, so they
+endure pivots: sections within `problem/README.md` or the relevant subdomain file —
+who they are, needs, context, willingness to pay — each under a stable anchor so
+brand, plans, and metric definitions can ref them. A persona's needs connect to the
+map's `## N-{slug}` need anchors. Persona names enter `glossary.md` as ubiquitous
+language: when an agent writes "the indie dev," it must resolve to one canonical
+definition.
 
 Market splits across the existing spine rather than getting a home: segmentation and
 competitive landscape are problem knowledge (body of `problem/README.md`); sizing and
@@ -247,3 +314,37 @@ accountant, an agency, outsourced support) is a role with an external holder:
 would for an agent; `holder/ref.md` points at the party. The residue — signed
 contracts, pricing, renewal dates — is body content plus state-refs to the system of
 record, with renewals as `rituals.md` entries.
+
+### Pivot
+A pivot is a strategy edit, not a rewrite of the world. The founding map endures —
+if it doesn't, that wasn't a pivot but a different business. Procedure: set the old
+strategy's `status: retired`; commit the new one, `supersedes:` naming the old.
+Every subdomain the retired strategy induced is now orphaned (rule 11): the
+derivation sweep flags each for its owner to re-parent onto a surviving commitment
+(often with a different `class:` — classification is per edge) or archive. Orphans
+carry core policy until resolved, so a half-finished pivot tightens agent autonomy
+rather than loosening it, and a root left with only retired strategies is flagged
+as an incomplete pivot. Abandon agents for elves; the agent-orchestration
+subdomain collects itself.
+
+### Stratified alternation
+The needs → strategy → subdomains machinery is normative only at the top stratum,
+but the logic recurs: each level's committed solution is the next level's problem
+context. Below the top stratum, a bounded context's significant commitments (a
+runtime, a vendor, an architecture) are `decisions/` whose Consequences name what
+they induce; superseding the decision orphans those consequences — same garbage
+collection, lighter machinery. When a lower stratum genuinely needs its own goals,
+metrics, and plans, rule 8 fires: it becomes a new domain root, where the full
+machinery applies again. Recursion happens via fractal roots (rule 9), never
+deeper trees.
+
+### Classification inversion (portfolio)
+Across ventures sharing a substrate, check each generic subdomain consumed by
+venture A for being a core subdomain of some venture B — in the portfolio or the
+market. The inversion is healthy and expected: it marks a clean factoring boundary
+and a candidate internal interface (mandate-governed agent payments: one venture's
+core, a sibling's generic — same problem, opposite classification, two doors
+down). Its absence is the smell: ventures duplicating each other's core, or one
+accidentally building a sibling's product as "internal tooling." This check runs
+at a portfolio root (rule 9: a portfolio is just a domain) over its venture refs;
+how classifications reach that root is the consumer's tooling, per rule 1.

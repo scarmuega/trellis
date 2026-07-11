@@ -31,11 +31,25 @@ tags: []            # groupings are tags; views over tags are generated
 ### problem/{subdomain}.md
 ```yaml
 provenance: authored
-class: core | supporting | generic
-# automation policy:
+induced-by:                              # >=1 edge; no edge to a committed
+  - strategy: strategy/{strategy}.md     #   strategy => orphan (lint)
+    class: core | supporting | generic   # classification is a property of the edge
+# effective automation policy = strictest class across edges to COMMITTED
+# strategies (core > supporting > generic; orphans default to core):
 #   generic    => full agent autonomy (or buy it)
 #   supporting => agent executes, human samples
 #   core       => human review gate on every change
+```
+
+### strategy/{strategy}.md
+```yaml
+provenance: authored
+status: aspirational | committed | retired   # only committed induces
+need: problem/README.md#n-{slug}
+differentiation: one line — why we win, against which alternative
+core-ranking: []    # required iff >1 core edge under this strategy;
+                    # total order, scarcest attention first
+supersedes: strategy/{previous}.md           # optional; set on pivot
 ```
 
 ### plans/{plan}.md
@@ -75,6 +89,12 @@ Open set; add types here before using them.
 Register tags here before use so generated views stay coherent.
 
 - (none yet)
+
+## Need anchors
+
+Market needs get stable anchored headings in `problem/README.md` (`## N-{slug}`),
+technology-free, so strategies can ref them as `problem/README.md#n-{slug}`. The
+founding map endures pivots; strategy vocabulary never appears in it.
 
 ## Requirement anchors
 

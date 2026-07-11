@@ -24,8 +24,11 @@ authoritative over this skill where they differ.
 conventions.md    schemas, registries, boundary guarantees, secrets policy
 rituals.md        heartbeat: cadenced processes, executor roles, escalations
 glossary.md       ubiquitous language — cite terms from here
-problem/          problem space: README (statement, market, personas) +
-                  {subdomain}.md classified core|supporting|generic
+problem/          founding map (README: needs as ## N-{slug} anchors, market,
+                  personas — technology-free, endures pivots) + {subdomain}.md
+                  carrying induced-by: strategy edges, class on the edge
+strategy/         {strategy}.md — committed solution to a need: status (only
+                  committed induces), need ref, differentiation, core-ranking
 brand.md          the promise to customers
 economics.md      pricing, revenue model, unit economics
 metrics/          definitions.md (authored) + actuals/ (generated or state-refs)
@@ -41,9 +44,11 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 
 | Content | Destination |
 |---|---|
-| Problem statement, market, segmentation | `problem/README.md` body |
+| Market need, job-to-be-done | anchored `## N-{slug}` section in `problem/README.md` — technology-free |
+| Market segmentation, competitive landscape | `problem/README.md` body |
 | Persona, as-is journey | anchored section in `problem/README.md` (persona names → glossary) |
-| New problem area | `problem/{subdomain}.md` with `class:` |
+| Business model, chosen means, differentiation, pivot | `strategy/{strategy}.md` — only `committed` induces |
+| New problem area | `problem/{subdomain}.md` with `induced-by:` edges (class on the edge) |
 | Requirement / constraint | body of its subdomain or BC README, anchored `## R-{name}-{n}` |
 | Promise, positioning, voice | `brand.md` |
 | Pricing, revenue, unit economics, sizing | `economics.md` |
@@ -81,6 +86,9 @@ tags; views over tags are generated.
    a subdirectory.
 9. The framework is fractal: portfolios and holdcos are just domains.
 10. Names are retrieval keys: distinctive over ambient, no opaque acronyms.
+11. The domain map carries its derivation: every subdomain declares `induced-by:`
+    strategy edges; class lives on the edge; only committed strategies induce;
+    retiring a strategy orphans its subdomains (re-parent or archive).
 
 ## Procedures
 
@@ -89,9 +97,23 @@ tags; views over tags are generated.
 `conventions.md` registries and boundary guarantees; date and pin
 `decisions/0000-adopt-trellis.md`; delete `template/README.md`.
 
-**Add a subdomain**: create `problem/{name}.md`, set `class:` (this sets its
-automation policy: generic ⇒ agent autonomy; supporting ⇒ agent executes, human
-samples; core ⇒ human review gate), add its terms to the glossary.
+**Commit a strategy**: create `strategy/{name}.md` — `need:` pointing at a
+founding-map `## N-{slug}` anchor, `differentiation:`, `status: aspirational`
+until it is the model as operated, then `committed` (only committed induces).
+More than one core edge under it ⇒ record `core-ranking:` (scarcest attention
+first).
+
+**Add a subdomain**: create `problem/{name}.md`, declare its `induced-by:` edges —
+each naming the strategy that put it in the domain, with `class:` on the edge.
+Effective automation policy is the strictest class across committed edges
+(generic ⇒ agent autonomy; supporting ⇒ agent executes, human samples; core ⇒
+human review gate; orphans default to core). Add its terms to the glossary.
+
+**Pivot**: set the old strategy `status: retired`; commit the new one with
+`supersedes:`. Every subdomain the retired strategy induced is orphaned — the
+founding map endures; re-parent each orphan onto a surviving commitment
+(re-classifying its edge) or archive it. Orphans carry core policy until
+resolved.
 
 **Add a bounded context**: `solution/{name}/` with README + local glossary; add a
 row to `context-map.md`; put its interfaces in `contracts/`, procedures in
@@ -114,6 +136,8 @@ answer is body content with a stable anchor.
 
 For audits, run the canonical checklist at
 `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` — the same set the
-`trellis:steward` agent enforces (frontmatter validity, classified subdomains,
-plan refs resolve, mandates have authority, append-only decisions, registered
-tags, no secrets, no grouping directories, actuals freshness).
+`trellis:steward` agent enforces (frontmatter validity, subdomain derivation
+edges, strategy validity, orphan detection, core-ranking, technology-free
+founding map, incomplete pivots, plan refs resolve, mandates have authority,
+append-only decisions, registered tags, no secrets, no grouping directories,
+actuals freshness).

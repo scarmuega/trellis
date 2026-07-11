@@ -9,7 +9,9 @@ escalation to the artifact's owner.
 1. Every artifact has frontmatter with valid `provenance:` and `owner:`.
 2. No `generated` artifact has hand-edits (diff against its generator's output
    where feasible; otherwise flag suspicious edits).
-3. Every `problem/{subdomain}.md` declares `class: core|supporting|generic`.
+3. Every `problem/{subdomain}.md` declares at least one `induced-by:` edge; each
+   edge names an existing `strategy/{strategy}.md` and a legal
+   `class: core|supporting|generic`. No node-level `class:` remains.
 4. Every plan declares `status:` and a registered `type:`; its `subdomains:`,
    `contexts:`, `metrics:`, and `decisions:` refs resolve to existing anchors.
 5. Every mandate declares `authority:` and `escalate-to:`; every role has a
@@ -23,3 +25,21 @@ escalation to the artifact's owner.
 11. No directory that is a grouping rather than a kind (spec rule 7).
 12. `metrics/actuals/` content is within the freshness window defined by
     `rituals.md`.
+13. Every `strategy/{strategy}.md` declares a legal
+    `status: aspirational|committed|retired`; its `need:` resolves to an
+    `N-{slug}` need anchor in `problem/README.md` (slug match — heading level
+    and case don't matter); `supersedes:` (if present) resolves; committed
+    strategies declare `differentiation:`.
+14. Every subdomain has at least one edge to a `status: committed` strategy;
+    subdomains whose edges all point to retired or aspirational strategies are
+    orphans — escalate for re-parenting or archival (they carry core policy until
+    resolved).
+15. Any committed strategy with more than one `core` edge declares
+    `core-ranking:` — a total order covering exactly its core subdomains.
+16. `problem/README.md` is technology-free: flag strategy vocabulary, chosen
+    means, and product or stack names for relocation to `strategy/` or `solution/`
+    (judgment check, like rule 2's "flag suspicious").
+17. If any strategy is `retired` and none is `committed`, the pivot is
+    incomplete — the root is operating nothing it can attribute. Escalate to the
+    retired strategy's owner: commit a successor or archive the induced
+    subdomains.

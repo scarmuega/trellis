@@ -4,11 +4,12 @@
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
 Trellis structures a business as a versioned markdown filesystem — one repo per
-domain — that humans and AI agents operate through the same artifacts: problem and
-solution spaces, mandates with explicit authority, plans with lifecycle, decisions
-as append-only memory, and rituals as the heartbeat.
+domain — that humans and AI agents operate through the same artifacts: a founding
+map of market needs, committed strategies and the problem space they induce,
+solution contexts, mandates with explicit authority, plans with lifecycle,
+decisions as append-only memory, and rituals as the heartbeat.
 
-**Status: pre-1.0.** Specification v10, zero production usage-hours. Expect churn;
+**Status: pre-1.0.** Specification v11, zero production usage-hours. Expect churn;
 conventions harden through dogfooding, and every change lands in `decisions/`.
 
 ## Layout
