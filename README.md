@@ -18,7 +18,8 @@ skills, agents, commands, and hooks from the conventional directories below.
 
 | path | what |
 |---|---|
-| `.claude-plugin/plugin.json` | plugin manifest (name, version, author) |
+| `.claude-plugin/plugin.json` | plugin manifest (name, description, author) |
+| `.claude-plugin/marketplace.json` | self-distributing catalog: the `trellis` plugin under the `scarmuega` marketplace |
 | `spec/trellis.md` | the specification: rationale, hierarchy, schemas, rules, patterns |
 | `template/` | copy to scaffold a new domain root (steward role included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
@@ -26,6 +27,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `skills/conventions/` | the base skill (`trellis:conventions`): conventions, placement guide, procedures |
 | `agents/` | subagents, one `{name}.md` each |
 | `agents/steward.md` | `trellis:steward` — enforcement agent; the portable holder of every domain's steward role |
+| `CHANGELOG.md` | the release ledger; notable changes per version |
 | `decisions/` | ADRs governing this spec — the framework eats its own mechanics |
 
 `spec/`, `template/`, and `checks/` sit at the plugin root: they are shared family
@@ -36,8 +38,9 @@ artifacts that every skill and agent draws on, not the property of any one skill
 1. Read `spec/trellis.md` — the Rationale section is the why, the rest is the what.
 2. Scaffold: `cp -r template/ path/to/{your-domain}` and follow the copied
    `README.md`.
-3. Install the `trellis` plugin (this repo) into Claude Code so every session is
-   Trellis-aware — the skill, spec, and template ship together.
+3. Install into Claude Code: `/plugin marketplace add scarmuega/trellis`, then
+   `/plugin install trellis@scarmuega`. The skill, spec, template, and steward agent
+   ship together.
 4. The template ships with `org/steward/` — the mandate stays local; its holder is
    a `ref.md` to the plugin's `trellis:steward` agent (identity is portable,
    authority is not). Deterministic tooling (a CLI) gets extracted from the steward

@@ -1,0 +1,14 @@
+{
+  "name": "scarmuega",
+  "owner": {
+    "name": "Santiago Carmuega",
+    "email": "santiago@carmuega.me"
+  },
+  "plugins": [
+    {
+      "name": "trellis",
+      "source": "./",
+      "description": "A domain-driven operating model for businesses run by humans and AI agents — skills, agents, and templates for operating Trellis domain repos."
+    }
+  ]
+}
