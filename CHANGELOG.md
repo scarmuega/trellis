@@ -14,6 +14,16 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Runtime as contract-plus-bindings (`spec/runtime.md`, decision 0019): three
+  trigger planes reduced to one `act(role, input)` primitive; `/trellis:act`
+  and `/trellis:ritual` commands; a deterministic enforcement gate (`hooks/`:
+  append-only decisions, no hand-edits to `generated` artifacts without an
+  acting-role marker, frontmatter warnings on new artifacts); template
+  reference workflows for the scheduled (cron rituals) and event-driven
+  (`role:{name}` issue labels) planes, with forge issues/PRs as the escalation
+  and approval channels; a "Runtime binding" section in the template's
+  `conventions.md`.
+
 - Stratified model (spec v11): `strategy/` as a first-class kind
   (`status: aspirational|committed|retired` — only committed induces), the
   founding map (`problem/README.md`: needs as `## N-{slug}` anchors,

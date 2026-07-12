@@ -21,12 +21,15 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `.claude-plugin/plugin.json` | plugin manifest (name, description, author) |
 | `.claude-plugin/marketplace.json` | self-distributing catalog: the `trellis` plugin under the `scarmuega` marketplace |
 | `spec/trellis.md` | the specification: rationale, hierarchy, schemas, rules, patterns |
+| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, contract services, the Claude Code + forge reference binding |
 | `template/` | copy to scaffold a new domain root (steward role included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
 | `skills/` | skills, one dir each (`SKILL.md` + assets) |
 | `skills/conventions/` | the base skill (`trellis:conventions`): conventions, placement guide, procedures |
 | `agents/` | subagents, one `{name}.md` each |
 | `agents/steward.md` | `trellis:steward` — enforcement agent; the portable holder of every domain's steward role |
+| `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner) |
+| `hooks/hooks.json` | deterministic enforcement gate: append-only decisions, no hand-edits to `generated` artifacts |
 | `CHANGELOG.md` | the release ledger; notable changes per version |
 | `decisions/` | ADRs governing this spec — the framework eats its own mechanics |
 
@@ -46,6 +49,10 @@ artifacts that every skill and agent draws on, not the property of any one skill
    a `ref.md` to the plugin's `trellis:steward` agent (identity is portable,
    authority is not). Deterministic tooling (a CLI) gets extracted from the steward
    later, once usage shows which checks must never be probabilistic.
+5. Operate: work interactively at the domain root; invoke roles with
+   `/trellis:act` and rituals with `/trellis:ritual`; wire the scheduled and
+   event-driven planes with the template's `.github/workflows/`. The runtime
+   contract and its reference binding: `spec/runtime.md`.
 
 ## Extending the plugin
 
@@ -59,8 +66,8 @@ repeat the `trellis` prefix.
 - **Subagents** → `agents/{name}.md`: YAML frontmatter (`name`, `description`,
   optional `tools`, `model`) then the system prompt as the body. Bare role:
   `steward` → `trellis:steward`.
-- **Slash commands** → `commands/{name}.md` (add the dir when the first one
-  lands). **Hooks** → `hooks/hooks.json`.
+- **Slash commands** → `commands/{name}.md`. Bare verb: `act`, `ritual` →
+  `/trellis:act`, `/trellis:ritual`. **Hooks** → `hooks/hooks.json`.
 
 ## Non-goals
 

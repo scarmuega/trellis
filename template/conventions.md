@@ -114,6 +114,29 @@ The framework leaves cross-root composition to tooling; this instance guarantees
 - Agent context is reproducible: an agent's behavior must be attributable to a
   specific commit of this root plus specific pins.
 
+## Runtime binding
+
+How this domain is operated day to day (contract: the `runtime.md` companion of
+the spec version pinned in `decisions/0000-adopt-trellis.md`). This instance's
+choices:
+
+- Harness: Claude Code with the `trellis` plugin — interactive sessions at the
+  root; headless `claude -p` for the scheduled and event-driven planes.
+- Role invocation: `/trellis:act {role} [input]`; rituals: `/trellis:ritual
+  {name}`. An agent acting under a role records it in `.trellis/acting-role`
+  (ephemeral, gitignored, never committed).
+- Scheduled plane: `.github/workflows/rituals.yml` — keep its cron in step with
+  `rituals.md`.
+- Ingress: label a forge issue `role:{name}` to invoke that role
+  (`.github/workflows/ingress.yml`). Relay outside events (email, tickets,
+  webhooks) into labeled issues so the domain keeps one ingress and one ledger.
+- Escalation channel: forge issues assigned to the `escalate-to:` role's
+  holder — human `holder/ref.md` files carry the forge handle for this reason.
+- Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
+  supporting → commit, sampled review on the ritual cadence; core → PR with
+  required owner review, enforced by branch protection plus a generated
+  CODEOWNERS view over `owner:` frontmatter.
+
 ## Secrets policy
 
 No secrets in this repo, ever — no keys, tokens, credentials, or account numbers.

@@ -17,4 +17,10 @@ Then:
 6. Review `conventions.md` — it is YOUR instance's authoritative copy; adjust the
    tag registry, plan types, and boundary guarantees to your tooling.
 7. Record `decisions/0000-adopt-trellis.md` (pre-written; pin your spec version).
-8. Delete this file.
+8. Wire the runtime (see `conventions.md` → Runtime binding): add
+   `ANTHROPIC_API_KEY` to the forge's secrets, align
+   `.github/workflows/rituals.yml` with your `rituals.md` cadences, pin the
+   plugin checkout ref in both workflows, create a `role:{name}` label per role
+   reachable from ingress, and protect core-class paths (branch protection +
+   CODEOWNERS).
+9. Delete this file.

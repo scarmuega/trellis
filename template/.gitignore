@@ -1,0 +1,2 @@
+# Ephemeral runtime state — never committed (see conventions.md, Runtime binding)
+.trellis/
