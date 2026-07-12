@@ -10,29 +10,29 @@
    slow-changing, technology-free: the model's only invariant layer. A strategy is
    a committed solution to a need — the business model as actually operated, not
    as aspired to. Only commitments induce consequences; intentions do not. The
-   search is not optimization of a fixed objective: strategy is chosen, versioned,
-   and revocable, and the search must sustain itself economically to continue —
+   search is not optimization of a fixed objective: strategy is chosen and
+   revocable, and the search must sustain itself economically to continue —
    viability is knowledge in its own right.
    *Grounds: `problem/README.md` (the founding map), `strategy/` and its status
    lifecycle, `economics.md`, `brand.md`.*
 
-2. **The domain is induced, not found — and derived artifacts carry their
-   derivation.** `need × strategy → domain`: the domain is everything the business
-   must become expert at *because of how* it chose to fulfill the need. Aircraft
-   maintenance is in an airline's domain because the strategy put it there. A
-   derived map must be attributable: an untagged subdomain is a modeling error —
-   it either belongs to the technology-free need layer or it owes its existence to
-   a strategy and must say which.
-   *Grounds: `induced-by:` edges, rule 11, orphan lint, the derivation sweep,
-   garbage collection on pivot.*
+2. **The domain is induced, not found.** `need × strategy → domain`: the domain is
+   everything the business must become expert at *because of how* it chose to
+   fulfill the need. Aircraft maintenance is in an airline's domain because the
+   strategy put it there — an induced subdomain owes its existence to a
+   commitment, and to nothing else. Induction also sets the asymmetry of change:
+   needs edits are rare and cascade everywhere; strategy edits are the normal
+   unit of pivot.
+   *Grounds: the founding-map / induced-subdomain split inside `problem/`,
+   `induced-by:` edges, `supersedes:` on `strategy/`.*
 
 3. **Problem and solution are roles, not territories.** The model is stratified: a
    solution at level N becomes the problem context at level N+1. Strategy is a
    solution at the level of the market and a problem-generator at the level of
    operations. `problem/` and `solution/` name the roles at the top stratum, not
    two fixed regions.
-   *Grounds: `strategy/` between the strata, the stratified-alternation pattern,
-   fractal recursion via rules 8–9.*
+   *Grounds: `strategy/` between `problem/` and `solution/`, the stratum-role
+   names themselves, fractal roots.*
 
 4. **Subdomain classification is relative to strategy, and induced subdomains are
    real.** Core is where the strategy claims differentiation; supporting is what
@@ -94,7 +94,10 @@
     *Grounds: `mandate.md`, the mandate/holder split, always-local authority.*
 
 Corollary: every element of the framework must be grounded by some premise above;
-an element grounded by none is a candidate for deletion.
+an element grounded by none is a candidate for deletion. Premises state how the
+world is; rules state how to operate under it — an obligation in a premise, or
+worldview in a rule, is misfiled. Grounds name elements, never rules or their
+enforcement: rules answer to premises, not the reverse.
 
 ## Hierarchy
 
@@ -248,10 +251,11 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     acronyms.
 11. **The domain map carries its derivation.** Every `problem/{subdomain}.md`
     declares the strategy edges that induced it; classification lives on the edge;
-    only `committed` strategies induce. Retiring a strategy orphans the subdomains
-    it induced — each must be re-parented to a surviving commitment or archived.
-    Needs edits are rare and cascade everywhere; strategy edits are the normal
-    unit of pivot.
+    only `committed` strategies induce. An untagged subdomain is a modeling
+    error — it either belongs in the technology-free founding map or it owes its
+    existence to a strategy and must say which. Retiring a strategy orphans the
+    subdomains it induced — each must be re-parented to a surviving commitment or
+    archived.
 
 ## Patterns & practices (non-normative)
 

@@ -87,8 +87,9 @@ tags; views over tags are generated.
 9. The framework is fractal: portfolios and holdcos are just domains.
 10. Names are retrieval keys: distinctive over ambient, no opaque acronyms.
 11. The domain map carries its derivation: every subdomain declares `induced-by:`
-    strategy edges; class lives on the edge; only committed strategies induce;
-    retiring a strategy orphans its subdomains (re-parent or archive).
+    strategy edges — an untagged subdomain is a modeling error; class lives on
+    the edge; only committed strategies induce; retiring a strategy orphans its
+    subdomains (re-parent or archive).
 
 ## Procedures
 

@@ -19,7 +19,7 @@ here and a matching `vx.y.z` git tag.
   founding map (`problem/README.md`: needs as `## N-{slug}` anchors,
   technology-free), `induced-by:` provenance edges on subdomains with
   classification per edge, spec rule 11, and the Pivot / Stratified alternation /
-  Classification inversion patterns. Decision records 0013–0017.
+  Classification inversion patterns. Decision records 0013–0018.
 - Lint rules 13–17 (strategy validity, orphan detection, core-ranking,
   technology-free founding map, incomplete pivot) and a rewritten rule 3
   (derivation edges).
