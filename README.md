@@ -1,6 +1,5 @@
 # Trellis
 
-> **The structure your business grows along.**
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
 Trellis structures a business as a versioned markdown filesystem — one repo per

@@ -1,6 +1,5 @@
 # Trellis — specification (v11)
 
-> **The structure your business grows along.**
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
 Trellis is an operating model for a business run by humans and AI agents
