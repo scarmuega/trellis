@@ -36,7 +36,8 @@ artifacts that every skill and agent draws on, not the property of any one skill
 
 ## Quick start
 
-1. Read `spec/trellis.md` — the Rationale section is the why, the rest is the what.
+1. Read `spec/trellis.md` — it opens with the what and the why; the Rationale
+   holds the premises, the Rules the obligations.
 2. Scaffold: `cp -r template/ path/to/{your-domain}` and follow the copied
    `README.md`.
 3. Install into Claude Code: `/plugin marketplace add scarmuega/trellis`, then

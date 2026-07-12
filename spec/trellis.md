@@ -3,6 +3,30 @@
 > **The structure your business grows along.**
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
+Trellis is an operating model for a business run by humans and AI agents
+together, structured as one versioned filesystem of markdown artifacts per
+domain. Everything the business knows and does gets an artifact with an owner,
+a provenance, and a lifecycle: the market needs it serves, the strategies
+committed to fulfill them, the problem space those commitments induce, the
+solution contexts operated in response, the plans, the metrics, the decisions,
+and the organization itself. The repo is the organization: agents load
+artifacts as their instructions, humans review diffs as their governance, and
+both work in the same medium.
+
+It exists because AI agents changed the economics of disciplined operation.
+Agents can now execute business processes end-to-end — but delegating to them
+demands explicit authority, stateless sessions demand predictable retrieval,
+and automated execution demands knowledge kept current. Operating models of
+this fidelity used to die of documentation ceremony; when the documentation is
+the execution medium, the upkeep pays for itself. Trellis is the stable shape
+that makes this workable: a place for every kind of business knowledge, known
+in advance to every participant, human or synthetic.
+
+The specification reads in order: **Rationale** — the premises, how the world
+is and why this framework follows from it; **Hierarchy** and **Schemas** — the
+shape; **Rules** — the obligations of operating under it; **Patterns** —
+recurring practice, advisory only.
+
 ## Rationale
 
 1. **Needs are primitive; a business is a search for a viable strategy to fulfill
