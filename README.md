@@ -28,7 +28,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `skills/conventions/` | the base skill (`trellis:conventions`): conventions, placement guide, procedures |
 | `agents/` | subagents, one `{name}.md` each |
 | `agents/steward.md` | `trellis:steward` — enforcement agent; the portable holder of every domain's steward role |
-| `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner) |
+| `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner), `/trellis:plan` (plan authoring through harness plan mode) |
 | `hooks/hooks.json` | deterministic enforcement gate: append-only decisions, no hand-edits to `generated` artifacts |
 | `CHANGELOG.md` | the release ledger; notable changes per version |
 | `decisions/` | ADRs governing this spec — the framework eats its own mechanics |
@@ -50,9 +50,10 @@ artifacts that every skill and agent draws on, not the property of any one skill
    authority is not). Deterministic tooling (a CLI) gets extracted from the steward
    later, once usage shows which checks must never be probabilistic.
 5. Operate: work interactively at the domain root; invoke roles with
-   `/trellis:act` and rituals with `/trellis:ritual`; wire the scheduled and
-   event-driven planes with the template's `.github/workflows/`. The runtime
-   contract and its reference binding: `spec/runtime.md`.
+   `/trellis:act`, rituals with `/trellis:ritual`, and draft plans with
+   `/trellis:plan`; wire the scheduled and event-driven planes with the
+   template's `.github/workflows/`. The runtime contract and its reference
+   binding: `spec/runtime.md`.
 
 ## Extending the plugin
 

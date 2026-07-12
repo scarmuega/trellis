@@ -14,6 +14,15 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- `/trellis:plan` (`commands/plan.md`, decision 0020): plan authoring that
+  rides the harness's plan mode — read-only research, `ExitPlanMode` approval,
+  then a conventions-compliant artifact persisted to `plans/{slug}.md`
+  (registered `type:`, resolving refs, `status: draft` with an activation
+  offer); registry additions land post-approval; self-lints against checklist
+  items 1/4/7/8. Binding surfaces updated: `spec/runtime.md` session row, the
+  template's "Runtime binding" section, and a "Create a plan" procedure in the
+  conventions skill.
+
 - Runtime as contract-plus-bindings (`spec/runtime.md`, decision 0019): three
   trigger planes reduced to one `act(role, input)` primitive; `/trellis:act`
   and `/trellis:ritual` commands; a deterministic enforcement gate (`hooks/`:

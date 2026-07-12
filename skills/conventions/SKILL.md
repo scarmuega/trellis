@@ -120,6 +120,12 @@ resolved.
 row to `context-map.md`; put its interfaces in `contracts/`, procedures in
 `skills/`.
 
+**Create a plan**: `/trellis:plan {topic}` where the binding offers it — the
+harness's plan mode gathers research and approval, then the artifact persists to
+`plans/{slug}.md` with a registered `type:`, resolving refs, and `status: draft`.
+Without the command: draft manually per the instance's plan schema, registering
+new types and tags in `conventions.md` first.
+
 **Add a role**: write `mandate.md` FIRST — purpose, scope, explicit `authority:`
 (spend, publish, approve) and `escalate-to:` — then the holder. Agent holders get
 `system.md` + at least one eval. Humans and external vendors get `holder/ref.md`.

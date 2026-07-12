@@ -97,7 +97,7 @@ binding".
 
 | service | binding |
 |---|---|
-| session | Claude Code at the domain root with the `trellis` plugin |
+| session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/` |
 | act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …" --plugin-dir <trellis checkout>` |
 | schedule | forge cron (reference: `template/.github/workflows/rituals.yml`) → headless `/trellis:ritual <name>` |
 | ingress | issues labeled `role:{name}` (reference: `template/.github/workflows/ingress.yml`) → headless act; relay non-forge events (email, tickets) into issues to keep one ingress and one ledger |
