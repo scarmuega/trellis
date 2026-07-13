@@ -14,6 +14,14 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Cross-cutting procedures pattern (spec) and decision 0021: skills have
+  exactly two homes — `solution/{bc}/skills/` for business procedures,
+  `org/{role}/holder/skills/` for identity-bound agent technique — and a
+  root-level `skills/` is a grouping-not-a-kind violation. A "context-free"
+  procedure resolves to a convention, a ritual, a runtime concern, or a
+  missing bounded context. Lint item 11 now names the root `skills/` case;
+  the conventions skill's placement guide and "Never create" list updated.
+
 - `/trellis:plan` (`commands/plan.md`, decision 0020): plan authoring that
   rides the harness's plan mode — read-only research, `ExitPlanMode` approval,
   then a conventions-compliant artifact persisted to `plans/{slug}.md`

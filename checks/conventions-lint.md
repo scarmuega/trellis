@@ -22,7 +22,11 @@ escalation to the artifact's owner.
 9. `decisions/` is append-only: no accepted decision has been edited; supersedence
    is a new numbered file.
 10. No secrets anywhere in the root (keys, tokens, credentials, account numbers).
-11. No directory that is a grouping rather than a kind (spec rule 7).
+11. No directory that is a grouping rather than a kind (spec rule 7). A
+    root-level `skills/` is this violation by name: procedures live in
+    `solution/{bc}/skills/` (business) or `org/{role}/holder/skills/` (agent
+    package) — escalate with the Cross-cutting procedures pattern's resolution
+    (convention, ritual, runtime concern, or missing bounded context).
 12. `metrics/actuals/` content is within the freshness window defined by
     `rituals.md`.
 13. Every `strategy/{strategy}.md` declares a legal

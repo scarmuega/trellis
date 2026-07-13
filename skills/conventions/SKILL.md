@@ -58,6 +58,7 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | "Why we chose X" | `decisions/NNNN-{slug}.md` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
+| "Context-free" procedure | it isn't: a convention (`conventions.md`), a ritual (`rituals.md`), a runtime concern, or a missing BC |
 | API, IDL, tx3, brand guideline | `solution/{bc}/contracts/` |
 | Responsibility + authority (human, agent, or labor vendor) | `org/{role}/mandate.md` |
 | Agent prompt, tools, evals | `org/{role}/holder/` |
@@ -66,8 +67,9 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Vendor providing a system | entry in `solution/context-map.md` with DDD relation |
 
 Never create: a functions/departments directory, a requirements directory, a
-personas directory, or any directory that groups existing kinds — groupings are
-tags; views over tags are generated.
+personas directory, a root-level `skills/` directory (skills live in bounded
+contexts or agent holder packages — decision 0021), or any directory that
+groups existing kinds — groupings are tags; views over tags are generated.
 
 ## Rules digest
 

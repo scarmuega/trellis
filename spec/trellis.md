@@ -308,6 +308,24 @@ executable: a contract (tx3, IDL) is a requirement made machine-checkable; an ev
 a requirement on an agent made testable. The methodology's pressure is to hatch prose
 into `contracts/` and `evals/`, not to accumulate it.
 
+### Cross-cutting procedures
+Skills have exactly two homes. `solution/{bc}/skills/` holds business
+procedures — domain knowledge written in the bounded context's language,
+governed by the automation policy through the context's subdomain edges.
+`org/{role}/holder/skills/` holds identity-bound technique that travels with
+an agent holder — never a business procedure, which must survive holder swaps.
+There is no third, root-level home: a root `skills/` is a grouping, not a kind
+(rule 7), and sits outside the derivation that gives every procedure its
+automation class. A procedure that seems to belong to no context is a modeling
+signal, and it resolves within the existing shape: a convention
+(`conventions.md`), a standing process (a `rituals.md` row pointing at a
+context's skill), a runtime concern (binding skills live outside the root,
+rules 1–2), or — most often — a bounded context waiting to be named: a domain
+accumulating "general" runbooks has an operations context it hasn't admitted
+to. Reachability never argues for the root — the session plane makes skills
+invocable at the root wherever they live; placement is knowledge
+classification, not availability.
+
 ### Personas & market
 Personas are founding-map knowledge — demand-side and technology-free, so they
 endure pivots: sections within `problem/README.md` or the relevant subdomain file —
