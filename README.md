@@ -20,7 +20,9 @@ skills, agents, commands, and hooks from the conventional directories below.
 |---|---|
 | `.claude-plugin/plugin.json` | plugin manifest (name, description, author) |
 | `.claude-plugin/marketplace.json` | self-distributing catalog: the `trellis` plugin under the `scarmuega` marketplace |
-| `spec/trellis.md` | the specification: rationale, hierarchy, schemas, rules, patterns |
+| `spec/model.md` | the specification (normative core + front door): what Trellis is, the doc map, hierarchy, schemas, rules |
+| `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
+| `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
 | `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, contract services, the Claude Code + forge reference binding |
 | `template/` | copy to scaffold a new domain root (steward role included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
@@ -38,8 +40,8 @@ artifacts that every skill and agent draws on, not the property of any one skill
 
 ## Quick start
 
-1. Read `spec/trellis.md` — it opens with the what and the why; the Rationale
-   holds the premises, the Rules the obligations.
+1. Read `spec/model.md` — the front door: it opens with the what and the why, maps
+   the doc set, and holds the Rules. The premises live in `spec/rationale.md`.
 2. Scaffold: `cp -r template/ path/to/{your-domain}` and follow the copied
    `README.md`.
 3. Install into Claude Code: `/plugin marketplace add scarmuega/trellis`, then

@@ -12,6 +12,15 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Changed
+
+- Restructured the specification into a content-named document set: renamed
+  `spec/trellis.md` → `spec/model.md` (normative core + front door; rule 10 /
+  decision 0005), extracted the premises to `spec/rationale.md` (grounding) and the
+  non-normative Patterns & practices to `spec/patterns.md` (mirrors
+  `spec/runtime.md`); decision 0022. Normative content unchanged; spec stays v11
+  (filing-only, per 0018).
+
 ### Added
 
 - Cross-cutting procedures pattern (spec) and decision 0021: skills have

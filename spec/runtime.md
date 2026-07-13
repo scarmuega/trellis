@@ -1,7 +1,7 @@
 # Trellis — runtime companion
 
 > How a Trellis domain is *operated* day to day. Non-normative companion to
-> `spec/trellis.md`: the operating model's contract ends at the root (rules 1–2);
+> `spec/model.md`: the operating model's contract ends at the root (rules 1–2);
 > everything here is consumer tooling. An instance declares which binding it uses
 > in its `conventions.md` ("Runtime binding" section); deviations need no spec
 > change, only a decision record in the instance.

@@ -9,7 +9,7 @@ description: Operating conventions for Trellis domain repos — a domain-driven 
 > businesses run by humans and AI agents.
 
 One repo = one root = one domain. Everything under the root is the domain's own
-knowledge, state-refs, and org. Full spec: `${CLAUDE_PLUGIN_ROOT}/spec/trellis.md`
+knowledge, state-refs, and org. Full spec: `${CLAUDE_PLUGIN_ROOT}/spec/model.md`
 (plugin root), or the ref in the instance's `decisions/0000-adopt-trellis.md`.
 
 ## Detecting a Trellis root
