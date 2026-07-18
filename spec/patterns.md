@@ -47,22 +47,21 @@ classification, not availability.
 
 ### Personas & market
 Personas are founding-map knowledge — demand-side and technology-free, so they
-endure pivots: sections within `problem/README.md` or the relevant subdomain file —
-who they are, needs, context, willingness to pay — each under a stable anchor so
-brand, plans, and metric definitions can ref them. A persona's needs connect to the
-map's `## N-{slug}` need anchors. Persona names enter `glossary.md` as ubiquitous
-language: when an agent writes "the indie dev," it must resolve to one canonical
-definition.
+endure pivots: sections within `market.md` — who they are, needs, context,
+willingness to pay — each under a stable anchor so brand, plans, and metric
+definitions can ref them. A persona's needs connect to the map's `## N-{slug}` need
+anchors. Persona names enter `glossary.md` as ubiquitous language: when an agent
+writes "the indie dev," it must resolve to one canonical definition.
 
-Market splits across the existing spine rather than getting a home: segmentation and
-competitive landscape are problem knowledge (body of `problem/README.md`); sizing and
-pricing-per-segment are `economics.md` content. "Market" as a directory would be a
-grouping, not a kind.
+Market splits across the existing spine rather than getting a directory: segmentation
+and competitive landscape are founding-map knowledge (body of `market.md`); sizing and
+pricing-per-segment are `economics.md` content. `market.md` is one authored document,
+not a "market" directory — the latter would be a grouping, not a kind.
 
 ### User journeys
 An as-is journey — how a persona currently experiences the problem, where it hurts —
 is discovery knowledge that belongs to the persona: a section next to their
-definition, anchor-referenceable. A to-be journey is a goal, and goals already have a
+definition in `market.md`, anchor-referenceable. A to-be journey is a goal, and goals already have a
 kind: it's a plan (`type: journey`), where the `contexts:` refs do real analytical
 work — a journey's value is precisely that it crosses bounded-context seams. The
 journey is the demand-side reading of `context-map.md`.

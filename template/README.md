@@ -6,9 +6,9 @@ Copy this directory to scaffold a new domain root:
 
 Then:
 1. Fill the founding map first: needs (`## N-{slug}`), market, and personas in
-   `problem/README.md` — technology-free; it must survive any pivot.
+   `market.md` — technology-free; it must survive any pivot.
 2. Write your first strategy: rename `strategy/first-strategy.md`, point its
-   `need:` at a founding-map anchor, and flip `status:` to `committed` once it is
+   `need:` at a `market.md` anchor, and flip `status:` to `committed` once it is
    the model as operated (only committed induces).
 3. Map what the strategy induces: one `problem/{subdomain}.md` per subdomain, each
    with an `induced-by:` edge back to the strategy, `class:` on the edge.

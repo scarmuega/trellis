@@ -26,7 +26,7 @@ extract those parts into tooling — that extraction is the CLI's charter.
   - **Metric sweep** — diff `metrics/actuals/` against targets in
     `metrics/definitions.md`; annotate affected plans; escalate deviations per
     this mandate.
-  - **Derivation sweep** — when `problem/README.md` or `strategy/` changed since
+  - **Derivation sweep** — when `market.md` or `strategy/` changed since
     the last sweep, escalate downstream artifacts (induced subdomains,
     `context-map.md`, plans, mandates scoped to them) to their owners for
     revalidation; flag orphaned subdomains for re-parenting or archival.

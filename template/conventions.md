@@ -45,7 +45,7 @@ induced-by:                              # >=1 edge; no edge to a committed
 ```yaml
 provenance: authored
 status: aspirational | committed | retired   # only committed induces
-need: problem/README.md#n-{slug}
+need: market.md#n-{slug}
 differentiation: one line — why we win, against which alternative
 core-ranking: []    # required iff >1 core edge under this strategy;
                     # total order, scarcest attention first
@@ -92,8 +92,8 @@ Register tags here before use so generated views stay coherent.
 
 ## Need anchors
 
-Market needs get stable anchored headings in `problem/README.md` (`## N-{slug}`),
-technology-free, so strategies can ref them as `problem/README.md#n-{slug}`. The
+Market needs get stable anchored headings in `market.md` (`## N-{slug}`),
+technology-free, so strategies can ref them as `market.md#n-{slug}`. The
 founding map endures pivots; strategy vocabulary never appears in it.
 
 ## Requirement anchors

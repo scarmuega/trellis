@@ -36,9 +36,10 @@ a domain is operated day to day.
 ├── rituals.md                      => heartbeat: reviews, metric sweeps, standing processes,
 │                                      escalation SLAs — executed by mandated agents
 ├── glossary.md                     => ubiquitous language; agents must cite terms from here
+├── market.md                       => founding map: the invariant layer — needs (anchored
+│                                      ## N-{slug}), jobs-to-be-done, market, personas —
+│                                      technology-free; endures pivots
 ├── problem/
-│   ├── README.md                   => founding map: needs (anchored ## N-{slug}), jobs-to-be-done,
-│   │                                  market, personas — technology-free; endures pivots
 │   └── {subdomain}.md              => induced problem space; frontmatter: induced-by edges naming
 │                                      the strategy that put it here, class per edge — business
 │                                      functions live here, classified per strategy
@@ -111,7 +112,7 @@ induced-by:                              # >=1 edge; no edge to a committed
 ```yaml
 provenance: authored
 status: aspirational | committed | retired   # only committed induces
-need: problem/README.md#n-{slug}             # the market need this fulfills
+need: market.md#n-{slug}                     # the market need this fulfills
 differentiation: one line — why we win, against which alternative
 core-ranking: [problem/{a}.md, problem/{b}.md]  # required iff >1 core edge under
                                                 # this strategy; a total order,
@@ -181,8 +182,9 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
 11. **The domain map carries its derivation.** Every `problem/{subdomain}.md`
     declares the strategy edges that induced it; classification lives on the edge;
     only `committed` strategies induce. An untagged subdomain is a modeling
-    error — it either belongs in the technology-free founding map or it owes its
-    existence to a strategy and must say which. Retiring a strategy orphans the
+    error — it either belongs in the technology-free founding map (`market.md`)
+    or it owes its existence to a strategy and must say which. Retiring a strategy
+    orphans the
     subdomains it induced — each must be re-parented to a surviving commitment or
     archived.
 

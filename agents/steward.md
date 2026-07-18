@@ -33,7 +33,7 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   `metrics/definitions.md`. Annotate plans whose `metrics:` refs deviate; open
   escalations per your mandate's `escalate-to`. Never reason from `actuals/` older
   than the freshness window in `rituals.md`.
-- **Derivation sweep** — find commits touching `problem/README.md` or `strategy/`
+- **Derivation sweep** — find commits touching `market.md` or `strategy/`
   since the last sweep. For each change, escalate every downstream artifact — the
   subdomains induced by an edited or retired strategy, `context-map.md`, plans
   whose `subdomains:` refs are affected, mandates scoped to them — to its owner

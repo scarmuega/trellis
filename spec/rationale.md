@@ -12,7 +12,7 @@
    search is not optimization of a fixed objective: strategy is chosen and
    revocable, and the search must sustain itself economically to continue —
    viability is knowledge in its own right.
-   *Grounds: `problem/README.md` (the founding map), `strategy/` and its status
+   *Grounds: `market.md` (the founding map), `strategy/` and its status
    lifecycle, `economics.md`, `brand.md`.*
 
 2. **The domain is induced, not found.** `need × strategy → domain`: the domain is
@@ -22,8 +22,8 @@
    commitment, and to nothing else. Induction also sets the asymmetry of change:
    needs edits are rare and cascade everywhere; strategy edits are the normal
    unit of pivot.
-   *Grounds: the founding-map / induced-subdomain split inside `problem/`,
-   `induced-by:` edges, `supersedes:` on `strategy/`.*
+   *Grounds: the founding map (`market.md`) inducing the subdomains under
+   `problem/`, `induced-by:` edges, `supersedes:` on `strategy/`.*
 
 3. **Problem and solution are roles, not territories.** The model is stratified: a
    solution at level N becomes the problem context at level N+1. Strategy is a

@@ -3,7 +3,7 @@ provenance: authored
 owner: <owner>
 status: aspirational    # flip to committed when this is the model as operated —
                         # only committed induces subdomains
-need: problem/README.md#n-{slug}
+need: market.md#n-{slug}
 differentiation: <why we win, against which alternative — one line>
 core-ranking: []        # required iff >1 core edge under this strategy;
                         # total order, scarcest attention first

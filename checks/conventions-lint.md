@@ -31,7 +31,7 @@ escalation to the artifact's owner.
     `rituals.md`.
 13. Every `strategy/{strategy}.md` declares a legal
     `status: aspirational|committed|retired`; its `need:` resolves to an
-    `N-{slug}` need anchor in `problem/README.md` (slug match — heading level
+    `N-{slug}` need anchor in `market.md` (slug match — heading level
     and case don't matter); `supersedes:` (if present) resolves; committed
     strategies declare `differentiation:`.
 14. Every subdomain has at least one edge to a `status: committed` strategy;
@@ -40,8 +40,8 @@ escalation to the artifact's owner.
     resolved).
 15. Any committed strategy with more than one `core` edge declares
     `core-ranking:` — a total order covering exactly its core subdomains.
-16. `problem/README.md` is technology-free: flag strategy vocabulary, chosen
-    means, and product or stack names for relocation to `strategy/` or `solution/`
+16. `market.md` (the founding map) is technology-free: flag strategy vocabulary,
+    chosen means, and product or stack names for relocation to `strategy/` or `solution/`
     (judgment check, like rule 2's "flag suspicious").
 17. If any strategy is `retired` and none is `committed`, the pivot is
     incomplete — the root is operating nothing it can attribute. Escalate to the

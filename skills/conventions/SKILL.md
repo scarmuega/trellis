@@ -24,9 +24,10 @@ authoritative over this skill where they differ.
 conventions.md    schemas, registries, boundary guarantees, secrets policy
 rituals.md        heartbeat: cadenced processes, executor roles, escalations
 glossary.md       ubiquitous language — cite terms from here
-problem/          founding map (README: needs as ## N-{slug} anchors, market,
-                  personas — technology-free, endures pivots) + {subdomain}.md
-                  carrying induced-by: strategy edges, class on the edge
+market.md         founding map: the invariant layer — needs as ## N-{slug}
+                  anchors, market, personas — technology-free, endures pivots
+problem/          induced subdomains: {subdomain}.md carrying induced-by:
+                  strategy edges, class on the edge
 strategy/         {strategy}.md — committed solution to a need: status (only
                   committed induces), need ref, differentiation, core-ranking
 brand.md          the promise to customers
@@ -44,9 +45,9 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 
 | Content | Destination |
 |---|---|
-| Market need, job-to-be-done | anchored `## N-{slug}` section in `problem/README.md` — technology-free |
-| Market segmentation, competitive landscape | `problem/README.md` body |
-| Persona, as-is journey | anchored section in `problem/README.md` (persona names → glossary) |
+| Market need, job-to-be-done | anchored `## N-{slug}` section in `market.md` — technology-free |
+| Market segmentation, competitive landscape | `market.md` body |
+| Persona, as-is journey | anchored section in `market.md` (persona names → glossary) |
 | Business model, chosen means, differentiation, pivot | `strategy/{strategy}.md` — only `committed` induces |
 | New problem area | `problem/{subdomain}.md` with `induced-by:` edges (class on the edge) |
 | Requirement / constraint | body of its subdomain or BC README, anchored `## R-{name}-{n}` |
@@ -95,7 +96,7 @@ groups existing kinds — groupings are tags; views over tags are generated.
 
 ## Procedures
 
-**Scaffold a domain**: copy the plugin's `${CLAUDE_PLUGIN_ROOT}/template/`; fill `problem/README`,
+**Scaffold a domain**: copy the plugin's `${CLAUDE_PLUGIN_ROOT}/template/`; fill `market.md`,
 `brand.md`, `economics.md` first; replace `<owner>` placeholders; adjust
 `conventions.md` registries and boundary guarantees; date and pin
 `decisions/0000-adopt-trellis.md`; delete `template/README.md`.

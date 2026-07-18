@@ -14,6 +14,14 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- Moved the founding map out of `problem/` to a root-level `market.md` (decision
+  0023): the invariant layer (needs as `## N-{slug}` anchors, jobs-to-be-done,
+  market, personas) now lives in its own artifact, and `problem/` holds only
+  induced subdomains — one role per directory. Strategies ref `market.md#n-{slug}`.
+  Refines 0013's filing; stratification unchanged. Path updates across `model.md`
+  (hierarchy, `need:` schema, rule 11), `rationale.md`, `patterns.md`, the
+  conventions skill and lint, the steward mandate/agent, and the template.
+
 - Restructured the specification into a content-named document set: renamed
   `spec/trellis.md` → `spec/model.md` (normative core + front door; rule 10 /
   decision 0005), extracted the premises to `spec/rationale.md` (grounding) and the
