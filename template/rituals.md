@@ -14,4 +14,4 @@ otherwise here.
 | conventions lint | weekly  | org/steward | run lint checklist; open escalations on violations |
 | metric sweep     | weekly  | org/steward | diff metrics/actuals vs targets; annotate plans    |
 | derivation sweep | weekly  | org/steward | on founding-map/strategy edits: escalate downstream artifacts for revalidation; flag orphaned subdomains |
-| plan review      | weekly  | <owner>     | walk plans with status active or blocked           |
+| focus            | weekly  | org/focus   | evaluate active and blocked plans against problem and metrics (plan-effectiveness checklist); escalate findings to owners |

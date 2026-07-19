@@ -1,0 +1,13 @@
+# Grading contract for the blockers-risks fixture (campfire-crm) — consumed by
+# evals/grade.mjs. Seeds checklist items 9-11.
+must_find:
+  - kind: blocker
+    item: 9
+    refs_include: [migrate-booking-engine]
+  - kind: risk
+    item: 10
+    refs_include: [spring-guide-signup-push|active-guides]
+  - kind: risk
+    item: 11
+    refs_include: [premium-positioning-push|average-deal-size, volume-discount-push|average-deal-size]
+must_not_flag: []

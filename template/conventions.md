@@ -128,6 +128,9 @@ choices:
 - Plan authoring: `/trellis:plan {topic}` — the harness's plan mode gathers
   research and approval; the approved plan persists to `plans/{slug}.md` per the
   plan schema above (types and tags register before use).
+- Plan effectiveness: `/trellis:focus [scope]` interactively; on the scheduled
+  plane the weekly `focus` ritual runs the same checklist through `org/focus` —
+  one escalation per finding, owners decide.
 - Scheduled plane: `.github/workflows/rituals.yml` — keep its cron in step with
   `rituals.md`.
 - Ingress: label a forge issue `role:{name}` to invoke that role

@@ -1,0 +1,6 @@
+# Grading contract for the healthy fixture — consumed by evals/grade.mjs.
+# Everything moves, everything is covered, nothing is blocked: the precision
+# guard. Any finding record at all is a false positive.
+must_find: []
+must_not_flag: []
+max_findings: 0

@@ -57,7 +57,7 @@ the existing plans (name, status, type) and ask what to plan.
    `status: draft`, the registered `type:`, and the resolved ref lists, then
    the body transposed from the draft. Offer to flip `status: active` in the
    same breath: activation is the owner's act — it commits execution, not just
-   content — and the plan-review ritual walks only `active` and `blocked`. Do
+   content — and the focus ritual evaluates only `active` and `blocked`. Do
    not commit; version-control mechanics follow the instance's runtime binding.
 
 8. **Lint before reporting**: run the plan-relevant items of

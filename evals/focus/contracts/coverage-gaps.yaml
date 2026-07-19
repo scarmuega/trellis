@@ -1,0 +1,14 @@
+# Grading contract for the coverage-gaps fixture (brewkit) — consumed by
+# evals/grade.mjs. Seeds checklist items 1-3; recall-focused: coverage
+# gaps legitimately co-fire attention-allocation findings, so no must_not_flag.
+must_find:
+  - kind: gap
+    item: 1
+    refs_include: [guided-recipes]
+  - kind: gap
+    item: 2
+    refs_include: [ingredient-sourcing]
+  - kind: gap
+    item: 3
+    refs_include: [recipe-completions]
+must_not_flag: []

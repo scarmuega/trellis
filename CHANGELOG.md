@@ -12,7 +12,34 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Added
+
+- `/trellis:focus` + `trellis:focus` (decision 0025): plan-effectiveness
+  evaluation as a command-and-role pair — coverage gaps, metric movement,
+  attention allocation against `core-ranking`, blockers/risks, and challenges
+  to value-dead plans, per a new shared checklist
+  (`checks/plan-effectiveness.md`) with a structured, dedupable finding record.
+  The template ships an advisory-only `org/focus/` role (local mandate, ref
+  holder to the plugin agent). Escalation-only in v1: no report artifact, no
+  candidate kind — accepted candidates graduate through `/trellis:plan`.
+- Evals for the effectiveness prompt (`evals/`): a cross-cutting harness — a
+  suite-parameterized headless runner (`run.sh`, `--ritual` for the scheduled
+  path), a deterministic grader (`grade.mjs`) matching finding records on
+  kind/item/refs and asserting the never-writes boundary on every run, a
+  universal fixture `skeleton/`, and a shared clean root (`fixtures/healthy`,
+  the precision guard) — plus the first suite, `evals/focus/`: five
+  purpose-built defect deltas with per-fixture grading contracts and an
+  `org/focus` overlay. Defect fixtures stay per-suite by design; machinery,
+  skeleton, and clean roots are shared.
+
 ### Changed
+
+- The template's `plan review` ritual row is replaced by `focus` (executor
+  `org/focus`, headless-capable — added to the workflow's RITUALS default);
+  `/trellis:ritual` step 3 generalized from the steward to any plugin-agent
+  holder. Binding surfaces updated: `spec/runtime.md` session row, the
+  template's "Runtime binding" section, and a "Challenge the plans" procedure
+  in the conventions skill.
 
 - Moved the founding map out of `problem/` to a root-level `market.md` (decision
   0023): the invariant layer (needs as `## N-{slug}` anchors, jobs-to-be-done,

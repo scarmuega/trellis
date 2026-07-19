@@ -1,0 +1,14 @@
+# Grading contract for the misallocation fixture (ledgerloom) — consumed by
+# evals/grade.mjs. Seeds checklist items 6-8; the unplanned second core
+# subdomain legitimately co-fires coverage findings, so no must_not_flag.
+must_find:
+  - kind: candidate
+    item: 6
+    refs_include: [polish-marketing-site|site-presence]
+  - kind: candidate
+    item: 7
+    refs_include: [handcraft-invoice-emails|invoice-emailing]
+  - kind: candidate
+    item: 8
+    refs_include: [integrate-bank-feeds]
+must_not_flag: []

@@ -1,0 +1,10 @@
+# Grading contract for the metric-drift fixture (petalpost) — consumed by
+# evals/grade.mjs. Seeds checklist items 4 and 5.
+must_find:
+  - kind: challenge
+    item: 4
+    refs_include: [expand-delivery-radius|weekly-orders]
+  - kind: blocker
+    item: 5
+    refs_include: [tighten-delivery-slots|on-time-rate]
+must_not_flag: []

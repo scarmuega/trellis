@@ -129,6 +129,13 @@ harness's plan mode gathers research and approval, then the artifact persists to
 Without the command: draft manually per the instance's plan schema, registering
 new types and tags in `conventions.md` first.
 
+**Challenge the plans**: `/trellis:focus [scope]` where the binding offers it —
+evaluates `active` and `blocked` plans against the problem they answer to,
+metrics as evidence (canonical checklist:
+`${CLAUDE_PLUGIN_ROOT}/checks/plan-effectiveness.md`). Findings are advisory:
+accepted candidates graduate through `/trellis:plan`; everything else escalates
+to its owner. The scheduled twin is the `focus` ritual in `rituals.md`.
+
 **Add a role**: write `mandate.md` FIRST — purpose, scope, explicit `authority:`
 (spend, publish, approve) and `escalate-to:` — then the holder. Agent holders get
 `system.md` + at least one eval. Humans and external vendors get `holder/ref.md`.

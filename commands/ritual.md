@@ -27,14 +27,16 @@ ritual column of `rituals.md`.
    as the role and the ritual's procedure as the input — resolve the mandate,
    record the acting role in `.trellis/acting-role`, adopt the holder, execute
    within authority, remove the marker when done. When the executor's holder is
-   a ref to the `trellis:steward` agent, invoke that agent, telling it which
-   ritual to run; collect its escalations.
+   a ref to a plugin agent (`trellis:steward`, `trellis:focus`), invoke that
+   agent, telling it which ritual to run; collect its escalations.
 
 4. **Deliver escalations** through the instance's escalation channel (see
    `conventions.md` → "Runtime binding"; default: forge issues assigned to the
    owner or `escalate-to:` role's holder, one per finding, via
    `gh issue create`). Without forge access, list them fully in the report,
-   addressed to their owners.
+   addressed to their owners. Any structured finding record the executor
+   produced (e.g. the plan-effectiveness fenced `yaml` block) travels verbatim
+   into the issue body or the report — never resummarized.
 
 5. **Report**: ritual name, executor, when it last ran if determinable (git
    history of generated views), findings, escalations opened (refs), artifacts

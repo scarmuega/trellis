@@ -24,13 +24,16 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
 | `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, automation shapes, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
 | `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, contract services, the Claude Code + forge reference binding |
-| `template/` | copy to scaffold a new domain root (steward role included) |
+| `template/` | copy to scaffold a new domain root (steward and focus roles included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
+| `checks/plan-effectiveness.md` | canonical plan-effectiveness checklist, shared by the focus agent and `/trellis:focus` |
+| `evals/` | shared eval harness (runner, grader, fixture skeleton, clean-root precision guard) + per-member suites; `evals/focus/` grades the effectiveness prompt against seeded fixture domains |
 | `skills/` | skills, one dir each (`SKILL.md` + assets) |
 | `skills/conventions/` | the base skill (`trellis:conventions`): conventions, placement guide, procedures |
 | `agents/` | subagents, one `{name}.md` each |
 | `agents/steward.md` | `trellis:steward` — enforcement agent; the portable holder of every domain's steward role |
-| `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner), `/trellis:plan` (plan authoring through harness plan mode) |
+| `agents/focus.md` | `trellis:focus` — plan-effectiveness agent; the portable holder of every domain's focus role |
+| `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner), `/trellis:plan` (plan authoring through harness plan mode), `/trellis:focus` (plan-effectiveness review) |
 | `hooks/hooks.json` | deterministic enforcement gate: append-only decisions, no hand-edits to `generated` artifacts |
 | `CHANGELOG.md` | the release ledger; notable changes per version |
 | `decisions/` | ADRs governing this spec — the framework eats its own mechanics |
@@ -47,15 +50,15 @@ artifacts that every skill and agent draws on, not the property of any one skill
 3. Install into Claude Code: `/plugin marketplace add scarmuega/trellis`, then
    `/plugin install trellis@scarmuega`. The skill, spec, template, and steward agent
    ship together.
-4. The template ships with `org/steward/` — the mandate stays local; its holder is
-   a `ref.md` to the plugin's `trellis:steward` agent (identity is portable,
+4. The template ships with `org/steward/` and `org/focus/` — mandates stay
+   local; each holder is a `ref.md` to the plugin's agent (identity is portable,
    authority is not). Deterministic tooling (a CLI) gets extracted from the steward
    later, once usage shows which checks must never be probabilistic.
 5. Operate: work interactively at the domain root; invoke roles with
-   `/trellis:act`, rituals with `/trellis:ritual`, and draft plans with
-   `/trellis:plan`; wire the scheduled and event-driven planes with the
-   template's `.github/workflows/`. The runtime contract and its reference
-   binding: `spec/runtime.md`.
+   `/trellis:act`, rituals with `/trellis:ritual`, draft plans with
+   `/trellis:plan`, and challenge them with `/trellis:focus`; wire the
+   scheduled and event-driven planes with the template's `.github/workflows/`.
+   The runtime contract and its reference binding: `spec/runtime.md`.
 
 ## Extending the plugin
 

@@ -40,7 +40,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          RITUALS: ${{ inputs.ritual || 'conventions lint|metric sweep|derivation sweep' }}
+          RITUALS: ${{ inputs.ritual || 'conventions lint|metric sweep|derivation sweep|focus' }}
         run: |
           IFS='|'
           for ritual in $RITUALS; do
