@@ -45,6 +45,20 @@ to. Reachability never argues for the root — the session plane makes skills
 invocable at the root wherever they live; placement is knowledge
 classification, not availability.
 
+### Automation shapes
+Every automation resolves to an existing kind by who triggers it and what
+relation it bears to judgment. A deliberate action someone invokes with inputs
+is an `act` invocation — its spelling (a slash command, a CLI verb) is the
+binding's adapter surface, outside the root (spec rules 1–2). Know-how that
+should activate when a situation is recognized is a skill, placed per
+Cross-cutting procedures. A worker with identity and bounded authority is a
+role — mandate plus holder; an agent is a holder form, never a shape of its
+own. A standing cadence is a `rituals.md` row. An invariant needing no
+judgment belongs to the gate, never to a prompt-borne member — which
+enforcement is deterministic is the binding's honest declaration (runtime
+companion). The naming rule carries the test: a verb is an invocation, a topic
+is a skill, a role is a holder.
+
 ### Personas & market
 Personas are founding-map knowledge — demand-side and technology-free, so they
 endure pivots: sections within `market.md` — who they are, needs, context,

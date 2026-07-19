@@ -22,7 +22,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `.claude-plugin/marketplace.json` | self-distributing catalog: the `trellis` plugin under the `scarmuega` marketplace |
 | `spec/model.md` | the specification (normative core + front door): what Trellis is, the doc map, hierarchy, schemas, rules |
 | `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
-| `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
+| `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, automation shapes, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
 | `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, contract services, the Claude Code + forge reference binding |
 | `template/` | copy to scaffold a new domain root (steward role included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
@@ -71,6 +71,13 @@ repeat the `trellis` prefix.
   `steward` → `trellis:steward`.
 - **Slash commands** → `commands/{name}.md`. Bare verb: `act`, `ritual` →
   `/trellis:act`, `/trellis:ritual`. **Hooks** → `hooks/hooks.json`.
+
+The bare-name rule doubles as the selection rule: a verb a person invokes
+deliberately is a command; a topic that should load on recognition is a skill;
+a role that runs to completion under bounded tools is an agent; a guard
+needing no judgment is a hook. When shapes compete, decision 0020 is the
+worked example of choosing; the harness-neutral rubric is the Automation
+shapes pattern (`spec/patterns.md`).
 
 ## Non-goals
 

@@ -31,6 +31,15 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Automation shapes pattern (spec) and decision 0024: automations classify by
+  who triggers them and their relation to judgment — deliberate action →
+  `act` invocation, recognized-situation know-how → skill (placed per
+  Cross-cutting procedures), bounded identity → role (agent as holder form),
+  standing cadence → `rituals.md` row, no-judgment invariant → the gate. The
+  README's "Extending the plugin" now states the member-type selection rule
+  (verb → command, topic → skill, role → agent, guard → hook), with decision
+  0020 as the worked example.
+
 - Cross-cutting procedures pattern (spec) and decision 0021: skills have
   exactly two homes — `solution/{bc}/skills/` for business procedures,
   `org/{role}/holder/skills/` for identity-bound agent technique — and a
