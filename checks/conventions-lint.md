@@ -52,3 +52,9 @@ escalation to the artifact's owner.
     incomplete — the root is operating nothing it can attribute. Escalate to the
     retired strategy's owner: commit a successor or archive the induced
     subdomains.
+18. The spec version pinned in `decisions/0000-adopt-trellis.md` matches the
+    current Trellis spec version (the `vN` in the title of
+    `${CLAUDE_PLUGIN_ROOT}/spec/model.md`). If the pin is behind, the root is
+    operating against superseded conventions — escalate to the adopt-decision's
+    owner to review the intervening spec changes and either re-pin (adopt the
+    current version) or record a deviation decision for what it declines.
