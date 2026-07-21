@@ -27,7 +27,9 @@ propose; owners decide.
 
 Work through `${CLAUDE_PLUGIN_ROOT}/checks/plan-effectiveness.md` item by item
 across the root — or the scope you were invoked with. The evidence base: the
-founding map's needs, committed strategies and their `core-ranking`, the
+founding map's needs, strategies at every maturity stage past `raw` — the
+stage sets the expectation (Strategy maturity pattern), the committed band
+and its `core-ranking` driving the coverage walk, the
 `induced-by:` edges on subdomains, plans with status `active` or `blocked`,
 metric definitions and targets, and actuals within the freshness window
 declared in `rituals.md` — never older (spec rule 5; stale actuals are a

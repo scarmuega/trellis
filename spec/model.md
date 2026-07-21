@@ -1,4 +1,4 @@
-# Trellis — specification (v11)
+# Trellis — specification (v12)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -45,9 +45,9 @@ a domain is operated day to day.
 │                                      functions live here, classified per strategy
 ├── strategy/
 │   └── {strategy}.md               => a committed solution to a need — the business model as
-│                                      operated, not as aspired to; frontmatter: status (only
-│                                      committed induces), need ref, differentiation claim,
-│                                      core-ranking
+│                                      operated, not as aspired to; frontmatter: status (the
+│                                      maturity ladder; only the committed band induces), need
+│                                      ref, differentiation claim, core-ranking
 ├── brand.md                        => promise to customers — the customer-facing voice of the
 │                                      committed strategy's differentiation claim
 ├── economics.md                    => pricing, revenue model, unit economics
@@ -111,7 +111,13 @@ induced-by:                              # >=1 edge; no edge to a committed
 ### strategy/{strategy}.md
 ```yaml
 provenance: authored
-status: aspirational | committed | retired   # only committed induces
+status: raw | defined | validated | implemented | established | discarded
+    # the maturity ladder — each stage names the work owed: refine, validate,
+    # implement, monitor, harden; discarded is terminal (failed, lacked merit,
+    # or superseded — the successor's supersedes: marks the last). Bands carry
+    # the coarse vocabulary: committed = validated|implemented|established —
+    # only the committed band induces (rule 11); aspirational = raw|defined;
+    # retired = discarded.
 need: market.md#n-{slug}                     # the market need this fulfills
 differentiation: one line — why we win, against which alternative
 core-ranking: [problem/{a}.md, problem/{b}.md]  # required iff >1 core edge under
@@ -181,7 +187,9 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     acronyms.
 11. **The domain map carries its derivation.** Every `problem/{subdomain}.md`
     declares the strategy edges that induced it; classification lives on the edge;
-    only `committed` strategies induce. An untagged subdomain is a modeling
+    only `committed` strategies induce (the band
+    `validated | implemented | established` — see the strategy schema). An
+    untagged subdomain is a modeling
     error — it either belongs in the technology-free founding map (`market.md`)
     or it owes its existence to a strategy and must say which. Retiring a strategy
     orphans the

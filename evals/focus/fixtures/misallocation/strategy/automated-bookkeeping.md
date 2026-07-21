@@ -1,7 +1,7 @@
 ---
 provenance: authored
 owner: org/founder
-status: committed
+status: implemented
 need: market.md#n-painless-books
 differentiation: books that keep themselves from live transaction data, against manual entry into desktop ledgers
 core-ranking: [problem/categorization-accuracy.md, problem/accountant-partnerships.md]

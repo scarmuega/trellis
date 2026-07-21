@@ -28,7 +28,10 @@ root: every `active` and `blocked` plan plus the full coverage walk.
    items touching the scoped artifacts and their edges.
 
 3. **Load the evaluation base** (read-only): `market.md` need anchors;
-   committed strategies and their `core-ranking`; the `induced-by:` edges on
+   strategies at every maturity stage past `raw` — the stage sets the
+   expectation (Strategy maturity pattern,
+   `${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`); the committed band and its
+   `core-ranking` drive the coverage walk; the `induced-by:` edges on
    subdomains (effective automation policy); plans with status `active` or
    `blocked` — nothing evaluates a draft; `metrics/definitions.md` targets and
    `metrics/actuals/` within the freshness window from `rituals.md` (spec

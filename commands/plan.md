@@ -28,6 +28,11 @@ the existing plans (name, status, type) and ask what to plan.
    the Plan decomposition pattern (`${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`):
    an umbrella plan plus sibling sub-plans (`plans/{parent}-{piece}.md`), each
    drafted through this command — never a `plans/{plan}/` folder.
+   A topic advancing a strategy biases the type to its stage (Strategy
+   maturity pattern, `${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`): `defined`
+   wants an `experiment` with an explicit decision criterion; `validated`, an
+   `initiative`; `established`, hardening or optimization work — propose the
+   stage-matched type first.
 
 3. **Resolve the owner**: every plan carries `owner:`. List the roles under
    `org/` whose mandate `scope:` overlaps the plan's likely subdomains, propose

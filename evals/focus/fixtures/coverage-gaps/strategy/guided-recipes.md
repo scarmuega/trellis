@@ -1,7 +1,7 @@
 ---
 provenance: authored
 owner: org/founder
-status: committed
+status: implemented
 need: market.md#n-brew-guidance
 differentiation: recipes sequenced to the box in hand, against generic tutorials that assume a stocked shelf
 ---

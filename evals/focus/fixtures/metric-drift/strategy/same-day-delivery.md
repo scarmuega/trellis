@@ -1,7 +1,7 @@
 ---
 provenance: authored
 owner: org/founder
-status: committed
+status: implemented
 need: market.md#n-fresh-flowers-on-time
 differentiation: a promised delivery slot the same day, against shops that promise only "today sometime"
 core-ranking: [problem/delivery-operations.md, problem/order-volume.md]

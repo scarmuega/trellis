@@ -35,12 +35,14 @@ escalation to the artifact's owner.
 12. `metrics/actuals/` content is within the freshness window defined by
     `rituals.md`.
 13. Every `strategy/{strategy}.md` declares a legal
-    `status: aspirational|committed|retired`; its `need:` resolves to an
+    `status: raw|defined|validated|implemented|established|discarded` (the
+    maturity ladder — Strategy maturity pattern); its `need:` resolves to an
     `N-{slug}` need anchor in `market.md` (slug match — heading level
-    and case don't matter); `supersedes:` (if present) resolves; committed
-    strategies declare `differentiation:`.
-14. Every subdomain has at least one edge to a `status: committed` strategy;
-    subdomains whose edges all point to retired or aspirational strategies are
+    and case don't matter); `supersedes:` (if present) resolves; committed-band
+    strategies (`validated|implemented|established`) declare `differentiation:`.
+14. Every subdomain has at least one edge to a committed-band strategy
+    (`status: validated|implemented|established`); subdomains whose edges all
+    point to strategies outside the committed band are
     orphans — escalate for re-parenting or archival (they carry core policy until
     resolved).
 15. Any committed strategy with more than one `core` edge declares
@@ -48,9 +50,9 @@ escalation to the artifact's owner.
 16. `market.md` (the founding map) is technology-free: flag strategy vocabulary,
     chosen means, and product or stack names for relocation to `strategy/` or `solution/`
     (judgment check, like rule 2's "flag suspicious").
-17. If any strategy is `retired` and none is `committed`, the pivot is
-    incomplete — the root is operating nothing it can attribute. Escalate to the
-    retired strategy's owner: commit a successor or archive the induced
+17. If any strategy is `discarded` and none is in the committed band, the pivot
+    is incomplete — the root is operating nothing it can attribute. Escalate to
+    the discarded strategy's owner: commit a successor or archive the induced
     subdomains.
 18. The spec version pinned in `decisions/0000-adopt-trellis.md` matches the
     current Trellis spec version (the `vN` in the title of

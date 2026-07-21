@@ -8,8 +8,9 @@ Then:
 1. Fill the founding map first: needs (`## N-{slug}`), market, and personas in
    `market.md` — technology-free; it must survive any pivot.
 2. Write your first strategy: rename `strategy/first-strategy.md`, point its
-   `need:` at a `market.md` anchor, and flip `status:` to `committed` once it is
-   the model as operated (only committed induces).
+   `need:` at a `market.md` anchor, and advance `status:` to `validated` when
+   you commit to operating it — the committed band (`validated` and beyond)
+   induces.
 3. Map what the strategy induces: one `problem/{subdomain}.md` per subdomain, each
    with an `induced-by:` edge back to the strategy, `class:` on the edge.
 4. Fill `brand.md` and `economics.md`.

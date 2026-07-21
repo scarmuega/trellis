@@ -41,6 +41,21 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- **Breaking (spec v11 → v12):** strategy `status:` becomes the six-stage
+  maturity ladder — `raw | defined | validated | implemented | established |
+  discarded` — per a new Strategy maturity pattern (spec) and decision 0027.
+  Each stage names the work owed (refine, validate, implement, monitor,
+  harden) and the metrics that read it; the old vocabulary survives as bands
+  (committed = `validated|implemented|established`, the inducing band —
+  rule 11's phrasing unchanged), and `discarded` is the sole terminal, with
+  the successor's `supersedes:` distinguishing superseded from evidence-killed.
+  Surfaces updated: plan-effectiveness items 14–15 (appended; 1–13 stable for
+  the eval contracts), lint items 13/14/17, both focus surfaces (strategies
+  past `raw` enter the walk), `/trellis:plan` step 2 (stage-matched plan
+  type), the template (conventions schema, strategy stub, README, v12 pin),
+  and the eval fixtures (migrated to `implemented`). Instances re-pin per
+  lint 18 using the ADR's migration mapping.
+
 - The template's `plan review` ritual row is replaced by `focus` (executor
   `org/focus`, headless-capable — added to the workflow's RITUALS default);
   `/trellis:ritual` step 3 generalized from the steward to any plugin-agent

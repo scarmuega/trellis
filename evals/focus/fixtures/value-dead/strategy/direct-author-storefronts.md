@@ -1,7 +1,7 @@
 ---
 provenance: authored
 owner: org/founder
-status: committed
+status: implemented
 need: market.md#n-earn-from-writing
 differentiation: author-owned storefronts with author-owned reader lists, against retail platforms that keep both
 core-ranking: [problem/direct-sales.md, problem/reader-audience.md]

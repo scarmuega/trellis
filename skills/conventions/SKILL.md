@@ -28,8 +28,9 @@ market.md         founding map: the invariant layer — needs as ## N-{slug}
                   anchors, market, personas — technology-free, endures pivots
 problem/          induced subdomains: {subdomain}.md carrying induced-by:
                   strategy edges, class on the edge
-strategy/         {strategy}.md — committed solution to a need: status (only
-                  committed induces), need ref, differentiation, core-ranking
+strategy/         {strategy}.md — committed solution to a need: status (the
+                  maturity ladder; the committed band induces), need ref,
+                  differentiation, core-ranking
 brand.md          the promise to customers
 economics.md      pricing, revenue model, unit economics
 metrics/          definitions.md (authored) + actuals/ (generated or state-refs)
@@ -94,8 +95,9 @@ generated.
 10. Names are retrieval keys: distinctive over ambient, no opaque acronyms.
 11. The domain map carries its derivation: every subdomain declares `induced-by:`
     strategy edges — an untagged subdomain is a modeling error; class lives on
-    the edge; only committed strategies induce; retiring a strategy orphans its
-    subdomains (re-parent or archive).
+    the edge; only committed strategies induce (the band
+    `validated|implemented|established` of the maturity ladder); discarding a
+    strategy orphans its subdomains (re-parent or archive).
 
 ## Procedures
 
@@ -104,11 +106,14 @@ generated.
 `conventions.md` registries and boundary guarantees; date and pin
 `decisions/0000-adopt-trellis.md`; delete `template/README.md`.
 
-**Commit a strategy**: create `strategy/{name}.md` — `need:` pointing at a
-founding-map `## N-{slug}` anchor, `differentiation:`, `status: aspirational`
-until it is the model as operated, then `committed` (only committed induces).
-More than one core edge under it ⇒ record `core-ranking:` (scarcest attention
-first).
+**Advance a strategy**: create `strategy/{name}.md` at `status: raw` — `need:`
+pointing at a founding-map `## N-{slug}` anchor, `differentiation:`. Advance on
+evidence, never ambition (Strategy maturity pattern): `defined` when need and
+differentiation are falsifiable, `validated` when the experiment's decision
+criterion resolves — the commitment line, induction starts — `implemented` when
+operating, `established` when the work is optimization; `discarded` is
+terminal. More than one core edge under it ⇒ record `core-ranking:` (scarcest
+attention first).
 
 **Add a subdomain**: create `problem/{name}.md`, declare its `induced-by:` edges —
 each naming the strategy that put it in the domain, with `class:` on the edge.
@@ -116,8 +121,8 @@ Effective automation policy is the strictest class across committed edges
 (generic ⇒ agent autonomy; supporting ⇒ agent executes, human samples; core ⇒
 human review gate; orphans default to core). Add its terms to the glossary.
 
-**Pivot**: set the old strategy `status: retired`; commit the new one with
-`supersedes:`. Every subdomain the retired strategy induced is orphaned — the
+**Pivot**: set the old strategy `status: discarded`; commit the new one with
+`supersedes:`. Every subdomain the discarded strategy induced is orphaned — the
 founding map endures; re-parent each orphan onto a surviving commitment
 (re-classifying its edge) or archive it. Orphans carry core policy until
 resolved.

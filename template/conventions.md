@@ -34,8 +34,9 @@ provenance: authored
 induced-by:                              # >=1 edge; no edge to a committed
   - strategy: strategy/{strategy}.md     #   strategy => orphan (lint)
     class: core | supporting | generic   # classification is a property of the edge
-# effective automation policy = strictest class across edges to COMMITTED
-# strategies (core > supporting > generic; orphans default to core):
+# effective automation policy = strictest class across edges to COMMITTED-band
+# strategies (validated|implemented|established — core > supporting > generic;
+# orphans default to core):
 #   generic    => full agent autonomy (or buy it)
 #   supporting => agent executes, human samples
 #   core       => human review gate on every change
@@ -44,7 +45,13 @@ induced-by:                              # >=1 edge; no edge to a committed
 ### strategy/{strategy}.md
 ```yaml
 provenance: authored
-status: aspirational | committed | retired   # only committed induces
+status: raw | defined | validated | implemented | established | discarded
+    # the maturity ladder — each stage names the work owed: refine, validate,
+    # implement, monitor, harden; discarded is terminal (failed, lacked merit,
+    # or superseded — the successor's supersedes: marks the last). Bands carry
+    # the coarse vocabulary: committed = validated|implemented|established —
+    # only the committed band induces; aspirational = raw|defined; retired =
+    # discarded.
 need: market.md#n-{slug}
 differentiation: one line — why we win, against which alternative
 core-ranking: []    # required iff >1 core edge under this strategy;

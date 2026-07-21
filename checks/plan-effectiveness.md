@@ -85,3 +85,24 @@ evaluates a draft.
 13. A plan past its measurement horizon without a recorded decision, and any
     experiment whose decision criterion has resolved, owes its owner a
     verdict — continue, graduate, or retire: `challenge`.
+
+## Maturity — the stage names the work owed and the metrics that read it
+
+Every strategy past `raw` enters this group, whatever its band (Strategy
+maturity pattern); `raw` is exempt — its work is refining the artifact, which
+no plan carries. On a root still pinned to a three-value status enum (spec
+v11), skip this group.
+
+14. Stage-work is planned: `defined` has an active `experiment` with a
+    decision criterion serving it (item 12's attribution); `validated`,
+    active implementation work; `established`, active hardening or
+    optimization work. Missing — `gap`. For committed-band strategies this
+    sharpens item 1 rather than duplicating it: name the stage-matched plan
+    type in the action line. An active plan advancing a `discarded` strategy
+    is the inverse — `challenge` to the plan's owner: retire or rejustify.
+15. The metrics reading a strategy's plans match its stage: learning and
+    leading indicators for `defined`, delivery progress for `validated`,
+    outcomes against `definitions.md` targets for `implemented`, efficiency
+    and unit economics for `established`. A mismatch — outcome targets graded
+    against a strategy still validating, or an `implemented` strategy with no
+    outcome metric defined — `challenge`.

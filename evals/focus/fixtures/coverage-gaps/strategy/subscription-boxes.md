@@ -1,7 +1,7 @@
 ---
 provenance: authored
 owner: org/founder
-status: committed
+status: implemented
 need: market.md#n-fresh-ingredients
 differentiation: curated fresh-ingredient boxes on a fixed cadence, against ad-hoc homebrew-shop runs
 core-ranking: [problem/ingredient-sourcing.md, problem/subscriber-growth.md]

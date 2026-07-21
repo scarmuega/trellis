@@ -110,10 +110,39 @@ would for an agent; `holder/ref.md` points at the party. The residue — signed
 contracts, pricing, renewal dates — is body content plus state-refs to the system of
 record, with renewals as `rituals.md` entries.
 
+### Strategy maturity
+A strategy's `status:` is the maturity ladder — the record of what the evidence
+has shown, never what anyone hopes: `raw | defined | validated | implemented |
+established | discarded`. Each stage names the work the strategy owes and the
+metrics that read it. `raw` owes refinement — sharpen `need:` and
+`differentiation:` until they are falsifiable; work on the artifact itself,
+which no plan carries. `defined` owes validation: an `experiment` plan with a
+decision criterion, read through learning and leading indicators. `validated`
+owes implementation — this is the commitment line, where the strategy starts
+inducing subdomains (spec rule 11): initiatives, read through delivery
+progress. `implemented` owes monitoring — the metric sweep does the work:
+outcome metrics against their `definitions.md` targets. `established` owes
+hardening and optimization, read through efficiency, unit economics, and
+reliability. `discarded` owes nothing — failed, unmeritorious, or superseded
+(see Pivot) — and any plan still advancing it has outlived its reason.
+
+The coarse vocabulary survives as bands, and prose using it stays true:
+aspirational is `raw|defined`; committed is `validated|implemented|established`
+— only the committed band induces; retired is `discarded`. The ladder advances
+only on evidence, never on ambition: each move is its owner's authored edit
+citing what changed. Skipping stages is legitimate when the evidence is real —
+a business selling before validating has run the strongest experiment there
+is; record the stage the evidence supports. The effectiveness walk reads the
+stage, not just the band: every strategy past `raw` enters it — an unvalidated
+strategy claiming attention has announced a validation debt — and the stage
+names the plan the walk should find and the metrics that count as evidence.
+The test for any status edit: what evidence changed? An edit justified by
+ambition alone is misfiled.
+
 ### Pivot
 A pivot is a strategy edit, not a rewrite of the world. The founding map endures —
 if it doesn't, that wasn't a pivot but a different business. Procedure: set the old
-strategy's `status: retired`; commit the new one, `supersedes:` naming the old.
+strategy's `status: discarded`; commit the new one, `supersedes:` naming the old.
 Every subdomain the retired strategy induced is now orphaned (spec rule 11): the
 derivation sweep flags each for its owner to re-parent onto a surviving commitment
 (often with a different `class:` — classification is per edge) or archive. Orphans
