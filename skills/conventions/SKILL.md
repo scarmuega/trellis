@@ -56,6 +56,7 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Metric definition or target | `metrics/definitions.md` |
 | Metric values | `metrics/actuals/` (generated) or state-ref — never authored |
 | Time-bounded goal, campaign, experiment, to-be journey | `plans/{plan}.md` with `type:` |
+| Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag — never a `plans/{plan}/` folder |
 | "Why we chose X" | `decisions/NNNN-{slug}.md` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
@@ -69,8 +70,10 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 
 Never create: a functions/departments directory, a requirements directory, a
 personas directory, a root-level `skills/` directory (skills live in bounded
-contexts or agent holder packages — decision 0021), or any directory that
-groups existing kinds — groupings are tags; views over tags are generated.
+contexts or agent holder packages — decision 0021), a plan folder
+(`plans/{plan}/` — sub-plans are flat siblings, decision 0026), or any
+directory that groups existing kinds — groupings are tags; views over tags are
+generated.
 
 ## Rules digest
 

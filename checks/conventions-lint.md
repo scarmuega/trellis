@@ -26,7 +26,12 @@ escalation to the artifact's owner.
     root-level `skills/` is this violation by name: procedures live in
     `solution/{bc}/skills/` (business) or `org/{role}/holder/skills/` (agent
     package) — escalate with the Cross-cutting procedures pattern's resolution
-    (convention, ritual, runtime concern, or missing bounded context).
+    (convention, ritual, runtime concern, or missing bounded context). A
+    `plans/{plan}/` directory is this violation by name too: sub-plans are flat
+    siblings (`plans/{parent}-{piece}.md`) — escalate with the Plan
+    decomposition pattern's resolution (umbrella plan + sibling pieces +
+    family tag; a family needing its own goals and metrics is rule 8 — a new
+    root).
 12. `metrics/actuals/` content is within the freshness window defined by
     `rituals.md`.
 13. Every `strategy/{strategy}.md` declares a legal

@@ -80,6 +80,24 @@ kind: it's a plan (`type: journey`), where the `contexts:` refs do real analytic
 work — a journey's value is precisely that it crosses bounded-context seams. The
 journey is the demand-side reading of `context-map.md`.
 
+### Plan decomposition
+A large effort wants an umbrella and independently workable pieces, and both are
+plans — the same kind, so no directory is earned (spec rule 7). Never
+`plans/{plan}/` with an index file: a plan-family folder is a grouping, and the
+index inside it is an artifact with no schema. The shape is flat: each piece is
+a sibling `plans/{parent}-{piece}.md` with full plan frontmatter — its own
+`status:`, its own refs — activated, blocked, and retired independently; the
+umbrella is a plan like any other (`type: initiative`, or a type the instance
+registers) whose body carries the decomposition as an anchored section linking
+each piece and the seams between them. Family membership is a registered tag on
+every member; any roll-up is a generated view over the tag, never an authored
+hierarchy. Prefix naming keeps the family adjacent in a flat listing (spec
+rule 10). The effectiveness walk needs no special case: each piece answers for
+its own worth, and the umbrella — holding the shared metric refs — answers for
+the whole. A family that starts wanting its own goals, metric definitions, and
+plans about its plans is spec rule 8 firing: that's a domain — give it a root,
+never a deeper tree (see Stratified alternation).
+
 ### Vendors
 Split by what the vendor provides. A vendor providing *a system* (a card processor,
 a cloud, an API provider) is an external bounded context: an entry in

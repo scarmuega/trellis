@@ -14,6 +14,13 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Plan decomposition pattern (spec) and decision 0026: a large effort is an
+  umbrella plan plus flat sibling sub-plans (`plans/{parent}-{piece}.md`),
+  each with its own lifecycle, grouped by a registered family tag — never a
+  `plans/{plan}/` folder, now named as a lint item 11 violation (like
+  root-level `skills/`, per 0021). Surfaces updated: the conventions skill
+  (placement row + never-create list) and `/trellis:plan` step 2.
+
 - `/trellis:focus` + `trellis:focus` (decision 0025): plan-effectiveness
   evaluation as a command-and-role pair — coverage gaps, metric movement,
   attention allocation against `core-ranking`, blockers/risks, and challenges

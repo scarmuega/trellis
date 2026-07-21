@@ -24,6 +24,10 @@ the existing plans (name, status, type) and ask what to plan.
    Ambiguous → ask, showing the registry. Not yet registered → agree the name
    and a one-line definition with the user now; the registry edit lands in
    step 7 (types register before use, but writes happen only after approval).
+   A topic that is really a program of independently workable moves → offer
+   the Plan decomposition pattern (`${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`):
+   an umbrella plan plus sibling sub-plans (`plans/{parent}-{piece}.md`), each
+   drafted through this command — never a `plans/{plan}/` folder.
 
 3. **Resolve the owner**: every plan carries `owner:`. List the roles under
    `org/` whose mandate `scope:` overlaps the plan's likely subdomains, propose
