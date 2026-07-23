@@ -14,6 +14,15 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- `template/AGENTS.md`: a succinct, harness-neutral orientation card at the
+  domain root — states that the repo is a Trellis domain, routes an agent to
+  where each kind lives, and names the gates on every edit (owner/provenance,
+  append-only decisions, act-under-a-role, no secrets). It defers all
+  authoritative detail to `conventions.md` rather than duplicating the schemas,
+  and carries the standard `provenance: authored` / `owner: <owner>` frontmatter
+  so it stays lint-clean (the `<owner>` placeholder is resolved by the existing
+  scaffolding step).
+
 - Plan decomposition pattern (spec) and decision 0026: a large effort is an
   umbrella plan plus flat sibling sub-plans (`plans/{parent}-{piece}.md`),
   each with its own lifecycle, grouped by a registered family tag — never a
