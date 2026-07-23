@@ -101,7 +101,7 @@ binding".
 | act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …" --plugin-dir <trellis checkout>` |
 | schedule | forge cron (reference: `template/.github/workflows/rituals.yml`) → headless `/trellis:ritual <name>` |
 | ingress | issues labeled `role:{name}` (reference: `template/.github/workflows/ingress.yml`) → headless act; relay non-forge events (email, tickets) into issues to keep one ingress and one ledger |
-| gate | plugin hooks (`hooks/hooks.json` → `hooks/gate.mjs`): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
+| gate | plugin hooks (`hooks/hooks.json` → `hooks/gate.mjs`): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | forge issues assigned to the `escalate-to:` role's holder (human `ref.md` should carry the forge handle); approvals are PRs |
 | ledger | git history + forge threads; the acting role is recorded in the session marker and named in commits/comments |
 

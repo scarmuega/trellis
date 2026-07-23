@@ -183,8 +183,9 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
    roles in N domains means N local mandates.
 5. **State lives elsewhere.** `metrics/actuals/` is generated on the ritual cadence or
    held as state-refs; agents never reason from numbers older than the interval.
-6. **Decisions are append-only.** Supersede, never edit — shared memory across agent
-   generations.
+6. **Decisions are append-only.** Supersede, never edit — once committed, a decision
+   is shared memory across agent generations (an uncommitted draft is still yours to
+   revise).
 7. **Directories hold kinds; groupings are tags.** A branch earns a directory only by
    introducing a new artifact kind — something needing its own frontmatter: its own
    lifecycle, owner, and provenance distinct from any parent document. Everything else

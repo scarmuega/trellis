@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Deterministic enforcement gate for Trellis domain roots (PreToolUse on
 // Write|Edit). Guards only what needs no judgment and no role attribution:
-//   1. decisions/ is append-only (spec rule 6) — accepted decisions never edited
+//   1. decisions/ is append-only (spec rule 6) — a *committed* accepted decision
+//      is never edited; an uncommitted draft (not yet in HEAD) stays editable
 //   2. `provenance: generated` artifacts are never hand-edited — writes are
 //      allowed only under an acting-role marker (`.trellis/acting-role`,
 //      written by /trellis:act)
@@ -12,6 +13,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 function out(obj) {
   process.stdout.write(JSON.stringify(obj));
@@ -65,6 +67,28 @@ function frontmatter(file) {
   }
 }
 
+// Append-only freezes a decision once its accepted state is *committed* — shared
+// memory across agent generations (spec rule 6). We read the HEAD version, not
+// the working tree or the index: a decision drafted/accepted this session (or
+// merely `git add`ed) is not yet in HEAD and stays editable. Outside a git repo
+// the "committed" notion is meaningless, so we fall back to always-frozen rather
+// than silently dropping the guarantee.
+function committedDecisionIsAccepted(root, rel) {
+  const inRepo = spawnSync("git", ["-C", root, "rev-parse", "--git-dir"], {
+    encoding: "utf8",
+  });
+  if (inRepo.status !== 0) return true; // not a git repo (or git missing): frozen
+
+  const posixRel = rel.split(path.sep).join("/");
+  const show = spawnSync("git", ["-C", root, "show", `HEAD:${posixRel}`], {
+    encoding: "utf8",
+  });
+  if (show.status !== 0) return false; // not in HEAD → uncommitted → editable
+
+  const match = (show.stdout || "").match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  return /^status:\s*accepted\b/m.test(match ? match[1] : "");
+}
+
 try {
   const input = JSON.parse(fs.readFileSync(0, "utf8"));
   const toolInput = input.tool_input || {};
@@ -85,12 +109,16 @@ try {
   const rel = path.relative(root, filePath);
   const exists = fs.existsSync(filePath);
 
-  // 1. decisions/ is append-only: accepted decisions are never edited.
+  // 1. decisions/ is append-only: a committed accepted decision is never edited.
+  //    An uncommitted draft (not yet in HEAD) is still part of the session.
   if (/^decisions[\\/]\d{4}-[^\\/]+\.md$/.test(rel) && exists) {
     const fm = frontmatter(filePath);
-    if (/^status:\s*accepted\b/m.test(fm)) {
+    if (
+      /^status:\s*accepted\b/m.test(fm) &&
+      committedDecisionIsAccepted(root, rel)
+    ) {
       deny(
-        `${rel} is an accepted decision — decisions/ is append-only (spec rule 6). ` +
+        `${rel} is a committed accepted decision — decisions/ is append-only (spec rule 6). ` +
           `Supersede it with a new numbered decision that names this one instead of editing it.`
       );
     }
