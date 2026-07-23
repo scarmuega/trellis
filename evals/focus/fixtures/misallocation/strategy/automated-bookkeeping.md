@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-painless-books
 differentiation: books that keep themselves from live transaction data, against manual entry into desktop ledgers
+funded-by:
+  - strategy: self
 core-ranking: [problem/categorization-accuracy.md, problem/accountant-partnerships.md]
 ---
 # Automated bookkeeping

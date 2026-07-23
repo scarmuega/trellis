@@ -54,6 +54,12 @@ status: raw | defined | validated | implemented | established | discarded
     # discarded.
 need: market.md#n-{slug}
 differentiation: one line — why we win, against which alternative
+funded-by:              # what sustains this strategy — owed at validated (the
+  - strategy: self      #   commitment line): self (captures its own revenue) |
+                        #   strategy/{funder}.md | external ref. relation on the
+                        #   edge: current (default) | intended (a conversion
+                        #   thesis — documents, never sustains). Committed with
+                        #   no sustaining edge = economic orphan (lint).
 core-ranking: []    # required iff >1 core edge under this strategy;
                     # total order, scarcest attention first
 supersedes: strategy/{previous}.md           # optional; set on pivot

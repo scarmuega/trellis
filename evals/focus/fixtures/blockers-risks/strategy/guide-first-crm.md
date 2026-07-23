@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-manage-bookings
 differentiation: a CRM built around trips and waivers for guiding companies, against generic sales CRMs bent to fit
+funded-by:
+  - strategy: self
 core-ranking: [problem/booking-pipeline.md, problem/guide-onboarding.md]
 ---
 # Guide-first CRM

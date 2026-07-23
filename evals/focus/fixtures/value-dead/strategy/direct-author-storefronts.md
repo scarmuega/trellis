@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-earn-from-writing
 differentiation: author-owned storefronts with author-owned reader lists, against retail platforms that keep both
+funded-by:
+  - strategy: self
 core-ranking: [problem/direct-sales.md, problem/reader-audience.md]
 ---
 # Direct author storefronts

@@ -139,13 +139,43 @@ names the plan the walk should find and the metrics that count as evidence.
 The test for any status edit: what evidence changed? An edit justified by
 ambition alone is misfiled.
 
+### Economic lineage
+Strategies decompose by need and differentiation, not by revenue stream — so a
+portfolio routinely splits producing value from capturing it. Open-source
+devtools are the canonical case: one strategy builds adoption, installed base,
+and catalog content while grants, hosting, or paid trust services collect the
+revenue. Without an edge, the producer looks economically self-justifying and
+the dependency stays invisible. `funded-by:` edges (spec rule 12) are the
+machine-readable skeleton: each committed strategy declares what sustains it —
+itself (`self`), a sibling strategy, or an external ref. The value-capture
+strategy is a genuine strategy, never bookkeeping: its `need:` is the payer's
+need — a grants strategy fulfills a funder's need for a maintained ecosystem; a
+hosting strategy, a user's need for managed infrastructure. `relation: current`
+records the operating model as committed; `relation: intended` records a
+conversion thesis — grants today, hosting tomorrow — and one strategy carries
+both edges at once. The division of labor is strict: the edge carries topology
+(who captures), the maturity ladder says how real the operation is, metrics say
+how capture performs, and `economics.md` narrates pricing and unit economics
+over the skeleton — never amounts or split ratios on the edge; that precision
+belongs to the narrative and the metric definitions. The failure mode the edges
+expose is portfolio-level: a funding strategy dying before the conversion
+lands. The lint catches the static forms — a committed strategy nothing
+sustains (economic orphan), a committed band funded only by itself in a circle
+(no capture point); the derivation sweep flags the dependents of a discarded
+funder exactly as it flags induced subdomains; and the focus walk weighs
+attention on producers against the health of whatever captures their value.
+
 ### Pivot
 A pivot is a strategy edit, not a rewrite of the world. The founding map endures —
 if it doesn't, that wasn't a pivot but a different business. Procedure: set the old
 strategy's `status: discarded`; commit the new one, `supersedes:` naming the old.
 Every subdomain the retired strategy induced is now orphaned (spec rule 11): the
 derivation sweep flags each for its owner to re-parent onto a surviving commitment
-(often with a different `class:` — classification is per edge) or archive. Orphans
+(often with a different `class:` — classification is per edge) or archive. Its
+funding dependents orphan the same way (spec rule 12): every strategy whose
+sustaining `funded-by:` edges pointed at the discarded one is flagged for its
+owner to re-fund onto a surviving capture, commit its conversion thesis, or
+reconsider its own commitment. Orphans
 carry core policy until resolved, so a half-finished pivot tightens agent autonomy
 rather than loosening it, and a root left with only retired strategies is flagged
 as an incomplete pivot. Abandon agents for elves; the agent-orchestration

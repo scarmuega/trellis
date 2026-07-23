@@ -60,3 +60,20 @@ escalation to the artifact's owner.
     operating against superseded conventions — escalate to the adopt-decision's
     owner to review the intervening spec changes and either re-pin (adopt the
     current version) or record a deviation decision for what it declines.
+19. Every `funded-by:` edge is legal: `strategy:` is `self`, a resolving
+    `strategy/{strategy}.md` ref, or a declared external ref (spec rule 2);
+    `relation:` (if present) is `current` or `intended` — absent means
+    `current`; no strategy names its own path (that is `self`). Edges to
+    aspirational or discarded strategies are legal — they document a thesis or
+    a loss — but never sustain.
+20. Every committed-band strategy is economically sustained: at least one
+    `current` edge whose target is `self`, a committed-band strategy, or an
+    external ref. A committed strategy without one is an economic orphan —
+    same spirit and severity as item 14's orphaned subdomain: escalate to its
+    owner to re-fund it, commit the conversion it intends, or reconsider the
+    commitment.
+21. The committed band has a capture point: at least one committed strategy
+    captures its own revenue (a `current` `self` edge) or is sustained from
+    outside the root (an external ref). A band whose strategies are funded
+    only by each other is a closed loop — value circulates, nothing enters.
+    Escalate as with item 17: the root is operating nothing that pays for it.

@@ -13,7 +13,7 @@
    revocable, and the search must sustain itself economically to continue —
    viability is knowledge in its own right.
    *Grounds: `market.md` (the founding map), `strategy/` and its status
-   lifecycle, `economics.md`, `brand.md`.*
+   lifecycle, `funded-by:` edges, `economics.md`, `brand.md`.*
 
 2. **The domain is induced, not found.** `need × strategy → domain`: the domain is
    everything the business must become expert at *because of how* it chose to

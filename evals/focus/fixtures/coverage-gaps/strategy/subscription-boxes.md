@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-fresh-ingredients
 differentiation: curated fresh-ingredient boxes on a fixed cadence, against ad-hoc homebrew-shop runs
+funded-by:
+  - strategy: self
 core-ranking: [problem/ingredient-sourcing.md, problem/subscriber-growth.md]
 ---
 # Subscription boxes

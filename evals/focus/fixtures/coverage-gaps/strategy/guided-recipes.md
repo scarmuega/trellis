@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-brew-guidance
 differentiation: recipes sequenced to the box in hand, against generic tutorials that assume a stocked shelf
+funded-by:
+  - strategy: self
 ---
 # Guided recipes
 

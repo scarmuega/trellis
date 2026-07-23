@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-trail-nutrition
 differentiation: chef-developed recipes in outdoor-retail channels, against mail-order freeze-dried incumbents
+funded-by:
+  - strategy: self
 core-ranking: [problem/recipe-development.md, problem/outdoor-retail-channel.md]
 ---
 # Dehydrated meal kits

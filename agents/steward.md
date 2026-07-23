@@ -39,7 +39,10 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   whose `subdomains:` refs are affected, mandates scoped to them — to its owner
   for revalidation. Flag subdomains left without an edge to a committed strategy
   as orphans, to be re-parented or archived by their owner (they carry core
-  automation policy until resolved). You flag; the owner collects.
+  automation policy until resolved). Flag committed strategies whose sustaining
+  `funded-by:` edges all point at an edited, demoted, or discarded strategy —
+  economic orphans, to be re-funded, converted, or reconsidered by their owner.
+  You flag; the owner collects.
 
 ## Boundaries (hard)
 

@@ -106,3 +106,24 @@ v11), skip this group.
     and unit economics for `established`. A mismatch — outcome targets graded
     against a strategy still validating, or an `implemented` strategy with no
     outcome metric defined — `challenge`.
+
+## Economic lineage — `funded-by:` edges are the capture skeleton `economics.md` narrates
+
+A strategy's plans answer not only to its own metrics but to whoever captures
+the value they produce (spec rule 12). On a root whose pinned spec predates
+`funded-by:` (v12 or earlier), skip this group.
+
+16. Attention on a value-producing strategy is challengeable against the
+    health of its capture: for each committed strategy sustained by *another*
+    strategy (`current` edges, not `self`), read the funder's stage, plans,
+    and metrics. Active plans pouring effort into the producer while its
+    funder is stalled, unplanned (item 1), or missing its targets is value
+    nobody collects — `risk`, addressed to both owners.
+17. An `intended` edge is a conversion thesis on the current funder's clock:
+    the target should be climbing the maturity ladder while the subsidy
+    lasts. A conversion target still aspirational with no active plan
+    advancing it, while the dependent's only sustaining edge is a single
+    `current` funder — the thesis is aging as the subsidy runs — `gap`. The
+    funder's own stage or metrics deteriorating sharpens it: the funding
+    strategy may die before the conversion lands — `risk`, addressed to the
+    owners of both the dependent and the target.

@@ -30,9 +30,11 @@ problem/          induced subdomains: {subdomain}.md carrying induced-by:
                   strategy edges, class on the edge
 strategy/         {strategy}.md — committed solution to a need: status (the
                   maturity ladder; the committed band induces), need ref,
-                  differentiation, core-ranking
+                  differentiation, funded-by edges (what sustains it),
+                  core-ranking
 brand.md          the promise to customers
-economics.md      pricing, revenue model, unit economics
+economics.md      pricing, revenue model, unit economics — narrates the
+                  funded-by skeleton in strategy/
 metrics/          definitions.md (authored) + actuals/ (generated or state-refs)
 plans/            time-bounded execution: status + type + refs
 decisions/        ADRs, append-only, NNNN-{slug}.md
@@ -54,6 +56,7 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Requirement / constraint | body of its subdomain or BC README, anchored `## R-{name}-{n}` |
 | Promise, positioning, voice | `brand.md` |
 | Pricing, revenue, unit economics, sizing | `economics.md` |
+| What sustains a strategy — self-capture, a funder, a conversion thesis | `funded-by:` edges in `strategy/{strategy}.md` frontmatter; the narrative stays in `economics.md` |
 | Metric definition or target | `metrics/definitions.md` |
 | Metric values | `metrics/actuals/` (generated) or state-ref — never authored |
 | Time-bounded goal, campaign, experiment, to-be journey | `plans/{plan}.md` with `type:` |
@@ -98,6 +101,12 @@ generated.
     the edge; only committed strategies induce (the band
     `validated|implemented|established` of the maturity ladder); discarding a
     strategy orphans its subdomains (re-parent or archive).
+12. A strategy declares what sustains it: committed strategies carry
+    `funded-by:` edges — `self`, another strategy, or an external ref, with
+    `relation: intended` marking a conversion thesis (documents, never
+    sustains). A committed strategy with no sustaining edge is an economic
+    orphan; discarding a strategy orphans its funding dependents (re-fund,
+    convert, or reconsider).
 
 ## Procedures
 
@@ -113,7 +122,10 @@ differentiation are falsifiable, `validated` when the experiment's decision
 criterion resolves — the commitment line, induction starts — `implemented` when
 operating, `established` when the work is optimization; `discarded` is
 terminal. More than one core edge under it ⇒ record `core-ranking:` (scarcest
-attention first).
+attention first). At `validated`, the funding declaration is owed: `funded-by:`
+edges naming what sustains it — `self` if it captures its own revenue, else
+the capture strategy's ref (`relation: intended` for a not-yet-operating
+conversion thesis).
 
 **Add a subdomain**: create `problem/{name}.md`, declare its `induced-by:` edges —
 each naming the strategy that put it in the domain, with `class:` on the edge.
@@ -125,7 +137,9 @@ human review gate; orphans default to core). Add its terms to the glossary.
 `supersedes:`. Every subdomain the discarded strategy induced is orphaned — the
 founding map endures; re-parent each orphan onto a surviving commitment
 (re-classifying its edge) or archive it. Orphans carry core policy until
-resolved.
+resolved. Strategies the discarded one funded are economic orphans the same
+way: re-fund each onto a surviving capture, commit its conversion thesis, or
+reconsider it.
 
 **Add a bounded context**: `solution/{name}/` with README + local glossary; add a
 row to `context-map.md`; put its interfaces in `contracts/`, procedures in
@@ -162,7 +176,8 @@ answer is body content with a stable anchor.
 For audits, run the canonical checklist at
 `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` — the same set the
 `trellis:steward` agent enforces (frontmatter validity, subdomain derivation
-edges, strategy validity, orphan detection, core-ranking, technology-free
-founding map, incomplete pivots, plan refs resolve, mandates have authority,
-append-only decisions, registered tags, no secrets, no grouping directories,
-actuals freshness).
+edges, strategy validity, orphan detection, funding-edge validity, economic
+orphans, capture points, core-ranking, technology-free founding map,
+incomplete pivots, plan refs resolve, mandates have authority, append-only
+decisions, registered tags, no secrets, no grouping directories, actuals
+freshness).

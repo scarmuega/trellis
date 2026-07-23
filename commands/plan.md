@@ -46,7 +46,8 @@ the existing plans (name, status, type) and ask what to plan.
 
 5. **Research the domain** (read-only): the subdomains the plan touches and
    their `induced-by:` edges (effective automation policy), the committed
-   strategies behind them, `solution/context-map.md` and the bounded contexts
+   strategies behind them and the `funded-by:` edges naming what sustains
+   those strategies, `solution/context-map.md` and the bounded contexts
    the plan executes through, the `metrics/definitions.md` anchors that will
    measure it, and prior `plans/` and `decisions/` that overlap. Use terms from
    `glossary.md`; surface conflicts with active plans.

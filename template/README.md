@@ -10,7 +10,8 @@ Then:
 2. Write your first strategy: rename `strategy/first-strategy.md`, point its
    `need:` at a `market.md` anchor, and advance `status:` to `validated` when
    you commit to operating it — the committed band (`validated` and beyond)
-   induces.
+   induces and owes its `funded-by:` declaration (what sustains it: `self`, a
+   capture strategy, or an external ref).
 3. Map what the strategy induces: one `problem/{subdomain}.md` per subdomain, each
    with an `induced-by:` edge back to the strategy, `class:` on the edge.
 4. Fill `brand.md` and `economics.md`.

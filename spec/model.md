@@ -1,4 +1,4 @@
-# Trellis — specification (v12)
+# Trellis — specification (v13)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -47,10 +47,12 @@ a domain is operated day to day.
 │   └── {strategy}.md               => a committed solution to a need — the business model as
 │                                      operated, not as aspired to; frontmatter: status (the
 │                                      maturity ladder; only the committed band induces), need
-│                                      ref, differentiation claim, core-ranking
+│                                      ref, differentiation claim, funding edges (funded-by —
+│                                      what sustains it), core-ranking
 ├── brand.md                        => promise to customers — the customer-facing voice of the
 │                                      committed strategy's differentiation claim
-├── economics.md                    => pricing, revenue model, unit economics
+├── economics.md                    => pricing, revenue model, unit economics — the narrative
+│                                      over the funded-by skeleton in strategy/
 ├── metrics/
 │   ├── definitions.md              => authored: metric defs, targets, owners (via mandates)
 │   └── actuals/                    => generated: bot-committed snapshots or state-refs
@@ -120,6 +122,18 @@ status: raw | defined | validated | implemented | established | discarded
     # retired = discarded.
 need: market.md#n-{slug}                     # the market need this fulfills
 differentiation: one line — why we win, against which alternative
+funded-by:                                   # what sustains this strategy (rule 12);
+  - strategy: self                           #   captures its own revenue, OR
+  - strategy: strategy/{funder}.md           #   another strategy captures for it, OR
+    relation: current | intended             #   an external ref (rule 2). relation
+                                             #   defaults to current.
+    # the edge declares the operating model's designed value flow — who captures
+    # the value this strategy produces. How real the operation is stays on the
+    # maturity ladder; how capture performs stays in metrics; economics.md
+    # narrates the skeleton these edges draw. current = sustains under the model
+    # as committed; intended = a conversion thesis — legal toward any stage,
+    # never sustaining. Committed band with no current edge to self, a
+    # committed strategy, or an external ref = economic orphan (lint).
 core-ranking: [problem/{a}.md, problem/{b}.md]  # required iff >1 core edge under
                                                 # this strategy; a total order,
                                                 # scarcest attention first
@@ -195,6 +209,21 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     orphans the
     subdomains it induced — each must be re-parented to a surviving commitment or
     archived.
+12. **A strategy declares what sustains it.** Strategies decompose by need and
+    differentiation, not by revenue stream, so producing value and capturing it
+    routinely land in different strategies. Every `committed` strategy carries
+    `funded-by:` edges naming where the value it produces is captured: itself
+    (`self`), another strategy, or an external ref (rule 2). Semantics ride the
+    edge: `relation: current` is the operating model as committed;
+    `relation: intended` is a conversion thesis — it documents, never sustains,
+    and edges to aspirational strategies do the same. A committed strategy with
+    no sustaining edge — no `current` edge to `self`, a committed-band
+    strategy, or an external ref — is an economic orphan: a modeling error
+    mirroring rule 11's untagged subdomain. Discarding a strategy economically
+    orphans its dependents exactly as it orphans induced subdomains — each must
+    be re-funded, converted, or reconsidered. Economic lineage is
+    strategy-layer knowledge: `economics.md` narrates the skeleton the edges
+    draw; the founding map never carries it.
 
 For the premises these rules answer to, see `spec/rationale.md`. For recurring,
 non-normative practice inside this structure, see `spec/patterns.md`.

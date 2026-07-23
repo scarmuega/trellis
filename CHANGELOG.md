@@ -50,6 +50,25 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- **Breaking (spec v12 → v13):** strategies declare economic lineage —
+  `funded-by:` edges naming where the value each produces is captured
+  (`self`, another strategy, or an external ref), with
+  `relation: current | intended` riding the edge (a conversion thesis
+  documents, never sustains), per a new spec rule 12, an Economic lineage
+  pattern, and decision 0028. A committed strategy with no sustaining edge is
+  an economic orphan — same spirit as an orphaned subdomain — and discarding
+  a strategy orphans its funding dependents exactly as it orphans induced
+  subdomains. Surfaces updated: lint items 19–21 (edge validity, economic
+  orphans, capture point), plan-effectiveness items 16–17 (appended
+  Economic lineage group — funder health challenges the producer's spend,
+  stalled conversion theses; 1–15 stable for the eval contracts), the
+  derivation sweep (steward agent + template ritual row), both focus
+  surfaces' evidence base, `/trellis:plan` research, rationale premise 1's
+  grounds, the template (conventions schema, strategy stub, `economics.md`
+  as the narrative over the skeleton, README, v13 pin), and the eval
+  fixtures (self-funded; skeleton re-pinned). Instances re-pin per lint 18 —
+  one `funded-by:` block per committed strategy.
+
 - **Breaking (spec v11 → v12):** strategy `status:` becomes the six-stage
   maturity ladder — `raw | defined | validated | implemented | established |
   discarded` — per a new Strategy maturity pattern (spec) and decision 0027.

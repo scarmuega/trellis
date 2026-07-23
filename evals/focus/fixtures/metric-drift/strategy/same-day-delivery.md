@@ -4,6 +4,8 @@ owner: org/founder
 status: implemented
 need: market.md#n-fresh-flowers-on-time
 differentiation: a promised delivery slot the same day, against shops that promise only "today sometime"
+funded-by:
+  - strategy: self
 core-ranking: [problem/delivery-operations.md, problem/order-volume.md]
 ---
 # Same-day delivery
