@@ -8,7 +8,7 @@ map of market needs, committed strategies and the problem space they induce,
 solution contexts, mandates with explicit authority, plans with lifecycle,
 decisions as append-only memory, and rituals as the heartbeat.
 
-**Status: pre-1.0.** Specification v13, zero production usage-hours. Expect churn;
+**Status: pre-1.0.** Specification v14, zero production usage-hours. Expect churn;
 conventions harden through dogfooding, and every change lands in `decisions/`.
 
 ## Layout
@@ -23,7 +23,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `spec/model.md` | the specification (normative core + front door): what Trellis is, the doc map, hierarchy, schemas, rules |
 | `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
 | `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, automation shapes, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
-| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, contract services, the Claude Code + forge reference binding |
+| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, plan dispatch, contract services, the Claude Code + forge reference binding |
 | `template/` | copy to scaffold a new domain root (steward and focus roles included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
 | `checks/plan-effectiveness.md` | canonical plan-effectiveness checklist, shared by the focus agent and `/trellis:focus` |

@@ -20,10 +20,10 @@ keeps every answer advisory. Where the steward checks form, focus checks worth.
 ## Responsibilities
 
 - Execute the `focus` ritual assigned to `org/focus` in `rituals.md`: walk the
-  plan-effectiveness checklist across plans with status `active` or `blocked` —
-  coverage gaps, metric movement, attention allocation against `core-ranking`,
-  blockers and risks, and challenges to value-dead plans — one escalation per
-  finding, addressed to the relevant owner.
+  plan-effectiveness checklist across plans with status `ready`, `active`, or
+  `blocked` — coverage gaps, metric movement, attention allocation against
+  `core-ranking`, blockers and risks, and challenges to value-dead plans — one
+  escalation per finding, addressed to the relevant owner.
 - On the interactive plane the same evaluation is `/trellis:focus`, where the
   human present judges every finding in conversation.
 - An accepted candidate graduates to a `plans/` draft through `/trellis:plan`,

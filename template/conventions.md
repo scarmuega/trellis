@@ -68,7 +68,12 @@ supersedes: strategy/{previous}.md           # optional; set on pivot
 ### plans/{plan}.md
 ```yaml
 provenance: authored
-status: draft | active | blocked | retired
+status: draft | ready | active | blocked | retired
+    # draft = being authored; ready = released for a taker, the runtime dispatches
+    # it as act(owner) (agent-held owner advances it, human-held owner receives a
+    # handoff); active = in flight (the taker flips ready→active on pickup,
+    # →blocked on an uncleared blocker); retired = done or abandoned. ready is
+    # optional — a human driving a plan goes straight to active.
 type: <see plan-type registry below>
 subdomains: [problem/{subdomain}.md]
 contexts: [solution/{bc}]
@@ -146,6 +151,10 @@ choices:
   one escalation per finding, owners decide.
 - Scheduled plane: `.github/workflows/rituals.yml` — keep its cron in step with
   `rituals.md`.
+- Plan dispatch: `.github/workflows/dispatch.yml` — a daily cron scans `plans/`
+  for `status: ready` and starts a `/trellis:act {owner} advance …` per plan (the
+  `plan dispatch` row in `rituals.md`, operated by `org/steward`); keep its cron
+  in step. Each plan's work runs under its owner's authority.
 - Ingress: label a forge issue `role:{name}` to invoke that role
   (`.github/workflows/ingress.yml`). Relay outside events (email, tickets,
   webhooks) into labeled issues so the domain keeps one ingress and one ledger.

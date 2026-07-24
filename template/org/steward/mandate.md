@@ -30,6 +30,11 @@ extract those parts into tooling — that extraction is the CLI's charter.
     the last sweep, escalate downstream artifacts (induced subdomains,
     `context-map.md`, plans, mandates scoped to them) to their owners for
     revalidation; flag orphaned subdomains for re-parenting or archival.
+  - **Plan dispatch** — route plans the owner has released (`status: ready`) to
+    their owners: for each, invoke `act(owner)` to advance it. The scan is
+    deterministic and the work runs under each owner's authority, so this grants
+    the steward no spend, publish, or approve of its own — it never does the plan
+    work itself, only starts the owner's.
 - Maintain generated views (tag indexes, orgchart view, plan boards) as
   `provenance: generated` artifacts.
 

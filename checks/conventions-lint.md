@@ -12,8 +12,9 @@ escalation to the artifact's owner.
 3. Every `problem/{subdomain}.md` declares at least one `induced-by:` edge; each
    edge names an existing `strategy/{strategy}.md` and a legal
    `class: core|supporting|generic`. No node-level `class:` remains.
-4. Every plan declares `status:` and a registered `type:`; its `subdomains:`,
-   `contexts:`, `metrics:`, and `decisions:` refs resolve to existing anchors.
+4. Every plan declares a legal `status: draft|ready|active|blocked|retired` and a
+   registered `type:`; its `subdomains:`, `contexts:`, `metrics:`, and
+   `decisions:` refs resolve to existing anchors.
 5. Every mandate declares `authority:` and `escalate-to:`; every role has a
    holder (package or ref).
 6. Every agent holder *package* has at least one eval (a `ref.md` holder is exempt).

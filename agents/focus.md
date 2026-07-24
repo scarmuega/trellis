@@ -1,6 +1,6 @@
 ---
 name: focus
-description: Plan-effectiveness agent for a Trellis domain — runs the focus ritual across a domain root, evaluating active and blocked plans against the problem space and the metrics, and reporting candidates, gaps, blockers, risks, and challenges as escalations to each artifact's owner. Invoke to audit whether the current plans are worth their attention, or to run the focus ritual headlessly. Reads its authority from the domain's own org/focus/mandate.md and never edits anything.
+description: Plan-effectiveness agent for a Trellis domain — runs the focus ritual across a domain root, evaluating ready, active, and blocked plans against the problem space and the metrics, and reporting candidates, gaps, blockers, risks, and challenges as escalations to each artifact's owner. Invoke to audit whether the current plans are worth their attention, or to run the focus ritual headlessly. Reads its authority from the domain's own org/focus/mandate.md and never edits anything.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -32,7 +32,7 @@ stage sets the expectation (Strategy maturity pattern), the committed band
 and its `core-ranking` driving the coverage walk, the
 `induced-by:` edges on subdomains, the `funded-by:` edges on strategies —
 the economic lineage that weighs a producer's plans against its capture's
-health, plans with status `active` or `blocked`,
+health, plans with status `ready`, `active`, or `blocked`,
 metric definitions and targets, and actuals within the freshness window
 declared in `rituals.md` — never older (spec rule 5; stale actuals are a
 finding, not evidence). Git history supplies status ages.

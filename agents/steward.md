@@ -43,6 +43,13 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   `funded-by:` edges all point at an edited, demoted, or discarded strategy —
   economic orphans, to be re-funded, converted, or reconsidered by their owner.
   You flag; the owner collects.
+- **Plan dispatch** — enumerate plans with `status: ready` and, for each, start a
+  *separate* `/trellis:act {owner} advance {plan}` invocation so the work runs
+  under that owner's authority (an agent-held owner advances it, a human-held
+  owner receives a handoff; the owner's act flips ready→active on pickup). You
+  only start the owner's act — you never do the plan work yourself and you flip
+  no status. Where the binding wires dispatch as a workflow, the scan runs there
+  and you are not invoked for it.
 
 ## Boundaries (hard)
 

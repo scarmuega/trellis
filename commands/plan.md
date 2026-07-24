@@ -65,10 +65,13 @@ the existing plans (name, status, type) and ask what to plan.
    rule 10, a distinctive retrieval key naming the move, never a date or
    "q3-plan" — with frontmatter `provenance: authored`, the confirmed `owner:`,
    `status: draft`, the registered `type:`, and the resolved ref lists, then
-   the body transposed from the draft. Offer to flip `status: active` in the
-   same breath: activation is the owner's act — it commits execution, not just
-   content — and the focus ritual evaluates only `active` and `blocked`. Do
-   not commit; version-control mechanics follow the instance's runtime binding.
+   the body transposed from the draft. Offer to release it in the same breath —
+   a deliberate owner's act that commits execution, not just content: flip to
+   **`ready`** to hand it to the runtime's plan dispatch (an agent-held owner
+   advances it autonomously, a human-held owner receives it as a handoff), or to
+   **`active`** if the owner is driving it themselves now. The focus ritual
+   evaluates `ready`, `active`, and `blocked` — never a draft. Do not commit;
+   version-control mechanics follow the instance's runtime binding.
 
 8. **Lint before reporting**: run the plan-relevant items of
    `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` against the new artifact —
@@ -79,4 +82,5 @@ the existing plans (name, status, type) and ask what to plan.
 9. **Report**: the artifact path, status, type, owner, the refs it carries, any
    registry additions to `conventions.md` (flag them to its owner when
    different), and — if left `draft` — the reminder that nothing reviews a
-   draft: flip to `active` when execution starts.
+   draft: flip to `ready` to release it for agent dispatch, or `active` when the
+   owner drives it.

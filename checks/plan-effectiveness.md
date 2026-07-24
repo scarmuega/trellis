@@ -34,7 +34,10 @@ dropped the contract.
 
 Walk the items in order — the coverage walk sets the attention ranking the rest
 report under. "Active plans" below means status `active` or `blocked`; nothing
-evaluates a draft.
+evaluates a draft. A `ready` plan — released for dispatch but not yet in flight —
+counts as advancing its strategy for the coverage walk (items 1–3) and answers
+for dispatch health (item 18), but the per-plan metric-movement and challenge
+items (4, 12, 13) skip it: it has not begun its measurement horizon.
 
 ## Coverage — walk `market.md` needs → committed strategies → induced subdomains → active plans
 
@@ -127,3 +130,15 @@ the value they produce (spec rule 12). On a root whose pinned spec predates
     funder's own stage or metrics deteriorating sharpens it: the funding
     strategy may die before the conversion lands — `risk`, addressed to the
     owners of both the dependent and the target.
+
+## Dispatch — the ready queue must actually drain
+
+On a root predating v14 (no `ready` status), skip this group.
+
+18. A plan `status: ready` beyond one dispatch cadence (the `plan dispatch` row
+    in `rituals.md`) with no act recorded against it in git history — the queue
+    is stalled: the owner has no agent holder to take it, the dispatcher is
+    misconfigured, or its budget is exhausted. A plan released for an agent that
+    no agent ever picks up is work the domain believes is moving and is not —
+    `blocker`, addressed to the plan's owner; name the likely cause (wiring
+    causes belong to the steward). Mirror of item 9's stalled `blocked`.

@@ -49,6 +49,23 @@ All three planes reduce to `act(role, input)`:
 The interactive plane invokes `act` ad hoc; a ritual is `act(executor,
 procedure)` on a timer; ingress is `act(role, payload)` on an event.
 
+## Plan dispatch
+
+A plan flagged `status: ready` is one its owner has released for a taker to
+advance. On the dispatch cadence the scheduled plane **enumerates the `ready`
+plans** — a deterministic scan, no judgment — and for each invokes
+`act(plan.owner, "advance plans/{slug}.md")`. The holder branch of `act` (step 2
+above) routes it: an agent-package owner advances the plan autonomously; a
+human-held owner receives it as a handoff, never impersonated. The taker flips
+the plan `ready → active` as it claims the work, so a plan leaves the queue the
+moment work starts — dispatch is **idempotent** across ticks without a separate
+lock, and a session that dies before claiming simply gets retried next tick.
+
+This adds no plane and no contract service: plan dispatch is `schedule` + `act`
+composed — the action-sibling of the `focus` ritual (focus *evaluates* plans and
+escalates; dispatch *advances* them). Change mechanics still bind: a change to a
+`core` subdomain is opened as a proposal, not landed (automation policy below).
+
 ## Contract services
 
 | service | obligation |
@@ -104,6 +121,16 @@ binding".
 | gate | plugin hooks (`hooks/hooks.json` → `hooks/gate.mjs`): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | forge issues assigned to the `escalate-to:` role's holder (human `ref.md` should carry the forge handle); approvals are PRs |
 | ledger | git history + forge threads; the acting role is recorded in the session marker and named in commits/comments |
+
+**Plan dispatch.** `.github/workflows/dispatch.yml` — a cron on its own cadence
+(daily by default, distinct from `rituals.yml`) scans `plans/` for `status:
+ready` and fires one headless `/trellis:act <owner> advance …` per plan, modeled
+on the ingress workflow's one-act-per-item shape for clean per-owner attribution.
+The `plan dispatch` row in `rituals.md` records the standing behavior; the
+steward is its scheduled-plane operator of record, but because the scan carries
+no judgment it is implemented as this wiring, not a steward session (the steward
+mandate's own "extract the deterministic parts into tooling"). If daily latency
+proves too slow, a more responsive dispatcher is Stage-3 territory (below).
 
 **Acting-role attribution.** `/trellis:act` records the acting role in
 `.trellis/acting-role` at the root (ephemeral, gitignored) and removes it on

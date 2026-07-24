@@ -1,4 +1,4 @@
-# Trellis — specification (v13)
+# Trellis — specification (v14)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -143,7 +143,13 @@ supersedes: strategy/{previous}.md           # optional; set on pivot
 ### plans/{plan}.md
 ```yaml
 provenance: authored
-status: draft | active | blocked | retired
+status: draft | ready | active | blocked | retired
+    # the plan lifecycle. draft = being authored, nothing reviews it. ready = the
+    # owner has released a specified plan for a taker; the runtime dispatches it as
+    # act(owner) (runtime companion) — an agent-held owner advances it autonomously,
+    # a human-held owner receives it as a handoff. active = in flight; the taker
+    # flips ready → active on pickup, → blocked on an uncleared blocker. ready is
+    # optional — a human driving a plan interactively goes straight to active.
 type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
 subdomains: [problem/growth.md]
 contexts: [solution/marketing]      # the bounded context(s) this plan executes through

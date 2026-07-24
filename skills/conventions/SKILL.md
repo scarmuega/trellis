@@ -152,7 +152,7 @@ Without the command: draft manually per the instance's plan schema, registering
 new types and tags in `conventions.md` first.
 
 **Challenge the plans**: `/trellis:focus [scope]` where the binding offers it —
-evaluates `active` and `blocked` plans against the problem they answer to,
+evaluates `ready`, `active`, and `blocked` plans against the problem they answer to,
 metrics as evidence (canonical checklist:
 `${CLAUDE_PLUGIN_ROOT}/checks/plan-effectiveness.md`). Findings are advisory:
 accepted candidates graduate through `/trellis:plan`; everything else escalates

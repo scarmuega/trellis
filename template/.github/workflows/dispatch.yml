@@ -1,0 +1,70 @@
+# <trellis runtime binding> Plan dispatch: on a cadence, scan plans/ for the ones
+# an owner has released for a taker (`status: ready`) and start an `act` session
+# per plan to advance it. The scan is deterministic (no judgment); each plan's
+# work runs as a separate `/trellis:act <owner>` under that owner's authority —
+# an agent-held owner advances it autonomously, a human-held owner receives it as
+# a handoff. The taker flips `ready → active` as it claims the work, so a plan
+# leaves the queue the moment work starts (idempotent across runs). Keep the cron
+# in step with the `plan dispatch` row in rituals.md. Requires ANTHROPIC_API_KEY
+# in the forge's secrets. See spec companion: runtime.md ("Plan dispatch").
+name: trellis plan dispatch
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # daily, 09:00 UTC — match the plan dispatch row in rituals.md
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the trellis plugin
+        uses: actions/checkout@v4
+        with:
+          repository: scarmuega/trellis
+          # ref: <pin the plugin SHA your domain operates against>
+          path: .trellis/plugin
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Advance every ready plan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          for plan in plans/*.md; do
+            # read status and owner from the frontmatter block only (before the 2nd ---)
+            status=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^status:/{print $2; exit}' "$plan")
+            [ "$status" = "ready" ] || continue
+            owner=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^owner:/{print $2; exit}' "$plan")
+            if [ -z "$owner" ]; then
+              echo "::warning::$plan is ready but declares no owner — skipping"
+              continue
+            fi
+            echo "Dispatching $plan to ${owner#org/}"
+            claude -p "/trellis:act ${owner#org/} advance $plan toward its objective: make the next increment of progress within your authority; flip its status ready→active as you claim it, blocked if you hit an uncleared blocker; leave a trail." \
+              --plugin-dir "$PWD/.trellis/plugin" \
+              --permission-mode acceptEdits \
+              --allowedTools "Read" "Grep" "Glob" "Write" "Edit" "Bash(gh *)" "Bash(git *)" \
+              --max-budget-usd 5
+          done
+
+      - name: Commit changes made within authority
+        run: |
+          rm -rf .trellis
+          git config user.name "trellis-runtime"
+          git config user.email "trellis-runtime@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || {
+            git commit -m "chore(dispatch): advance ready plans"
+            git push
+          }

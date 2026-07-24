@@ -14,6 +14,24 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Plan readiness & dispatch (spec v13 → v14, additive; decision 0029):** plans
+  gain a `ready` status between `draft` and `active` — the owner's deliberate
+  release of a specified plan for a taker. A new `plan dispatch` scheduled ritual
+  (`org/steward` as operator of record) and a
+  `template/.github/workflows/dispatch.yml` cron scan `plans/` for
+  `status: ready` and start one `/trellis:act {owner} advance …` per plan; the
+  holder branch of `act` routes an agent-owned plan to autonomous execution and a
+  human-owned plan to a handoff, and the taker flips `ready → active` on pickup
+  (an idempotent queue). Dispatch is `schedule` + `act` composed — no new plane
+  or contract service, the action-sibling of the `focus` ritual. Surfaces
+  updated: the plan schema (`spec/model.md`, `template/conventions.md`), the
+  runtime companion (`spec/runtime.md` — a "Plan dispatch" section + binding
+  note), `/trellis:plan` (offer `ready` or `active` on persist), the steward
+  mandate and agent, `rituals.md`, and the conventions runtime-binding section.
+  Kept honest by conventions-lint item 4 (now enumerates the legal plan statuses)
+  and plan-effectiveness item 18 (a `ready` plan the dispatcher never drains is a
+  stalled queue), with `ready` counting toward the coverage walk. Existing
+  `focus` eval fixtures unaffected.
 - `template/AGENTS.md`: a succinct, harness-neutral orientation card at the
   domain root — states that the repo is a Trellis domain, routes an agent to
   where each kind lives, and names the gates on every edit (owner/provenance,

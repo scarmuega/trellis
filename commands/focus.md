@@ -12,7 +12,7 @@ ritual (`org/focus` → the `trellis:focus` agent). Both walk the same canonical
 checklist: `${CLAUDE_PLUGIN_ROOT}/checks/plan-effectiveness.md`.
 
 Arguments: `$ARGUMENTS` — an optional scope, free text. Empty means the whole
-root: every `active` and `blocked` plan plus the full coverage walk.
+root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
 
 ## Procedure
 
@@ -34,11 +34,10 @@ root: every `active` and `blocked` plan plus the full coverage walk.
    `core-ranking` drive the coverage walk; the `induced-by:` edges on
    subdomains (effective automation policy); the `funded-by:` edges on
    strategies (economic lineage — who captures the value each produces);
-   plans with status `active` or
-   `blocked` — nothing evaluates a draft; `metrics/definitions.md` targets and
-   `metrics/actuals/` within the freshness window from `rituals.md` (spec
-   rule 5 — stale actuals become a finding, never evidence); git history for
-   status ages.
+   plans with status `ready`, `active`, or `blocked` — nothing evaluates a
+   draft; `metrics/definitions.md` targets and `metrics/actuals/` within the
+   freshness window from `rituals.md` (spec rule 5 — stale actuals become a
+   finding, never evidence); git history for status ages.
 
 4. **Work the checklist** item by item within scope, recording each finding
    with its full record — kind, item, refs, evidence, action, addressed-to
