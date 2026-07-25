@@ -163,7 +163,10 @@ choices:
 - Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
   supporting → commit, sampled review on the ritual cadence; core → PR with
   required owner review, enforced by branch protection plus a generated
-  CODEOWNERS view over `owner:` frontmatter.
+  CODEOWNERS view over `owner:` frontmatter. An agent holder that writes code
+  (the plugin's `trellis:coder`) always opens a PR — draft while the work is
+  unfinished — and never merges its own; which PRs may land without review is
+  this instance's wiring, per the class above.
 
 ## Secrets policy
 

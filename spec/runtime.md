@@ -132,6 +132,17 @@ no judgment it is implemented as this wiring, not a steward session (the steward
 mandate's own "extract the deterministic parts into tooling"). If daily latency
 proves too slow, a more responsive dispatcher is Stage-3 territory (below).
 
+**Implementation holders.** A plan whose `contexts:` land in code needs a holder
+that can write it; the plugin ships `trellis:coder` as the portable one (decision
+0031). A domain adopts it by creating an implementation role — a local mandate
+scoping the subdomains and contexts it may change, plus a `holder/ref.md` to the
+agent — and naming that role as the `owner:` of code-bearing plans; dispatch then
+routes to it through the agent branch of `act`, with no extra wiring. The coder
+gates on `checks/plan-readiness.md` and blocks rather than guesses, delivers code
+as a PR (draft while unfinished) and never merges it, and files residue as a
+`draft` plan. The class still decides who lands the change: `generic` and
+`supporting` PRs may be auto-merged by this binding, `core` waits for its owner.
+
 **Acting-role attribution.** `/trellis:act` records the acting role in
 `.trellis/acting-role` at the root (ephemeral, gitignored) and removes it on
 completion. The gate uses it to distinguish a mandated generator refreshing a

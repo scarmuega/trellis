@@ -69,7 +69,12 @@ the existing plans (name, status, type) and ask what to plan.
    a deliberate owner's act that commits execution, not just content: flip to
    **`ready`** to hand it to the runtime's plan dispatch (an agent-held owner
    advances it autonomously, a human-held owner receives it as a handoff), or to
-   **`active`** if the owner is driving it themselves now. The focus ritual
+   **`active`** if the owner is driving it themselves now. Before offering
+   `ready`, walk `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` — the same bar
+   the taker re-checks at pickup; a plan failing an item stays `draft` until it
+   is fixed, since a release that isn't specified comes straight back blocked
+   (items 9–11 apply only when the taker is an agent — say so if the plan is
+   ready for a human holder and not an agent one). The focus ritual
    evaluates `ready`, `active`, and `blocked` — never a draft. Do not commit;
    version-control mechanics follow the instance's runtime binding.
 

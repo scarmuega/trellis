@@ -56,6 +56,11 @@ jobs:
               --permission-mode acceptEdits \
               --allowedTools "Read" "Grep" "Glob" "Write" "Edit" "Bash(gh *)" "Bash(git *)" \
               --max-budget-usd 5
+            # A role that writes code (holder → trellis:coder) also needs the
+            # build and test commands of the contexts it implements — add them to
+            # --allowedTools, or it cannot verify its own work and every PR it
+            # opens stays draft. Budget likewise: implementation costs more than
+            # an artifact edit.
           done
 
       - name: Commit changes made within authority

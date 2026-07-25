@@ -163,6 +163,16 @@ to its owner. The scheduled twin is the `focus` ritual in `rituals.md`.
 (spend, publish, approve) and `escalate-to:` — then the holder. Agent holders get
 `system.md` + at least one eval. Humans and external vendors get `holder/ref.md`.
 
+**Adopt an implementation role** (a domain whose plans land in code): add a role
+per code-bearing bounded context, named for what it does in this domain — mandate
+scoping the subdomains and contexts it may change, then `holder/ref.md` pointing
+at the plugin's portable `trellis:coder`. Name that role as the `owner:` of
+code-bearing plans and dispatch routes to it with no further wiring. The coder
+gates on `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` before starting, blocks
+and escalates rather than guessing, delivers code as a PR (draft while
+unfinished, never self-merged), and files residue as a `draft` plan for the owner
+to release. Not a template role: it operates the business, not the model.
+
 **Record a decision**: next NNNN, context/decision/consequences/alternatives.
 Superseding = new file that names the one it replaces.
 

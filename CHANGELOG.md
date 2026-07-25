@@ -14,6 +14,47 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **`trellis:coder` (`agents/coder.md`) and decision 0031:** the implementation
+  holder — the producer the dispatch queue (0029) was missing. The steward
+  enforces form and focus challenges worth; neither writes authored content, so a
+  plan landing in code had no agent to take it. The coder binds to the root,
+  reads the mandate of the role it acts as (under dispatch, the plan's `owner:` —
+  never a role named `coder`), and does four things: **gates on readiness**
+  before any code, flipping an underspecified plan `ready → blocked` and
+  escalating the failed items as questions rather than guessing (blocking, not
+  leaving it `ready`, is what drains the queue instead of re-burning a session
+  every tick — the stall stays visible as item 9 dwell); **runs to completion or
+  to a blocker**, claiming with `ready → active`, implementing within the plan's
+  `contexts:` under the effective automation class, verifying against the
+  context's own tests and contracts, and escalating rather than working around
+  anything that needs a human; **delivers code as a PR** — draft while
+  unfinished, ready for review when the done criterion is met, never self-merged
+  (the class expressed in the binding decides who lands it, and `core` waits for
+  its owner); and **files residue as one `draft` plan**, never `ready`, since an
+  agent that queues its own next job closes a loop with no human in it. It never
+  retires a plan — a merged PR is the completion event and the verdict is the
+  owner's. Non-normative: spec stays v14, no schema change, no new status, plane,
+  or lint item — an agent is a holder form (Automation shapes).
+- `checks/plan-readiness.md`: the canonical definition of *ready* — items 1–8 for
+  any taker (objective vs task list, a done criterion the taker can evaluate
+  itself, resolving refs, determinable change mechanics, an owner whose mandate
+  covers it, authority named not discovered, no deferrals, decisions recorded)
+  and 9–11 for an agent taker with no human present (the underdetermination test,
+  a reachable and writable target, verification that exists). Shared on the 0011
+  precedent: `/trellis:plan`'s release offer checks it and the coder re-checks it
+  at pickup, so a plan never leaves `draft` on a bar the taker then fails it on.
+  A plan passing 1–8 and failing 9–11 is releasable to a human holder, not an
+  agent one.
+- Adoption is a conventions-skill procedure, not a template role: the steward and
+  focus ship in `template/org/` because they operate the *model*; an
+  implementation role operates the *business* — contingent (a bakery has no
+  codebase), context-specific in scope, and plural in a domain with several
+  code-bearing contexts. Surfaces updated: `spec/runtime.md` (an "Implementation
+  holders" note in the reference binding), the conventions skill ("Adopt an
+  implementation role"), `/trellis:plan` step 7, `template/conventions.md`'s
+  approval-gate bullet, and the README. No eval suite ships with it — `ref.md`
+  holders are lint-exempt (item 6) and a coder fixture needs a seeded codebase
+  plus a forge, which `evals/` does not model yet.
 - Execution health pattern (`spec/patterns.md`) and decision 0030: the one
   metric family portable across every domain, because it reads the machine
   rather than the business — census (plans per status, cut by type, owner, and
