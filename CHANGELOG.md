@@ -14,6 +14,29 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- Execution health pattern (`spec/patterns.md`) and decision 0030: the one
+  metric family portable across every domain, because it reads the machine
+  rather than the business — census (plans per status, cut by type, owner, and
+  subdomain class), flow (entries, releases, closures, and dwell per status from
+  git history), and mix (shares, WIP per owner, cycle time as WIP over closure
+  rate). It refines the two misleading readings: percent-complete is rejected —
+  no progress field exists and none should be added; dwell and movement (no
+  commit within a cadence) are the mechanical substitutes, and decomposition is
+  how a domain buys resolution. Closure rate measures clearance, not success,
+  since `retired` conflates shipped/abandoned/superseded — split it with an
+  anchored verdict section, not a schema change. Structural stance: these are
+  instruments, not goals — a generated plan board under `metrics/actuals/`
+  (steward-written, threshold-bearing, stale past the sweep cadence per rule 5),
+  never a `definitions.md` entry, because a definition earns a target, a target
+  earns a plan, and a plan about plan throughput is Goodhart with a mandate or
+  spec rule 8 firing. Its use is pre-computing the mechanical fraction of the
+  effectiveness walk (stalled ready queue, stalled blockers, plans past their
+  horizon, WIP on generic subdomains) into sorted queues; its stated limit is
+  that a perfect board says nothing about whether the plans are worth running.
+  Non-normative filing only — spec stays v14, no schema change, no new lint
+  item; the conventions skill gains a placement row so the numbers don't get
+  misfiled into `definitions.md`, and the steward needs no new authority (plan
+  boards were already in its generated-view list).
 - **Plan readiness & dispatch (spec v13 → v14, additive; decision 0029):** plans
   gain a `ready` status between `draft` and `active` — the owner's deliberate
   release of a specified plan for a taker. A new `plan dispatch` scheduled ritual

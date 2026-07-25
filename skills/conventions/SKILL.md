@@ -59,6 +59,7 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | What sustains a strategy — self-capture, a funder, a conversion thesis | `funded-by:` edges in `strategy/{strategy}.md` frontmatter; the narrative stays in `economics.md` |
 | Metric definition or target | `metrics/definitions.md` |
 | Metric values | `metrics/actuals/` (generated) or state-ref — never authored |
+| Plan counts, throughput, stall/dwell numbers | a generated plan board in `metrics/actuals/` — an instrument with thresholds, never a `definitions.md` metric with a target (Execution health pattern, decision 0030) |
 | Time-bounded goal, campaign, experiment, to-be journey | `plans/{plan}.md` with `type:` |
 | Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag — never a `plans/{plan}/` folder |
 | "Why we chose X" | `decisions/NNNN-{slug}.md` |

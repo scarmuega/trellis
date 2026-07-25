@@ -98,6 +98,70 @@ the whole. A family that starts wanting its own goals, metric definitions, and
 plans about its plans is spec rule 8 firing: that's a domain — give it a root,
 never a deeper tree (see Stratified alternation).
 
+### Execution health
+One metric family is portable across every domain, because it reads the machine
+rather than the business: whether the plans that exist are moving. It computes
+from `plans/` frontmatter and git history alone — no domain knowledge, no
+judgment — so one generator serves any root, and a domain has it on day one,
+before it knows which business metrics it will own. Three readings carry it. The
+*census* is the stock: plans per `status:` — draft, ready, active, blocked,
+retired — cut by `type:`, by `owner:`, and by the automation class of the
+subdomains each touches. The *flow* is what a census hides, and it comes from the
+history of `plans/`: entries authored, releases (`draft → ready|active`), and
+closures per cadence, plus *dwell* — how long each plan has held its current
+status, counted from the commit that set it. The *mix* is derived: shares of the
+census, work in progress per owner, and cycle time as WIP over closure rate — the
+honest form of "how long a plan takes here."
+
+Two tempting readings need refining before they mislead. Percent-complete is not
+one of the measures: no progress field exists, and none should be added —
+self-reported completion is unfalsifiable, and its failure mode is the plan that
+is ninety percent done for a quarter. The mechanical substitutes are dwell and
+*movement*: an active plan whose artifact and declared contexts saw no commit
+within a cadence is not progressing, whatever its body claims. A domain wanting
+finer resolution decomposes (see Plan decomposition) — a family of six siblings
+with four retired is a percentage, and one the filesystem computes. Fulfillment
+rate needs the same care: `retired` conflates shipped, abandoned, and superseded,
+so closure rate measures clearance, not success. Read it as clearance, or make
+the split mechanical with a body convention — an anchored verdict section
+recorded as the status flips (shipped | abandoned | superseded), which costs no
+schema change and is what a plan's owed verdict looks like once written down.
+
+These numbers are instrumentation, not goals, and the distinction is structural.
+`metrics/definitions.md` holds what the business is trying to move: each
+definition carries a target, an owner, and a plan that refs it. Execution health
+has none of the three and should acquire none — it belongs where generated
+readings land, a plan board under `metrics/actuals/` with `provenance:
+generated`, refreshed on the sweep cadence and stale past it like any other
+reading (spec rule 5), written by the steward, which already keeps generated
+views. No board directory is earned: a view over the plan set is a view (spec
+rule 7). The reason for the discipline is that a definition earns a target, a
+target earns a plan, and a plan whose purpose is to improve plan throughput is
+either Goodhart with a mandate — pieces split to raise the closure count, drafts
+withheld to keep the blocked share low, plans retired to clear the board — or
+spec rule 8 firing, since a unit needing plans about its plans is a domain.
+Thresholds are the right form for these numbers: a dwell figure that says *look*,
+never a number anyone is graded against.
+
+What the board buys is that the mechanical fraction of the effectiveness walk
+stops being re-derived every cadence: ready dwell past the dispatch cadence is
+the stalled queue, blocked dwell past a ritual cadence is the stalled blocker,
+active dwell past a plan's measurement horizon is the owed verdict, and WIP
+sitting on generic or low-ranked subdomains is the attention-allocation question
+in one cut — each arriving as a sorted queue, so the walk's judgment spends
+itself on plans the arithmetic already ranked. The mix reads against the domain's
+own shape: draft-heavy means the domain authors faster than it executes,
+ready-heavy indicts the dispatcher rather than the owners, blocked-heavy means
+the escalation channel is not clearing. Across roots the readings mean the same
+thing everywhere, so a portfolio can roll its ventures' boards up — by spec rule
+1, how the numbers get there is the consumer's tooling. The limit is the one no
+instrument sees past: execution health can be perfect while the business dies —
+every plan moving, closing, on cadence, against strategies that do not matter. It
+answers whether the machine runs, never whether it runs on anything worth
+running on; that question stays with the effectiveness walk's challenges and the
+maturity ladder. A board trending up while outcome metrics flatten is not a
+contradiction to reconcile — it is the value-dead finding arriving early.
+
 ### Vendors
 Split by what the vendor provides. A vendor providing *a system* (a card processor,
 a cloud, an API provider) is an external bounded context: an entry in
