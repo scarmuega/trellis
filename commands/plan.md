@@ -56,16 +56,19 @@ the existing plans (name, status, type) and ask what to plan.
    usual, but shaped like the artifact: a frontmatter block naming the exact
    `type:`, `subdomains:`, `contexts:`, `metrics:`, `decisions:`, `tags:`, and
    `owner:` values — every ref resolved to an existing file or anchor while
-   drafting, never after — then objective, approach, measurement, risks and
-   escalation triggers. Present via `ExitPlanMode`; feedback → revise and
+   drafting, never after — plus `complexity:` (optional) when the owner can scope
+   the reasoning depth the work demands: `mechanical` (the plan determines the
+   change), `standard` (local design judgment), or `deep` (novel or
+   cross-context judgment) — depth, never size. Then objective, approach,
+   measurement, risks and escalation triggers. Present via `ExitPlanMode`; feedback → revise and
    re-present.
 
 7. **Persist on approval**: first land any registry additions (plan type, new
    tags) in `conventions.md`; then write `plans/{slug}.md` — the slug per
    rule 10, a distinctive retrieval key naming the move, never a date or
    "q3-plan" — with frontmatter `provenance: authored`, the confirmed `owner:`,
-   `status: draft`, the registered `type:`, and the resolved ref lists, then
-   the body transposed from the draft. Offer to release it in the same breath —
+   `status: draft`, the registered `type:`, the `complexity:` tier if the draft
+   set one, and the resolved ref lists, then the body transposed from the draft. Offer to release it in the same breath —
    a deliberate owner's act that commits execution, not just content: flip to
    **`ready`** to hand it to the runtime's plan dispatch (an agent-held owner
    advances it autonomously, a human-held owner receives it as a handoff), or to
@@ -74,7 +77,10 @@ the existing plans (name, status, type) and ask what to plan.
    the taker re-checks at pickup; a plan failing an item stays `draft` until it
    is fixed, since a release that isn't specified comes straight back blocked
    (items 9–11 apply only when the taker is an agent — say so if the plan is
-   ready for a human holder and not an agent one). The focus ritual
+   ready for a human holder and not an agent one). When the taker is an agent and
+   the plan declares `complexity:`, confirm the tier against its definitions — an
+   under-tiered plan dispatches into a session too small for the work, and the
+   tier grades reasoning depth, never diff size. The focus ritual
    evaluates `ready`, `active`, and `blocked` — never a draft. Do not commit;
    version-control mechanics follow the instance's runtime binding.
 

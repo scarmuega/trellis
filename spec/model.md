@@ -1,4 +1,4 @@
-# Trellis — specification (v14)
+# Trellis — specification (v15)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -151,6 +151,17 @@ status: draft | ready | active | blocked | retired
     # flips ready → active on pickup, → blocked on an uncleared blocker. ready is
     # optional — a human driving a plan interactively goes straight to active.
 type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
+complexity: mechanical | standard | deep
+    # optional; the reasoning depth the work demands of its taker — never its
+    # size (a large migration can still be mechanical). mechanical = the plan
+    # fully determines the change; execution is transcription and verification is
+    # cheap and already exists. standard = local design judgment within the
+    # declared contexts; the plan fixes outcomes, not construction. deep = novel
+    # design or cross-context judgment with a wide blast radius — many defensible
+    # constructions deliver the same outcome, which is not a readiness failure:
+    # what the business gets stays fixed, only how it is built is open. The
+    # runtime sizes the taker's session from the tier (runtime companion); absent
+    # defers to the binding's default.
 subdomains: [problem/growth.md]
 contexts: [solution/marketing]      # the bounded context(s) this plan executes through
 metrics: [metrics/definitions.md#metric]

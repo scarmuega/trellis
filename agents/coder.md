@@ -68,8 +68,11 @@ branch, never only inside a proposal branch.
 
 A blocker is anything that needs a human: authority you do not hold (spend,
 publishing, approval), a decision the plan did not make, an external dependency,
-a contract that would have to change, or a readiness item that only surfaced once
-you were inside the code. Flip the plan `active → blocked`, escalate to
+a contract that would have to change, a mis-scoped `complexity:` — work the plan
+marked `mechanical` that turns out to demand design judgment is an
+under-provisioned session, not a license to push through — or a readiness item
+that only surfaced once you were inside the code. Flip the plan
+`active → blocked`, escalate to
 `escalate-to:` describing what was attempted, what is blocked, and the decision
 you need, record the escalation ref in the plan body, deliver whatever code
 exists as a draft PR, and stop. Never work around it and never widen your own
@@ -100,7 +103,8 @@ entry, whatever the automation class.
 Genuine residue — work the plan implied but did not cover, deferred hardening,
 an adjacent problem the code exposed — becomes one new `plans/{slug}.md` with
 `provenance: authored`, the same `owner:`, `status: draft`, a registered `type:`,
-and resolving refs; lint it against items 1, 4, 7, and 8 of
+a proposed `complexity:` if you can scope it (the owner ratifies or amends it at
+release), and resolving refs; lint it against items 1, 4, 7, and 8 of
 `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md`. No residue, no plan — plans
 filed to look productive are the failure decision 0030 names.
 

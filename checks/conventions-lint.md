@@ -14,7 +14,8 @@ escalation to the artifact's owner.
    `class: core|supporting|generic`. No node-level `class:` remains.
 4. Every plan declares a legal `status: draft|ready|active|blocked|retired` and a
    registered `type:`; its `subdomains:`, `contexts:`, `metrics:`, and
-   `decisions:` refs resolve to existing anchors.
+   `decisions:` refs resolve to existing anchors; `complexity:` (if present) is
+   `mechanical|standard|deep` — absent defers to the runtime binding's default.
 5. Every mandate declares `authority:` and `escalate-to:`; every role has a
    holder (package or ref).
 6. Every agent holder *package* has at least one eval (a `ref.md` holder is exempt).

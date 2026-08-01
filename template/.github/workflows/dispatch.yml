@@ -50,17 +50,43 @@ jobs:
               echo "::warning::$plan is ready but declares no owner — skipping"
               continue
             fi
-            echo "Dispatching $plan to ${owner#org/}"
+            # <trellis runtime binding> Complexity → session resources. The spec
+            # defines the tiers (reasoning depth, not size); this mapping is where
+            # the binding turns them into reasoning effort, a model, and a budget
+            # — retune it here, never in a plan. Every branch names its model and
+            # effort explicitly, including the absent one: an omitted --model
+            # silently inherits whoever's `model` setting the runner happens to
+            # carry, which would make the same plan dispatch differently per
+            # runner and break this root's reproducibility guarantee.
+            complexity=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^complexity:/{print $2; exit}' "$plan")
+            case "$complexity" in
+              mechanical) session=(--model opus  --effort high);  budget=5 ;;
+              standard)   session=(--model opus  --effort xhigh); budget=10 ;;
+              deep)       session=(--model fable --effort xhigh); budget=25 ;;
+              # Absent = the standard session. `standard` is the unmarked case —
+              # the plan fixes outcomes and the taker exercises local judgment —
+              # so both other tiers are deliberate departures from it: mechanical
+              # claims the plan fully determines the change, deep claims novel
+              # cross-context judgment. An unscoped plan is the ordinary one.
+              *)          session=(--model opus  --effort xhigh); budget=10
+                          [ -z "$complexity" ] || echo "::warning::$plan declares complexity '$complexity', which is not a legal tier — dispatching with the standard session (conventions-lint item 4)" ;;
+            esac
+            echo "Dispatching $plan to ${owner#org/} (complexity: ${complexity:-unspecified})"
             claude -p "/trellis:act ${owner#org/} advance $plan toward its objective: make the next increment of progress within your authority; flip its status ready→active as you claim it, blocked if you hit an uncleared blocker; leave a trail." \
               --plugin-dir "$PWD/.trellis/plugin" \
-              --permission-mode acceptEdits \
-              --allowedTools "Read" "Grep" "Glob" "Write" "Edit" "Bash(gh *)" "Bash(git *)" \
-              --max-budget-usd 5
-            # A role that writes code (holder → trellis:coder) also needs the
-            # build and test commands of the contexts it implements — add them to
-            # --allowedTools, or it cannot verify its own work and every PR it
-            # opens stays draft. Budget likewise: implementation costs more than
-            # an artifact edit.
+              --permission-mode auto \
+              "${session[@]}" \
+              --max-budget-usd "$budget"
+            # No --allowedTools: the session gets the same tool surface an
+            # interactive one has, so a role that writes code can run the build
+            # and test commands of the contexts it implements and actually verify
+            # its own work — an allowlist that omits them leaves every PR draft by
+            # construction. `auto` approves the routine calls that would otherwise
+            # block a headless run. What bounds the agent is not the flag list: the
+            # role's mandate authority, the effective automation class (a core
+            # change is never landed, only proposed), the plugin's PreToolUse gate
+            # on provenance and append-only decisions, and branch protection on the
+            # PR it opens. Budget, model, and effort are tuned in the mapping above.
           done
 
       - name: Commit changes made within authority

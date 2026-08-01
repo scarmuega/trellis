@@ -14,6 +14,41 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Plan complexity (spec v14 → v15, additive; decision 0032):** plans gain an
+  optional `complexity: mechanical | standard | deep` — a closed ordinal the spec
+  defines by observable task properties (the reasoning depth the work demands of
+  its taker, never its size: `mechanical` = the plan determines the change and
+  verification is cheap; `standard` = local design judgment inside the declared
+  contexts; `deep` = novel or cross-context judgment with a wide blast radius) —
+  so the runtime binding can size the dispatched session without a model name,
+  effort level, or price ever entering the domain root (0019, 0024). The
+  reference `dispatch.yml` maps each tier to `--effort`, `--model`, and
+  `--max-budget-usd`, naming both explicitly on every branch including the absent
+  one — an omitted `--model` inherits the runner's own configured default, which
+  would make the same plan dispatch differently per runner (against the
+  reproducibility boundary guarantee) and silently fund unscoped work at whatever
+  tier that operator happens to prefer. Absent means the stated default,
+  `standard` — the unmarked case, since both other tiers are deliberate
+  departures from it. Closed and spec-side rather than an open
+  registry like `type:`, because the portable coder must read one meaning in
+  every root — the same reason `status` is a spec enum. Meets the
+  drives-the-runtime bar 0029 set for `ready` and 0026/0030/0031 applied when
+  refusing `parent:`, `progress:`, and `pr:` — this field changes what dispatch
+  does, which those did not; depth-only by design, since volume is what plan
+  decomposition (0026) answers; readiness untouched, since `deep` is not
+  underdetermined — readiness item 9 tests business outcomes, `deep` grades
+  construction. Kept honest by two behavioral clauses: the coder escalates a
+  mis-scoped tier as a blocker instead of pushing through, and may propose a tier
+  on its residue draft for the owner to ratify at release. Surfaces updated: the
+  plan schema (`spec/model.md`, `template/conventions.md`), conventions-lint item
+  4, the runtime companion (`spec/runtime.md` — "Plan dispatch" and the reference
+  binding), `template/.github/workflows/dispatch.yml` (the tier → effort/model/
+  budget mapping), the conventions runtime-binding section, `/trellis:plan` steps
+  6–7, the coder, the conventions skill's implementation-role procedure, and the
+  version pins (`README.md`, `template/decisions/0000-adopt-trellis.md`, and the
+  eval skeleton re-pinned — all three instance pins were stale at v13, having
+  already missed v14). Eval fixtures themselves are untouched: the field is
+  optional and `evals/grade.mjs` reads no plan frontmatter.
 - **`trellis:coder` (`agents/coder.md`) and decision 0031:** the implementation
   holder — the producer the dispatch queue (0029) was missing. The steward
   enforces form and focus challenges worth; neither writes authored content, so a
@@ -132,6 +167,21 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- **Plan dispatch runs with the interactive tool surface (non-normative; no spec
+  change):** `template/.github/workflows/dispatch.yml` drops `--allowedTools` and
+  moves from `--permission-mode acceptEdits` to `auto`. The previous allowlist
+  (`Read Grep Glob Write Edit Bash(gh *) Bash(git *)`) gave a code-writing holder
+  no way to run the build and test commands of the contexts it implements, so it
+  could never satisfy the coder's own "verify before you call anything done" rule
+  and every PR it opened stayed draft by construction — the workflow's own comment
+  had conceded this since the coder landed (0031). What bounds the dispatched
+  agent is unchanged and was never the flag list: the role's mandate authority,
+  the effective automation class (a `core` change is proposed, never landed), the
+  plugin's `PreToolUse` gate on `provenance: generated` and committed decisions
+  (which runs ahead of any permission check, so it survives the mode change), and
+  branch protection on the PR. `ingress.yml` and `rituals.yml` keep the allowlist:
+  ingress acts on externally-filed issues, which `conventions.md` treats as
+  untrusted input, and the steward and focus roles never needed a build toolchain.
 - **Breaking (spec v12 → v13):** strategies declare economic lineage —
   `funded-by:` edges naming where the value each produces is captured
   (`self`, another strategy, or an external ref), with

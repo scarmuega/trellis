@@ -59,7 +59,11 @@ above) routes it: an agent-package owner advances the plan autonomously; a
 human-held owner receives it as a handoff, never impersonated. The taker flips
 the plan `ready → active` as it claims the work, so a plan leaves the queue the
 moment work starts — dispatch is **idempotent** across ticks without a separate
-lock, and a session that dies before claiming simply gets retried next tick.
+lock, and a session that dies before claiming simply gets retried next tick. A
+plan may also declare `complexity:` (schema in `spec/model.md`); the scan reads it
+to size the taker's session — how much reasoning, which model, how much budget —
+per the binding's mapping. Reading a declared field keeps the scan deterministic;
+absent means the binding's default.
 
 This adds no plane and no contract service: plan dispatch is `schedule` + `act`
 composed — the action-sibling of the `focus` ritual (focus *evaluates* plans and
@@ -129,8 +133,12 @@ on the ingress workflow's one-act-per-item shape for clean per-owner attribution
 The `plan dispatch` row in `rituals.md` records the standing behavior; the
 steward is its scheduled-plane operator of record, but because the scan carries
 no judgment it is implemented as this wiring, not a steward session (the steward
-mandate's own "extract the deterministic parts into tooling"). If daily latency
-proves too slow, a more responsive dispatcher is Stage-3 territory (below).
+mandate's own "extract the deterministic parts into tooling"). It also maps the
+plan's `complexity:` tier to the session's `--effort`, `--model`, and
+`--max-budget-usd`: the tier's meaning is the spec's, the effort levels, model
+names, and prices are this binding's — retuned in the workflow, never in a plan.
+If daily latency proves too slow, a more responsive dispatcher is Stage-3
+territory (below).
 
 **Implementation holders.** A plan whose `contexts:` land in code needs a holder
 that can write it; the plugin ships `trellis:coder` as the portable one (decision

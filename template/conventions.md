@@ -75,6 +75,13 @@ status: draft | ready | active | blocked | retired
     # →blocked on an uncleared blocker); retired = done or abandoned. ready is
     # optional — a human driving a plan goes straight to active.
 type: <see plan-type registry below>
+complexity: mechanical | standard | deep
+    # optional; the reasoning depth the work demands of its taker — never its
+    # size. mechanical = the plan fully determines the change, execution is
+    # transcription, verification is cheap; standard = local design judgment
+    # within the declared contexts; deep = novel or cross-context judgment, wide
+    # blast radius. Dispatch maps the tier to session resources (see Runtime
+    # binding); absent = the binding's default.
 subdomains: [problem/{subdomain}.md]
 contexts: [solution/{bc}]
 metrics: [metrics/definitions.md#{metric}]
@@ -154,7 +161,14 @@ choices:
 - Plan dispatch: `.github/workflows/dispatch.yml` — a daily cron scans `plans/`
   for `status: ready` and starts a `/trellis:act {owner} advance …` per plan (the
   `plan dispatch` row in `rituals.md`, operated by `org/steward`); keep its cron
-  in step. Each plan's work runs under its owner's authority.
+  in step. Each plan's work runs under its owner's authority. A plan's
+  `complexity:` tier maps to the dispatched session's reasoning effort, model,
+  and budget inside `dispatch.yml` — provider names, effort levels, and prices
+  live only in that workflow; retune the mapping there, never in a plan. The
+  dispatched session runs with the full tool surface and auto-approved routine
+  calls, so a role that writes code can build and test what it implements; what
+  bounds it is the role's mandate, the automation class, the provenance gate, and
+  the approval gate below — not a tool allowlist.
 - Ingress: label a forge issue `role:{name}` to invoke that role
   (`.github/workflows/ingress.yml`). Relay outside events (email, tickets,
   webhooks) into labeled issues so the domain keeps one ingress and one ledger.

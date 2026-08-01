@@ -171,7 +171,11 @@ code-bearing plans and dispatch routes to it with no further wiring. The coder
 gates on `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` before starting, blocks
 and escalates rather than guessing, delivers code as a PR (draft while
 unfinished, never self-merged), and files residue as a `draft` plan for the owner
-to release. Not a template role: it operates the business, not the model.
+to release. On code-bearing plans the owner may set `complexity:` at release so
+dispatch can size the session — the tier grades reasoning depth, never size, and
+absent defers to the binding's default; the mapping to concrete session resources
+lives in the instance's runtime binding. Not a template role: it operates the
+business, not the model.
 
 **Record a decision**: next NNNN, context/decision/consequences/alternatives.
 Superseding = new file that names the one it replaces.
