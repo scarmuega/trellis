@@ -86,3 +86,15 @@ escalation to the artifact's owner.
     none can — same spirit and severity as item 21's closed funding loop:
     escalate to every member's owner naming the cycle; an edge must drop or a
     plan must split (Plan decomposition pattern).
+23. Every `context-map.md` relation is backed by the language it claims.
+    `published-language`: this root publishes — the publishing context's
+    `contracts/` holds the artifact; nothing behind it is a promise with no
+    artifact, consumers conforming to conversation. `conformist` and `acl`:
+    the upstream owns the language — the relation carries a ref (spec rule 2)
+    to what is conformed to or translated, pinned per the instance's boundary
+    guarantees; conforming to something unnamed is the same failure inverted.
+    `customer-supplier` claims negotiation, not an artifact — its interface
+    may still be larval (Requirements pattern), so nothing fires; the seam
+    steering hatches it when work touches the seam. Escalate to the publishing
+    context's owner or the conforming context's owner as the case directs:
+    hatch the contract, pin the ref, or re-annotate the relation.

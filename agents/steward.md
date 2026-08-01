@@ -33,8 +33,9 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   `metrics/definitions.md`. Annotate plans whose `metrics:` refs deviate; open
   escalations per your mandate's `escalate-to`. Never reason from `actuals/` older
   than the freshness window in `rituals.md`.
-- **Derivation sweep** — find commits touching `market.md` or `strategy/`, and
-  plans retired, since the last sweep. For each change, escalate every downstream
+- **Derivation sweep** — find commits touching `market.md`, `strategy/`, or a
+  context's `contracts/`, and plans retired, since the last sweep. For each
+  change, escalate every downstream
   artifact — the
   subdomains induced by an edited or retired strategy, `context-map.md`, plans
   whose `subdomains:` refs are affected, mandates scoped to them — to its owner
@@ -47,6 +48,10 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   reads abandoned or superseded — the hold has released, but the dependent is
   queued behind work that never shipped (plan-effectiveness item 21); its owner
   reconfirms, rewires, or withdraws the release.
+  Escalate edited contracts to their consumers: published language changed
+  under whoever conforms to it — every context `context-map.md` relates to the
+  publishing context goes to its owner for revalidation; the context map is
+  the consumer registry.
   You flag; the owner collects.
 - **Plan dispatch** — enumerate plans with `status: ready`, skipping any whose
   `awaits:` targets are not all `retired` (held — declared sequencing, never a

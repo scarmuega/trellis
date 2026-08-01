@@ -148,6 +148,15 @@ reconsider it.
 row to `context-map.md`; put its interfaces in `contracts/`, procedures in
 `skills/`.
 
+**Hatch a contract**: when an interface stabilizes — an anchored requirement, a
+schema, an API that a second context, a party, or a system now consumes — move
+it from prose into the publishing context's `contracts/` as machine-checkable
+published language (tx3, IDL, OpenAPI, a brand guideline), leaving the prose as
+a pointer. Plans deliver against it (readiness item 11 counts its validation as
+verification), the coder lands stabilized interfaces there as part of its PR,
+and the steward's derivation sweep escalates contract edits to consumers per
+`context-map.md`.
+
 **Create a plan**: `/trellis:plan {topic}` where the binding offers it — the
 harness's plan mode gathers research and approval, then the artifact persists to
 `plans/{slug}.md` with a registered `type:`, resolving refs, and `status: draft`.
@@ -199,6 +208,7 @@ For audits, run the canonical checklist at
 edges, strategy validity, orphan detection, funding-edge validity, economic
 orphans, capture points, core-ranking, technology-free founding map,
 incomplete pivots, plan refs resolve, plan sequencing edges resolve and stay
-acyclic, mandates have authority, append-only
+acyclic, context-map relations back their language claims, mandates have
+authority, append-only
 decisions, registered tags, no secrets, no grouping directories, actuals
 freshness).

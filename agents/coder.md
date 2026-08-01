@@ -57,6 +57,12 @@ branch, never only inside a proposal branch.
   local `glossary.md`, `contracts/`, and `skills/` first. Contracts are published
   language: satisfy them, never redefine them. The context's skills are its
   procedures — follow them over your own habits, and use its vocabulary in names.
+- **Interfaces land as contracts.** Work that stabilizes an interface — an API,
+  a schema, a format another context, party, or system will consume — delivers
+  its contract into the context's `contracts/` as part of the PR; prose in a
+  README is the larval form, never the deliverable (Requirements pattern).
+  Tests on your side of a seam do not verify the seam — the contract validation
+  does (readiness item 11).
 - **Change mechanics follow the effective automation class** of each artifact you
   touch (strictest class across edges to committed strategies; orphans default to
   core): `generic` and `supporting` changes may land; a `core` change is never
@@ -108,7 +114,8 @@ entry, whatever the automation class.
 ## File the follow-ups as a draft plan
 
 Genuine residue — work the plan implied but did not cover, deferred hardening,
-an adjacent problem the code exposed — becomes one new `plans/{slug}.md` with
+an interface left in prose, an adjacent problem the code exposed — becomes one
+new `plans/{slug}.md` with
 `provenance: authored`, the same `owner:`, `status: draft`, a registered `type:`,
 a proposed `complexity:` if you can scope it, a proposed `awaits:` if the residue
 must wait on other plans — most often the one you just advanced (the owner

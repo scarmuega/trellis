@@ -51,7 +51,9 @@ the existing plans (name, status, type) and ask what to plan.
    their `induced-by:` edges (effective automation policy), the committed
    strategies behind them and the `funded-by:` edges naming what sustains
    those strategies, `solution/context-map.md` and the bounded contexts
-   the plan executes through, the `metrics/definitions.md` anchors that will
+   the plan executes through — including their `contracts/`, the published
+   language the plan must satisfy or would change — the `metrics/definitions.md`
+   anchors that will
    measure it, and prior `plans/` and `decisions/` that overlap. Use terms from
    `glossary.md`; surface conflicts with active plans.
 
@@ -65,7 +67,11 @@ the existing plans (name, status, type) and ask what to plan.
    cross-context judgment) — depth, never size — and `awaits:` (optional) when
    this plan must queue behind other plans finishing, each target an existing
    `plans/*.md` resolved like every other ref. Then objective, approach,
-   measurement, risks and escalation triggers. Present via `ExitPlanMode`; feedback → revise and
+   measurement, risks and escalation triggers. A deliverable another context,
+   party, or system will consume names its contract in the body — an existing
+   one the plan satisfies, or one it hatches into the publishing context's
+   `contracts/` (readiness item 11 counts that validation as the verification).
+   Present via `ExitPlanMode`; feedback → revise and
    re-present.
 
 7. **Persist on approval**: first land any registry additions (plan type, new

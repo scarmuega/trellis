@@ -14,6 +14,39 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Contract steering (non-normative; decision 0035):** contracts were the only
+  load-bearing kind whose loop was never closed — one consumption instruction
+  (the coder reads and satisfies them) and zero production triggers anywhere,
+  which the dogfooding evidence surfaced as ~50 plans completed with no
+  contract involved. The produce side is now wired at every point where work
+  touches a seam: readiness item 11 gains the interface clause (an
+  interface-shaped done criterion is verified by its contract, existing or
+  hatched by the plan — tests on one side of a seam do not verify the seam),
+  checked twice as ever at release and pickup; the coder gains an "interfaces
+  land as contracts" implement rule and "an interface left in prose" as
+  residue; `/trellis:plan` reads the touched contexts' `contracts/` at
+  research and asks the interface question at drafting. Two standing pulls
+  keep it honest: lint item 23, checking each `context-map.md` relation's
+  claim against its artifact (`published-language`: the publishing context's
+  `contracts/` holds it; `conformist`/`acl`: a pinned ref names the upstream
+  language conformed to or translated — conforming to something unnamed is the
+  same failure inverted; `customer-supplier` claims negotiation, not an
+  artifact — its interface may run larval until the seam steering hatches it),
+  and the derivation sweep now watches `contracts/` edits,
+  escalating every context the map relates to the publisher — the context map
+  is the consumer registry, and this is the payoff that makes producing a
+  contract worth it. Trigger discipline throughout: every clause fires on
+  seams, never on plans generally — blanket contract ceremony is the
+  accumulation problem the Requirements pattern warns against. Deferred by
+  pull: an effectiveness item for seam-crossing plans without a contract, and
+  a `contracts:` frontmatter ref list (no consumer branches on it). Surfaces
+  updated: `checks/plan-readiness.md` item 11, `agents/coder.md`,
+  `commands/plan.md` steps 5–6, `checks/conventions-lint.md` item 23,
+  `agents/steward.md` (derivation sweep), `template/rituals.md`, and the
+  conventions skill (lint summary + a "Hatch a contract" procedure). No
+  schema, no Rule, spec stays v16; eval fixtures untouched —
+  `published-language` appears in no fixture and readiness items are not
+  graded.
 - **Plan sequencing (spec v15 → v16, additive; decision 0033):** plans gain an
   optional `awaits: [plans/{other}.md]` — declared sequencing between plans. The
   dispatch scan holds a `ready` plan whose targets are not all `retired`:

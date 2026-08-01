@@ -57,7 +57,11 @@ releasable to a human holder and not to an agent one; say which when you report.
 11. **Verification exists.** The taker can check its own work: a test suite, a
     `contracts/` artifact, an eval, or a manual check the plan states. Without
     one, "done" is self-reported, which is the failure mode decision 0030
-    rejected for progress.
+    rejected for progress. An interface-shaped done criterion — output another
+    context, party, or system will consume — is verified by its contract: an
+    existing one in the publishing context's `contracts/`, or one this plan
+    hatches. Tests on one side of a seam do not verify the seam; an interface
+    deliverable with no contract is verification that does not exist.
 
 ## What a failure means
 
