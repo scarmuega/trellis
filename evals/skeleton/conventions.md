@@ -5,7 +5,7 @@ tags: []
 ---
 # Conventions
 
-Instance copy of the Trellis conventions, spec v15. Provenance classes:
+Instance copy of the Trellis conventions, spec v16. Provenance classes:
 `authored` (owner-edited), `generated` (never hand-edited), `state-ref`
 (pointer to a system of record).
 

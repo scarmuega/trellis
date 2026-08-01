@@ -1,4 +1,4 @@
-# Trellis — specification (v15)
+# Trellis — specification (v16)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -147,7 +147,8 @@ status: draft | ready | active | blocked | retired
     # the plan lifecycle. draft = being authored, nothing reviews it. ready = the
     # owner has released a specified plan for a taker; the runtime dispatches it as
     # act(owner) (runtime companion) — an agent-held owner advances it autonomously,
-    # a human-held owner receives it as a handoff. active = in flight; the taker
+    # a human-held owner receives it as a handoff — held, not dispatched, while
+    # any awaits: target is unretired. active = in flight; the taker
     # flips ready → active on pickup, → blocked on an uncleared blocker. ready is
     # optional — a human driving a plan interactively goes straight to active.
 type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
@@ -162,6 +163,19 @@ complexity: mechanical | standard | deep
     # what the business gets stays fixed, only how it is built is open. The
     # runtime sizes the taker's session from the tier (runtime companion); absent
     # defers to the binding's default.
+awaits: [plans/{other}.md]
+    # optional; declared sequencing — every target must finish before this plan
+    # should be advanced. The dispatch scan (runtime companion) holds a ready
+    # plan until every target's status is retired: skipped, still ready, no
+    # status change, retried next tick — the hold clears itself when the last
+    # target retires. A hold is never a flavor of blocked: blocked records a
+    # defect a human must clear and leaves the queue; a hold records an order
+    # the owner declared and stays in it. Retirement is the satisfaction signal
+    # because it is the only owner-asserted end of a plan's lifecycle — a merged
+    # PR is the taker's event, the verdict is the owner's — so releasing a
+    # dependent is a governance act, never an inference. A target that does not
+    # resolve holds the plan (fail closed; the lint owns the repair), and the
+    # awaits graph must be acyclic — a cycle holds every member forever.
 subdomains: [problem/growth.md]
 contexts: [solution/marketing]      # the bounded context(s) this plan executes through
 metrics: [metrics/definitions.md#metric]

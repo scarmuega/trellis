@@ -65,6 +65,15 @@ to size the taker's session — how much reasoning, which model, how much budget
 per the binding's mapping. Reading a declared field keeps the scan deterministic;
 absent means the binding's default.
 
+A plan may declare `awaits:` (schema in `spec/model.md`): the scan **holds** a
+`ready` plan whose targets are not all `retired` — skipped, still `ready`, no
+status change, retried every tick until the last target retires. The hold is not
+`blocked`: no defect, no escalation, and it clears itself. Retirement being the
+owner's verdict, releasing a dependent stays an owner's act — never an inference
+from a merged PR or a session's report. Both reads are declared fields, so the
+scan stays deterministic; a target that does not resolve holds the plan and
+warns — the lint owns the repair.
+
 This adds no plane and no contract service: plan dispatch is `schedule` + `act`
 composed — the action-sibling of the `focus` ritual (focus *evaluates* plans and
 escalates; dispatch *advances* them). Change mechanics still bind: a change to a
@@ -137,6 +146,9 @@ mandate's own "extract the deterministic parts into tooling"). It also maps the
 plan's `complexity:` tier to the session's `--effort`, `--model`, and
 `--max-budget-usd`: the tier's meaning is the spec's, the effort levels, model
 names, and prices are this binding's — retuned in the workflow, never in a plan.
+It also reads `awaits:` (flow or block list) with the same frontmatter-only
+extraction and holds any `ready` plan whose targets are not all `retired` — one
+`status:` lookup per target, still no judgment.
 If daily latency proves too slow, a more responsive dispatcher is Stage-3
 territory (below).
 

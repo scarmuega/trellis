@@ -36,7 +36,8 @@ brand.md          the promise to customers
 economics.md      pricing, revenue model, unit economics — narrates the
                   funded-by skeleton in strategy/
 metrics/          definitions.md (authored) + actuals/ (generated or state-refs)
-plans/            time-bounded execution: status + type + refs
+plans/            time-bounded execution: status + type + refs; awaits: edges
+                  sequence plans (dispatch holds until targets retire)
 decisions/        ADRs, append-only, NNNN-{slug}.md
 solution/         context-map.md + {bounded context}/ (README, glossary,
                   contracts/, skills/, deployment units)
@@ -61,7 +62,8 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Metric values | `metrics/actuals/` (generated) or state-ref — never authored |
 | Plan counts, throughput, stall/dwell numbers | a generated plan board in `metrics/actuals/` — an instrument with thresholds, never a `definitions.md` metric with a target (Execution health pattern, decision 0030) |
 | Time-bounded goal, campaign, experiment, to-be journey | `plans/{plan}.md` with `type:` |
-| Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag — never a `plans/{plan}/` folder |
+| Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag + `awaits:` edges between pieces where order matters — never a `plans/{plan}/` folder |
+| Ordering between plans — advance B only after A finishes | `awaits:` in B's frontmatter — dispatch holds B (still `ready`) until A retires; never umbrella prose alone, never `status: blocked` |
 | "Why we chose X" | `decisions/NNNN-{slug}.md` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
@@ -171,10 +173,13 @@ code-bearing plans and dispatch routes to it with no further wiring. The coder
 gates on `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` before starting, blocks
 and escalates rather than guessing, delivers code as a PR (draft while
 unfinished, never self-merged), and files residue as a `draft` plan for the owner
-to release. On code-bearing plans the owner may set `complexity:` at release so
+to release — proposing `complexity:` and `awaits:` on it where it can scope them,
+most often awaiting the plan it just advanced. On code-bearing plans the owner
+may set `complexity:` at release so
 dispatch can size the session — the tier grades reasoning depth, never size, and
 absent defers to the binding's default; the mapping to concrete session resources
-lives in the instance's runtime binding. Not a template role: it operates the
+lives in the instance's runtime binding. Sequencing works the same way: `awaits:`
+on a released plan holds its dispatch until every named plan retires. Not a template role: it operates the
 business, not the model.
 
 **Record a decision**: next NNNN, context/decision/consequences/alternatives.
@@ -193,6 +198,7 @@ For audits, run the canonical checklist at
 `trellis:steward` agent enforces (frontmatter validity, subdomain derivation
 edges, strategy validity, orphan detection, funding-edge validity, economic
 orphans, capture points, core-ranking, technology-free founding map,
-incomplete pivots, plan refs resolve, mandates have authority, append-only
+incomplete pivots, plan refs resolve, plan sequencing edges resolve and stay
+acyclic, mandates have authority, append-only
 decisions, registered tags, no secrets, no grouping directories, actuals
 freshness).

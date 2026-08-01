@@ -33,8 +33,9 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   `metrics/definitions.md`. Annotate plans whose `metrics:` refs deviate; open
   escalations per your mandate's `escalate-to`. Never reason from `actuals/` older
   than the freshness window in `rituals.md`.
-- **Derivation sweep** — find commits touching `market.md` or `strategy/`
-  since the last sweep. For each change, escalate every downstream artifact — the
+- **Derivation sweep** — find commits touching `market.md` or `strategy/`, and
+  plans retired, since the last sweep. For each change, escalate every downstream
+  artifact — the
   subdomains induced by an edited or retired strategy, `context-map.md`, plans
   whose `subdomains:` refs are affected, mandates scoped to them — to its owner
   for revalidation. Flag subdomains left without an edge to a committed strategy
@@ -42,8 +43,14 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
   automation policy until resolved). Flag committed strategies whose sustaining
   `funded-by:` edges all point at an edited, demoted, or discarded strategy —
   economic orphans, to be re-funded, converted, or reconsidered by their owner.
+  Flag plans whose `awaits:` edges point at a newly retired plan whose verdict
+  reads abandoned or superseded — the hold has released, but the dependent is
+  queued behind work that never shipped (plan-effectiveness item 21); its owner
+  reconfirms, rewires, or withdraws the release.
   You flag; the owner collects.
-- **Plan dispatch** — enumerate plans with `status: ready` and, for each, start a
+- **Plan dispatch** — enumerate plans with `status: ready`, skipping any whose
+  `awaits:` targets are not all `retired` (held — declared sequencing, never a
+  blocker: the plan stays `ready` and clears itself), and, for each, start a
   *separate* `/trellis:act {owner} advance {plan}` invocation so the work runs
   under that owner's authority (an agent-held owner advances it, a human-held
   owner receives a handoff; the owner's act flips ready→active on pickup). You

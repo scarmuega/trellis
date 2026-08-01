@@ -89,7 +89,12 @@ a sibling `plans/{parent}-{piece}.md` with full plan frontmatter — its own
 `status:`, its own refs — activated, blocked, and retired independently; the
 umbrella is a plan like any other (`type: initiative`, or a type the instance
 registers) whose body carries the decomposition as an anchored section linking
-each piece and the seams between them. Family membership is a registered tag on
+each piece and the seams between them. A seam that is an ordering is declared,
+not narrated: the later piece carries an `awaits:` edge naming the earlier
+(spec schema), so dispatch holds it — still `ready`, undispatched — until its
+sibling retires; the family releases at once and drains in dependency order,
+the sequence machine-visible to the scan instead of living in prose the scan
+cannot read. Family membership is a registered tag on
 every member; any roll-up is a generated view over the tag, never an authored
 hierarchy. Prefix naming keeps the family adjacent in a flat listing (spec
 rule 10). The effectiveness walk needs no special case: each piece answers for
@@ -161,6 +166,28 @@ answers whether the machine runs, never whether it runs on anything worth
 running on; that question stays with the effectiveness walk's challenges and the
 maturity ladder. A board trending up while outcome metrics flatten is not a
 contradiction to reconcile — it is the value-dead finding arriving early.
+
+### Loop observability
+Every standing loop in a domain — a ritual on its cadence, the dispatch tick,
+an agent session retried until it lands — keeps its exit and progress
+conditions in artifacts and git, never in an agent's memory or its self-report.
+Agents are stateless (rationale premise 9): whatever a loop needs to stop,
+skip, or resume must be reconstructible from the tree; and execution must carry
+status (premise 5): a loop whose progress lives in a transcript has none. The
+shape is already everywhere the runtime works. Dispatch is idempotent because
+the claim is an artifact edit — the taker's `ready → active` flip is what
+removes a plan from the scan, so a dead session changes nothing and the next
+tick retries. A hold is a status read — `awaits:` targets unretired — and its
+release is another. The readiness gate ends a doomed loop by flipping
+`ready → blocked`: a declared field, not a memory that this plan was tried.
+Progress is dwell and movement (Execution health) — commits touching the plan
+and its declared contexts, never a percentage anyone typed. The failure mode is
+the loop whose termination lives in a report: a session that claimed a plan in
+its transcript but not on the default branch is dispatched again forever
+(plan-effectiveness item 19), and a ritual that ran without a trail did not
+run. The test for any standing loop: erase every participant's memory between
+ticks — does it still stop, hold, and resume correctly from the tree alone? If
+not, its state is filed in the wrong place.
 
 ### Vendors
 Split by what the vendor provides. A vendor providing *a system* (a card processor,

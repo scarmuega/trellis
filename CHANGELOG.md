@@ -14,6 +14,59 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Plan sequencing (spec v15 → v16, additive; decision 0033):** plans gain an
+  optional `awaits: [plans/{other}.md]` — declared sequencing between plans. The
+  dispatch scan holds a `ready` plan whose targets are not all `retired`:
+  skipped, still `ready`, no status change, retried every tick, self-clearing
+  when the last target retires. A hold is never a flavor of `blocked` (defect,
+  escalation, human clears it, leaves the queue) — it is an order the owner
+  declared, and the plan stays in the queue so no re-release is needed when the
+  wait ends. Satisfied means every target `retired`, the only owner-asserted end
+  of a plan's lifecycle (there is no `done` — 0030; under dispatch a finished
+  plan sits `active` because the verdict is the owner's — 0031), so releasing a
+  dependent is an owner-gated governance act, never an inference from forge
+  state; the two honesty gaps are instrumented, not accepted — verdict latency
+  starving a dependent is plan-effectiveness item 20, a target retired without
+  shipping is item 21 (the mirror of rule 11's re-parenting). Named `awaits`,
+  not `blocked-by`, so one grep never returns two mechanisms with opposite
+  clearing semantics (rule 10). Clears the bar 0026 set when refusing `parent:`
+  — dispatch branches on the edge — and gives decomposed families (0026) their
+  missing piece: release the whole family at once, drain in dependency order,
+  ordering machine-visible instead of umbrella prose. Fail closed on a dangling
+  target (warn and hold; lint owns the repair), acyclic by lint (new item 22 —
+  a deadlock by construction, in the closed-funding-loop idiom). The coder
+  may propose `awaits:` on its residue draft — most often awaiting the plan just
+  advanced — and never edits a released plan's edges (new hard boundary).
+  Surfaces updated: the plan schema (`spec/model.md`, `template/conventions.md`),
+  conventions-lint item 4 + new item 22, plan-effectiveness (walk-order
+  preamble, item 18 carve-out, new items 20–21, v16 gate), the runtime
+  companion (`spec/runtime.md` — "Plan dispatch" and the reference binding),
+  `template/.github/workflows/dispatch.yml` (list-valued frontmatter read + one
+  `status:` lookup per target, still zero judgment), `template/rituals.md`'s
+  dispatch row, the conventions runtime-binding section, `/trellis:plan` steps
+  2/6/7, the coder (pre-gate hold check, residue proposal, boundary), both
+  focus surfaces' evidence base, the steward (dispatch skip + derivation-sweep
+  flag on plans retired), the conventions skill (map, placement rows, lint
+  keywords, implementation-role procedure), the Plan decomposition pattern, and
+  the version pins (`README.md`, `template/decisions/0000-adopt-trellis.md`,
+  and the eval skeleton — all re-pinned v15 → v16). Eval fixtures themselves
+  are untouched: the field is optional, no fixture declares it, and
+  `evals/grade.mjs` reads no plan frontmatter.
+- **Loop observability (non-normative; decision 0034):** the principle four
+  decisions kept re-deriving — every standing loop's exit and progress
+  conditions live in artifacts and git, never in agent memory or self-report —
+  stated once as a `spec/patterns.md` entry (beside Execution health; grounded
+  in rationale premises 9 and 5; ending on the test: erase every participant's
+  memory between ticks — does the loop still stop, hold, and resume from the
+  tree alone?), plus its uncovered failure mode instrumented as
+  plan-effectiveness item 19: a `ready` plan dispatch has acted on across more
+  than one cadence with no `ready → active` (or `→ blocked`) flip on the
+  default branch — takers dying before the claim, budget burning every tick
+  while the queue believes the plan untaken; a flip stranded on a proposal
+  branch is the same finding. Complements item 18 (the act that never fires)
+  with the act that fires and dies unclaimed, and is deliberately not gated to
+  v16 — the failure exists on any dispatching root from v14 on. No schema, no
+  Rule, no spec content beyond 0033's bump.
 - **Plan complexity (spec v14 → v15, additive; decision 0032):** plans gain an
   optional `complexity: mechanical | standard | deep` — a closed ordinal the spec
   defines by observable task properties (the reasoning depth the work demands of

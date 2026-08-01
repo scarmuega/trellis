@@ -4,8 +4,9 @@
 # work runs as a separate `/trellis:act <owner>` under that owner's authority —
 # an agent-held owner advances it autonomously, a human-held owner receives it as
 # a handoff. The taker flips `ready → active` as it claims the work, so a plan
-# leaves the queue the moment work starts (idempotent across runs). Keep the cron
-# in step with the `plan dispatch` row in rituals.md. Requires ANTHROPIC_API_KEY
+# leaves the queue the moment work starts (idempotent across runs). A plan whose
+# `awaits:` targets are not all retired is held — skipped, still ready, retried
+# next tick. Keep the cron in step with the `plan dispatch` row in rituals.md. Requires ANTHROPIC_API_KEY
 # in the forge's secrets. See spec companion: runtime.md ("Plan dispatch").
 name: trellis plan dispatch
 
@@ -45,6 +46,33 @@ jobs:
             # read status and owner from the frontmatter block only (before the 2nd ---)
             status=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^status:/{print $2; exit}' "$plan")
             [ "$status" = "ready" ] || continue
+            # <trellis runtime binding> Declared sequencing. A ready plan that
+            # awaits other plans dispatches only once every target is retired —
+            # retirement is the owner's verdict, so unlocking a dependent is an
+            # owner act, never an inference from a PR or a report. The hold is
+            # not `blocked`: the plan stays ready and self-clears next tick.
+            # Both reads are declared fields (the scan stays deterministic); a
+            # target that does not resolve holds the plan, fail closed —
+            # conventions-lint item 4 owns the repair.
+            awaits=$(awk '
+              /^---[[:space:]]*$/ { n++; next } n>=2 { exit }
+              /^awaits:[[:space:]]*\[/ { s=$0; sub(/^awaits:[[:space:]]*\[/, "", s); sub(/\].*/, "", s); gsub(/,/, " ", s); print s; exit }
+              /^awaits:[[:space:]]*$/ { in_list=1; next }
+              in_list && /^[[:space:]]+-[[:space:]]*/ { sub(/^[[:space:]]+-[[:space:]]*/, ""); print; next }
+              in_list { exit }' "$plan")
+            held=""
+            for target in $awaits; do
+              if [ ! -f "$target" ]; then
+                echo "::warning::$plan awaits '$target', which does not resolve — holding it in the queue (conventions-lint item 4)"
+                held=1; break
+              fi
+              target_status=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^status:/{print $2; exit}' "$target")
+              if [ "$target_status" != "retired" ]; then
+                echo "Holding $plan — awaits $target (status: ${target_status:-none}); it stays ready and re-enters the scan next tick"
+                held=1; break
+              fi
+            done
+            [ -n "$held" ] && continue
             owner=$(awk '/^---[[:space:]]*$/{n++; next} n>=2{exit} /^owner:/{print $2; exit}' "$plan")
             if [ -z "$owner" ]; then
               echo "::warning::$plan is ready but declares no owner — skipping"

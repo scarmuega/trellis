@@ -27,7 +27,10 @@ the existing plans (name, status, type) and ask what to plan.
    A topic that is really a program of independently workable moves → offer
    the Plan decomposition pattern (`${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`):
    an umbrella plan plus sibling sub-plans (`plans/{parent}-{piece}.md`), each
-   drafted through this command — never a `plans/{plan}/` folder.
+   drafted through this command — never a `plans/{plan}/` folder. Where one
+   piece must finish before another, declare it: the later piece carries
+   `awaits:` naming the earlier, so dispatch holds it until the target retires
+   and the whole family can release at once and drain in order.
    A topic advancing a strategy biases the type to its stage (Strategy
    maturity pattern, `${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`): `defined`
    wants an `experiment` with an explicit decision criterion; `validated`, an
@@ -59,7 +62,9 @@ the existing plans (name, status, type) and ask what to plan.
    drafting, never after — plus `complexity:` (optional) when the owner can scope
    the reasoning depth the work demands: `mechanical` (the plan determines the
    change), `standard` (local design judgment), or `deep` (novel or
-   cross-context judgment) — depth, never size. Then objective, approach,
+   cross-context judgment) — depth, never size — and `awaits:` (optional) when
+   this plan must queue behind other plans finishing, each target an existing
+   `plans/*.md` resolved like every other ref. Then objective, approach,
    measurement, risks and escalation triggers. Present via `ExitPlanMode`; feedback → revise and
    re-present.
 
@@ -80,7 +85,11 @@ the existing plans (name, status, type) and ask what to plan.
    ready for a human holder and not an agent one). When the taker is an agent and
    the plan declares `complexity:`, confirm the tier against its definitions — an
    under-tiered plan dispatches into a session too small for the work, and the
-   tier grades reasoning depth, never diff size. The focus ritual
+   tier grades reasoning depth, never diff size. A plan carrying `awaits:`
+   releases like any other but dispatches only after every target retires — say
+   so when offering `ready`: the owner is committing it to the queue, not to the
+   next tick, and retiring each target (recording its verdict) is what will
+   release it. The focus ritual
    evaluates `ready`, `active`, and `blocked` — never a draft. Do not commit;
    version-control mechanics follow the instance's runtime binding.
 

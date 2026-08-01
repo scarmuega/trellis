@@ -82,6 +82,12 @@ complexity: mechanical | standard | deep
     # within the declared contexts; deep = novel or cross-context judgment, wide
     # blast radius. Dispatch maps the tier to session resources (see Runtime
     # binding); absent = the binding's default.
+awaits: [plans/{other}.md]
+    # optional; declared sequencing — dispatch holds this plan (skipped, still
+    # ready, no status change) until every target's status is retired, then the
+    # hold clears itself. Never a flavor of blocked: blocked records a defect a
+    # human must clear; a hold records an order the owner declared. Retiring
+    # the target — the owner's verdict — is what releases dependents.
 subdomains: [problem/{subdomain}.md]
 contexts: [solution/{bc}]
 metrics: [metrics/definitions.md#{metric}]
@@ -161,7 +167,10 @@ choices:
 - Plan dispatch: `.github/workflows/dispatch.yml` — a daily cron scans `plans/`
   for `status: ready` and starts a `/trellis:act {owner} advance …` per plan (the
   `plan dispatch` row in `rituals.md`, operated by `org/steward`); keep its cron
-  in step. Each plan's work runs under its owner's authority. A plan's
+  in step. Each plan's work runs under its owner's authority. A plan whose
+  `awaits:` targets are not all `retired` is held — skipped, still `ready`,
+  retried next tick; the hold and its release are both frontmatter reads inside
+  `dispatch.yml`. A plan's
   `complexity:` tier maps to the dispatched session's reasoning effort, model,
   and budget inside `dispatch.yml` — provider names, effort levels, and prices
   live only in that workflow; retune the mapping there, never in a plan. The

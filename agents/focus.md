@@ -32,7 +32,9 @@ stage sets the expectation (Strategy maturity pattern), the committed band
 and its `core-ranking` driving the coverage walk, the
 `induced-by:` edges on subdomains, the `funded-by:` edges on strategies —
 the economic lineage that weighs a producer's plans against its capture's
-health, plans with status `ready`, `active`, or `blocked`,
+health, the `awaits:` edges on plans — the declared sequencing that holds a
+`ready` plan in the dispatch queue until its targets retire, plans with
+status `ready`, `active`, or `blocked`,
 metric definitions and targets, and actuals within the freshness window
 declared in `rituals.md` — never older (spec rule 5; stale actuals are a
 finding, not evidence). Git history supplies status ages.

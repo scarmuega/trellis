@@ -16,6 +16,8 @@ escalation to the artifact's owner.
    registered `type:`; its `subdomains:`, `contexts:`, `metrics:`, and
    `decisions:` refs resolve to existing anchors; `complexity:` (if present) is
    `mechanical|standard|deep` — absent defers to the runtime binding's default.
+   Every `awaits:` entry (if present) resolves to an existing `plans/{plan}.md`
+   in this root — never the plan itself, never a path outside `plans/`.
 5. Every mandate declares `authority:` and `escalate-to:`; every role has a
    holder (package or ref).
 6. Every agent holder *package* has at least one eval (a `ref.md` holder is exempt).
@@ -79,3 +81,8 @@ escalation to the artifact's owner.
     outside the root (an external ref). A band whose strategies are funded
     only by each other is a closed loop — value circulates, nothing enters.
     Escalate as with item 17: the root is operating nothing that pays for it.
+22. The `awaits:` graph over `plans/` is acyclic. A cycle is a deadlock by
+    construction — dispatch holds every member until the others retire, which
+    none can — same spirit and severity as item 21's closed funding loop:
+    escalate to every member's owner naming the cycle; an edge must drop or a
+    plan must split (Plan decomposition pattern).

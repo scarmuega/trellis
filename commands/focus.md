@@ -33,7 +33,9 @@ root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
    `${CLAUDE_PLUGIN_ROOT}/spec/patterns.md`); the committed band and its
    `core-ranking` drive the coverage walk; the `induced-by:` edges on
    subdomains (effective automation policy); the `funded-by:` edges on
-   strategies (economic lineage — who captures the value each produces);
+   strategies (economic lineage — who captures the value each produces); the
+   `awaits:` edges on plans (declared sequencing — a `ready` plan is held,
+   undispatched, until its targets retire);
    plans with status `ready`, `active`, or `blocked` — nothing evaluates a
    draft; `metrics/definitions.md` targets and `metrics/actuals/` within the
    freshness window from `rituals.md` (spec rule 5 — stale actuals become a

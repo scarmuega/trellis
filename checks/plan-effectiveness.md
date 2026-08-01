@@ -36,8 +36,9 @@ Walk the items in order — the coverage walk sets the attention ranking the res
 report under. "Active plans" below means status `active` or `blocked`; nothing
 evaluates a draft. A `ready` plan — released for dispatch but not yet in flight —
 counts as advancing its strategy for the coverage walk (items 1–3) and answers
-for dispatch health (item 18), but the per-plan metric-movement and challenge
-items (4, 12, 13) skip it: it has not begun its measurement horizon.
+for dispatch health (items 18–21 — one held by unsatisfied `awaits:` edges
+answers to items 20–21, never item 18), but the per-plan metric-movement and
+challenge items (4, 12, 13) skip it: it has not begun its measurement horizon.
 
 ## Coverage — walk `market.md` needs → committed strategies → induced subdomains → active plans
 
@@ -133,7 +134,8 @@ the value they produce (spec rule 12). On a root whose pinned spec predates
 
 ## Dispatch — the ready queue must actually drain
 
-On a root predating v14 (no `ready` status), skip this group.
+On a root predating v14 (no `ready` status), skip this group. Items 20–21 read
+`awaits:` edges; on a root predating v16, skip them.
 
 18. A plan `status: ready` beyond one dispatch cadence (the `plan dispatch` row
     in `rituals.md`) with no act recorded against it in git history — the queue
@@ -141,4 +143,33 @@ On a root predating v14 (no `ready` status), skip this group.
     misconfigured, or its budget is exhausted. A plan released for an agent that
     no agent ever picks up is work the domain believes is moving and is not —
     `blocker`, addressed to the plan's owner; name the likely cause (wiring
-    causes belong to the steward). Mirror of item 9's stalled `blocked`.
+    causes belong to the steward). Mirror of item 9's stalled `blocked`. A plan
+    held by `awaits:` edges whose targets are not all retired is not this
+    finding — dispatch skips it by design and no act is owed; it answers to
+    item 20.
+19. A plan `status: ready` that dispatch has acted on across more than one
+    cadence — workflow runs, dispatch commits, a session's branch or draft PR
+    naming it — yet never flipped `ready → active` (or `→ blocked`): the takers
+    are dying before the claim, and the budget burns every tick while the queue
+    believes the plan is untaken. The claim is a default-branch edit, so a flip
+    stranded on a proposal branch is this finding too — `blocker`, addressed to
+    the plan's owner; the session-sizing and wiring causes (budget, model,
+    permissions) belong to the steward. Mirror of item 18's stalled queue:
+    there the act never fires; here it fires and dies unclaimed.
+20. A plan `status: ready` held by `awaits:` beyond one dispatch cadence whose
+    hold has no visible end: a target that does not resolve (lint item 4 owns
+    the edge; this finding is the starvation), a target still `draft` —
+    released work queued behind unreleased work — a target `blocked` without
+    movement (item 9 fires on the target), or a target finished in fact — done
+    criterion met, PR merged — but never retired, so the hold is now the
+    owner's verdict latency. The hold itself is by design; the finding is the
+    target's state — `blocker`, addressed to the target's owner. Mirror of
+    item 13's owed verdict, arriving as another plan's starvation.
+21. A plan whose `awaits:` target retired without shipping — the verdict
+    section, where the instance records one (Execution health pattern), or the
+    PR trail reads abandoned or superseded. Retirement alone released the hold,
+    so this plan now dispatches queued behind work that never happened; its
+    owner owes a reconfirmation — advance it anyway, rewire the edge to the
+    successor, or withdraw the release: `challenge`. Mirror of rule 11's
+    re-parenting: retiring a plan orphans its awaiters exactly as discarding a
+    strategy orphans its induced subdomains.

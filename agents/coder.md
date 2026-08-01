@@ -25,6 +25,13 @@ decide what it should have specified.
 
 ## Then, gate on readiness — stop early rather than guess
 
+Before the checklist, check `awaits:`: any target plan whose `status:` is not
+`retired` means this plan is held, not takeable — dispatch skips held plans,
+but an interactive invocation or a stale scan can still hand you one. Report
+the hold and stop, flipping nothing: a hold is declared sequencing that clears
+itself when its targets retire, and flipping it `blocked` would convert a
+self-clearing hold into an escalation a human must clear.
+
 Read the plan named in your input and walk
 `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` against it. Any item fails and
 you do not start:
@@ -103,8 +110,9 @@ entry, whatever the automation class.
 Genuine residue — work the plan implied but did not cover, deferred hardening,
 an adjacent problem the code exposed — becomes one new `plans/{slug}.md` with
 `provenance: authored`, the same `owner:`, `status: draft`, a registered `type:`,
-a proposed `complexity:` if you can scope it (the owner ratifies or amends it at
-release), and resolving refs; lint it against items 1, 4, 7, and 8 of
+a proposed `complexity:` if you can scope it, a proposed `awaits:` if the residue
+must wait on other plans — most often the one you just advanced (the owner
+ratifies both at release), and resolving refs; lint it against items 1, 4, 7, and 8 of
 `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md`. No residue, no plan — plans
 filed to look productive are the failure decision 0030 names.
 
@@ -126,6 +134,8 @@ opened with refs, the follow-up plan if any, and anything a human must sample.
 - Never retire a plan. A merged PR is the completion event and the verdict is the
   owner's; you leave the plan `active` with the PR ref.
 - Never flip any plan to `ready`, and never release your own follow-up.
+- Never edit a released plan's `awaits:` edges — sequencing is the owner's
+  declaration; your residue draft may propose its own.
 - Never hand-edit `provenance: generated` artifacts; `decisions/` is append-only.
 - Never resolve external refs; never read or write secrets; never spend, publish,
   or approve beyond `authority:`.
