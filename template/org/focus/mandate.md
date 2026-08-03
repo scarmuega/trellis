@@ -2,7 +2,7 @@
 provenance: authored
 owner: <owner>
 purpose: keep this domain's plans effective — solution against problem, metrics as evidence
-scope: []               # advisory-only: focus changes no artifact; findings travel the escalation channel
+scope: []               # advisory-only: focus changes no artifact — it reports findings and owners record them
 authority:
   spend: none
   publish: none
@@ -23,7 +23,8 @@ keeps every answer advisory. Where the steward checks form, focus checks worth.
   plan-effectiveness checklist across plans with status `ready`, `active`, or
   `blocked` — coverage gaps, metric movement, attention allocation against
   `core-ranking`, blockers and risks, and challenges to value-dead plans — one
-  escalation per finding, addressed to the relevant owner.
+  reported finding per item, addressed to the relevant owner, who records it as
+  an escalation in the artifact it concerns.
 - On the interactive plane the same evaluation is `/trellis:focus`, where the
   human present judges every finding in conversation.
 - An accepted candidate graduates to a `plans/` draft through `/trellis:plan`,

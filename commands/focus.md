@@ -20,7 +20,8 @@ root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
    directory holding `conventions.md`, `problem/`, `solution/`, and `org/`. Not
    in a Trellis root → say so and stop. Read the root's `conventions.md`
    (authoritative over this command where they differ) — especially its plan
-   schema and "Runtime binding" section (the escalation channel).
+   schema, its "Escalation records" schema, and its "Runtime binding" section
+   (the escalation channel).
 
 2. **Fix the scope**: match `$ARGUMENTS` against plan slugs, `problem/`
    subdomains, `strategy/` files, and metric anchors. Ambiguous → ask, showing
@@ -54,9 +55,11 @@ root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
 6. **Offer follow-through** — each an explicit act, none automatic:
    - an accepted candidate → hand off to `/trellis:plan {topic}`; it graduates
      to a draft plan under its owner's hand (there is no candidate artifact);
-   - a finding addressed to an owner not present → an escalation through the
-     instance's escalation channel (default: a forge issue via
-     `gh issue create`, one per finding, the record in the body);
+   - a finding addressed to an owner present → their authored escalation record
+     in the artifact it concerns, written at their direction;
+   - a finding addressed to an owner not present → a report line carrying the
+     finding record verbatim, for that owner to transcribe as an escalation
+     record; the analysis never writes one on their behalf;
    - a status flip (activate, block, retire) with the plan's owner present →
      the owner's authored edit, made at their direction.
 
@@ -64,5 +67,6 @@ root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
 
 7. **Report**: the scope walked, plans evaluated, findings by kind with their
    records (fenced `yaml`, one per finding), dispositions from the
-   conversation, hand-offs made, escalations opened (refs), and any staleness
-   that blocked judgment.
+   conversation, hand-offs made, escalation records written at an owner's
+   direction and findings still awaiting an absent owner's transcription, and any
+   staleness that blocked judgment.

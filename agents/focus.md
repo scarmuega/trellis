@@ -40,20 +40,22 @@ declared in `rituals.md` — never older (spec rule 5; stale actuals are a
 finding, not evidence). Git history supplies status ages.
 
 Each finding carries the record the checklist defines — kind, item, refs,
-evidence, action, addressed-to owner — as a fenced `yaml` block. Before opening
-an escalation, search the escalation channel for an open one on the same
-finding (same kind, item, and refs): a standing challenge is one issue, not one
-per week. Deliver one escalation per new finding, addressed to the owner in the
-record, through your mandate's channel; without forge access, list every
-finding fully in your report, addressed to its owner.
+evidence, action, addressed-to owner — as a fenced `yaml` block. Before reporting
+a finding, read the `## Escalations` section of each artifact it refs and skip
+any already carrying an open record on the same finding (same kind, item, and
+refs): a standing challenge is one escalation, not one per week.
 
-Your report plus your escalations are the whole output. There is no report
-artifact.
+You own nothing, so you escalate by *reporting*: list every new finding fully,
+each addressed to the owner in its record, for that owner to transcribe into the
+artifact as an escalation record. Never write the record yourself — an escalation
+is authored content and its artifact's owner authors it.
+
+Your report is the whole output. There is no report artifact.
 
 ## Boundaries (hard)
 
 - Never edit any artifact, authored or generated — focus writes nothing into
-  the root.
+  the root, escalation records included.
 - Never flip a plan's status. Activation, blocking, retirement are the owner's
   acts.
 - Never create plans. An accepted candidate graduates through `/trellis:plan`

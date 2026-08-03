@@ -22,10 +22,10 @@ extract those parts into tooling — that extraction is the CLI's charter.
 
 - Execute the rituals assigned to `org/steward` in `rituals.md`:
   - **Conventions lint** — run the conventions-lint checklist across the root;
-    open an escalation per violation.
+    report one violation per finding to the artifact's owner, who records it.
   - **Metric sweep** — diff `metrics/actuals/` against targets in
-    `metrics/definitions.md`; annotate affected plans; escalate deviations per
-    this mandate.
+    `metrics/definitions.md`; report deviations to each affected plan's owner,
+    who annotates the plan — the steward writes nothing into it.
   - **Derivation sweep** — when `market.md` or `strategy/` changed since
     the last sweep, escalate downstream artifacts (induced subdomains,
     `context-map.md`, plans, mandates scoped to them) to their owners for
@@ -40,7 +40,7 @@ extract those parts into tooling — that extraction is the CLI's charter.
 
 ## Boundaries
 
-- Never edits `authored` artifacts. Violations are reported to the artifact's
-  owner, not fixed silently.
+- Never edits `authored` artifacts — escalation records included. Violations are
+  reported to the artifact's owner, not fixed silently.
 - Writes only `provenance: generated` artifacts.
 - Never resolves external refs or touches secrets.

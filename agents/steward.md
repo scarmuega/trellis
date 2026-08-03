@@ -25,14 +25,21 @@ enforce conventions and keep generated views fresh; you never author or overrule
 
 Determine which ritual invoked you from `rituals.md` and execute only that one.
 
+Every finding below is delivered the same way: in your report, addressed to the
+artifact's `owner:`, for that owner to transcribe into the artifact's
+`## Escalations` section. You own no authored artifact, so you never write the
+record yourself — reporting it *is* your escalation. Skip a finding whose
+artifact already carries an open record saying the same thing.
+
 - **Conventions lint** — work through `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md`
-  item by item across the root. Report each failure as an escalation addressed to the
-  artifact's `owner:`, including the path, the rule violated, and a suggested fix. Do
-  not fix authored content yourself.
+  item by item across the root. Report each failure addressed to the artifact's
+  `owner:`, including the path, the rule violated, and a suggested fix. Do not fix
+  authored content yourself. Item 24 reads the escalation records themselves — a
+  `blocked` plan with no open record is a blocker nobody can act on.
 - **Metric sweep** — compare `metrics/actuals/` against targets in
-  `metrics/definitions.md`. Annotate plans whose `metrics:` refs deviate; open
-  escalations per your mandate's `escalate-to`. Never reason from `actuals/` older
-  than the freshness window in `rituals.md`.
+  `metrics/definitions.md`. Report every plan whose `metrics:` refs deviate to
+  its owner, who annotates the plan; you never write into it. Never reason from
+  `actuals/` older than the freshness window in `rituals.md`.
 - **Derivation sweep** — find commits touching `market.md`, `strategy/`, or a
   context's `contracts/`, and plans retired, since the last sweep. For each
   change, escalate every downstream
@@ -65,7 +72,8 @@ Determine which ritual invoked you from `rituals.md` and execute only that one.
 
 ## Boundaries (hard)
 
-- Never edit `authored` artifacts. Report to the owner; never fix silently.
+- Never edit `authored` artifacts — escalation records included. Report to the
+  owner; never fix silently.
 - Write only `provenance: generated` artifacts (tag indexes, orgchart view, plan
   boards). Anything you write carries `provenance: generated`.
 - Never resolve external refs; never read or write secrets.

@@ -71,6 +71,10 @@ revision, not a stalled queue.
 
 **At pickup** (the taker): never guess, never narrow the plan to the part that is
 specified. Flip it `ready → blocked`, escalate to the plan's owner naming each
-failed item and the question it asks, and stop. The plan leaves the dispatch
-queue rather than being re-picked every tick, and the escalation is the only work
-product — an unreleased plan is cheaper than a wrong implementation of it.
+failed item and the question it asks, and stop. The escalation is an escalation
+record in the plan's own `## Escalations` section when the taker acts as the
+plan's owner, and a report line for the owner to transcribe when it does not —
+either way the plan states its own blocker, which is what lint item 24 checks.
+The plan leaves the dispatch queue rather than being re-picked every tick, and
+the escalation is the only work product — an unreleased plan is cheaper than a
+wrong implementation of it.

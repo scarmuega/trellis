@@ -179,7 +179,10 @@ the claim is an artifact edit — the taker's `ready → active` flip is what
 removes a plan from the scan, so a dead session changes nothing and the next
 tick retries. A hold is a status read — `awaits:` targets unretired — and its
 release is another. The readiness gate ends a doomed loop by flipping
-`ready → blocked`: a declared field, not a memory that this plan was tried.
+`ready → blocked`: a declared field, not a memory that this plan was tried. What
+*clears* that block is filed the same way — an escalation record in the plan
+itself, so the question a human must answer is reconstructible from a checkout
+rather than from a forge thread the next session cannot see.
 Progress is dwell and movement (Execution health) — commits touching the plan
 and its declared contexts, never a percentage anyone typed. The failure mode is
 the loop whose termination lives in a report: a session that claimed a plan in

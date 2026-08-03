@@ -106,6 +106,34 @@ escalate-to: org/{role}
 holder: holder/ | <opaque external ref>
 ```
 
+## Escalation records
+
+An escalation is body content in the artifact it concerns, under an
+`## Escalations` heading — one fenced `yaml` block per escalation:
+
+```yaml
+raised: YYYY-MM-DD
+by: org/{role}      # the acting role that raised it
+to: org/{role}      # the raiser's escalate-to:, or the artifact's owner
+status: open | resolved
+asks: one line — the question a human must answer
+attempted: one line — what was tried
+blocked: one line — what stopped
+```
+
+Only the artifact's `owner:` writes a record: an escalation is authored content,
+so a role whose mandate does not reach the artifact reports its finding instead
+and the owner transcribes it. An agent acting *as* the owner (the `trellis:coder`
+under dispatch) writes its own. Resolution is the owner's edit — answer in prose
+beneath the record and flip `status: resolved`; whatever act it unblocks (a plan
+`blocked → ready`) is a separate change. Records stay in the artifact as the
+trail; nothing is deleted.
+
+An escalation with no artifact to sit in — a role exceeding its authority on
+free-text input, a ritual deviation — stays in the acting session's report,
+addressed to its owner. A `generated` artifact is never annotated: the escalation
+goes to its generator's source.
+
 ## Plan-type registry
 
 Open set; add types here before using them.
@@ -181,8 +209,12 @@ choices:
 - Ingress: label a forge issue `role:{name}` to invoke that role
   (`.github/workflows/ingress.yml`). Relay outside events (email, tickets,
   webhooks) into labeled issues so the domain keeps one ingress and one ledger.
-- Escalation channel: forge issues assigned to the `escalate-to:` role's
-  holder — human `holder/ref.md` files carry the forge handle for this reason.
+- Escalation channel: escalation records in the repo, per "Escalation records"
+  above — the artifact that carries the problem carries the escalation, so a
+  blocker is reconstructible from the tree rather than from a forge thread. The
+  trade this instance accepts: a committed record notifies nobody. Recipients
+  find escalations by reading the root (a `blocked` plan carries an open record
+  by lint item 24) or a generated view over them, not by inbox.
 - Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
   supporting → commit, sampled review on the ritual cadence; core → PR with
   required owner review, enforced by branch protection plus a generated

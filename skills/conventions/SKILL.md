@@ -21,7 +21,8 @@ authoritative over this skill where they differ.
 ## The map
 
 ```
-conventions.md    schemas, registries, boundary guarantees, secrets policy
+conventions.md    schemas, registries, escalation records, boundary guarantees,
+                  secrets policy
 rituals.md        heartbeat: cadenced processes, executor roles, escalations
 glossary.md       ubiquitous language — cite terms from here
 market.md         founding map: the invariant layer — needs as ## N-{slug}
@@ -64,6 +65,7 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Time-bounded goal, campaign, experiment, to-be journey | `plans/{plan}.md` with `type:` |
 | Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag + `awaits:` edges between pieces where order matters — never a `plans/{plan}/` folder |
 | Ordering between plans — advance B only after A finishes | `awaits:` in B's frontmatter — dispatch holds B (still `ready`) until A retires; never umbrella prose alone, never `status: blocked` |
+| A blocker, or anything needing a human's decision | an escalation record — fenced `yaml` under `## Escalations` in the artifact it concerns, written by that artifact's owner; never a forge issue, never a separate kind |
 | "Why we chose X" | `decisions/NNNN-{slug}.md` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
@@ -191,6 +193,16 @@ lives in the instance's runtime binding. Sequencing works the same way: `awaits:
 on a released plan holds its dispatch until every named plan retires. Not a template role: it operates the
 business, not the model.
 
+**Raise an escalation**: write a record into the `## Escalations` section of the
+artifact that carries the problem — `raised`, `by`, `to` (the raiser's
+`escalate-to:`), `status: open`, and the question asked of a human (schema in the
+instance's `conventions.md`). Only that artifact's `owner:` writes one, so a role
+whose mandate does not reach the artifact reports the finding and the owner
+transcribes it — this is why `org/focus` and `org/steward` escalate by reporting.
+Resolution is the owner's edit: answer beneath the record, flip
+`status: resolved`, and make whatever act it unblocks separately. A `blocked`
+plan owes an open record (lint item 24); nothing is deleted.
+
 **Record a decision**: next NNNN, context/decision/consequences/alternatives.
 Superseding = new file that names the one it replaces.
 
@@ -208,7 +220,8 @@ For audits, run the canonical checklist at
 edges, strategy validity, orphan detection, funding-edge validity, economic
 orphans, capture points, core-ranking, technology-free founding map,
 incomplete pivots, plan refs resolve, plan sequencing edges resolve and stay
-acyclic, context-map relations back their language claims, mandates have
+acyclic, context-map relations back their language claims, escalation records
+well-formed and every blocked plan stating its blocker, mandates have
 authority, append-only
 decisions, registered tags, no secrets, no grouping directories, actuals
 freshness).

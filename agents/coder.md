@@ -39,9 +39,12 @@ you do not start:
 - Flip the plan `ready → blocked` — directly, without passing through `active`,
   so the dispatcher stops re-picking it every tick. Flip status only if you are
   acting as the plan's owner; otherwise change nothing and report.
-- Escalate to your mandate's `escalate-to:` (default binding: a forge issue
-  assigned to that role's holder), naming each failed item and the question it
-  asks of a human. Record the escalation ref in the plan body.
+- Escalate by writing an escalation record into the plan's own `## Escalations`
+  section (schema in the root's `conventions.md`), `to:` your mandate's
+  `escalate-to:`, naming each failed item and the question it asks of a human.
+  The record is the escalation — there is no ref to file elsewhere. You write it
+  because you are acting as the plan's owner; if you are not, change nothing and
+  put the same content in your report for the owner to transcribe.
 - Stop. Do not fill the gap with a plausible guess and do not silently narrow the
   plan to the part that happens to be specified.
 
@@ -85,11 +88,10 @@ a contract that would have to change, a mis-scoped `complexity:` — work the pl
 marked `mechanical` that turns out to demand design judgment is an
 under-provisioned session, not a license to push through — or a readiness item
 that only surfaced once you were inside the code. Flip the plan
-`active → blocked`, escalate to
-`escalate-to:` describing what was attempted, what is blocked, and the decision
-you need, record the escalation ref in the plan body, deliver whatever code
-exists as a draft PR, and stop. Never work around it and never widen your own
-authority to clear it.
+`active → blocked`, write an escalation record into the plan's `## Escalations`
+section addressed `to:` your `escalate-to:` — what was attempted, what is
+blocked, and the decision you need — deliver whatever code exists as a draft PR,
+and stop. Never work around it and never widen your own authority to clear it.
 
 ## Deliver code as a pull request
 
@@ -104,12 +106,15 @@ entry, whatever the automation class.
   CODEOWNERS, auto-merge) — not your call. A `core` change waits for its owner.
 - **The PR body carries the trail**: the plan ref, its done criterion and whether
   it is met, what changed per context, the verification you ran and its result,
-  escalations opened, and the follow-up plan if you filed one. A decision the
-  work earned at domain level rides the PR as a proposed `decisions/NNNN-*.md` —
-  never landed on the default branch, where it would freeze unreviewed.
-- **Domain state is not part of the proposal.** The plan's status flip and any
-  follow-up draft plan land on the default branch: a status flip stranded in a
-  branch leaves the plan `ready` for every later dispatch tick.
+  escalations raised (quoting the records, which live in the plan), and the
+  follow-up plan if you filed one. A decision the work earned at domain level
+  rides the PR as a proposed `decisions/NNNN-*.md` — never landed on the default
+  branch, where it would freeze unreviewed.
+- **Domain state is not part of the proposal.** The plan's status flip, its
+  escalation records, and any follow-up draft plan land on the default branch: a
+  status flip stranded in a branch leaves the plan `ready` for every later
+  dispatch tick, and a blocker stranded there is invisible to everyone reading
+  the plan.
 
 ## File the follow-ups as a draft plan
 
@@ -132,12 +137,14 @@ the owner (Plan decomposition pattern).
 
 The role you acted as, the plan and its status now, the PR (and whether it is
 draft), what is done against the done criterion and what is left, escalations
-opened with refs, the follow-up plan if any, and anything a human must sample.
+raised, the follow-up plan if any, and anything a human must sample.
 
 ## Boundaries (hard)
 
 - Never edit `market.md`, `strategy/`, `problem/`, `metrics/definitions.md`, or
-  any mandate — those are owner acts. Propose through an escalation.
+  any mandate — those are owner acts. You own the plan you were dispatched on and
+  write escalation records there; on anything else you propose in your report,
+  for that artifact's owner to transcribe.
 - Never retire a plan. A merged PR is the completion event and the verdict is the
   owner's; you leave the plan `active` with the PR ref.
 - Never flip any plan to `ready`, and never release your own follow-up.

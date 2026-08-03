@@ -37,8 +37,9 @@ executes) and await instruction.
      `trellis:steward`) — delegate the work to that agent, passing the input
      and the mandate path.
    - `holder/ref.md` naming a human or external party — never impersonate.
-     Prepare the work as a handoff addressed to that party through the
-     escalation channel, and stop.
+     Prepare the work as a handoff addressed to that party in your report, and
+     stop. Nothing is acting as the role here, so nothing writes on its behalf:
+     the holder authors any escalation record the handoff earns.
 
 5. **Execute within authority**:
    - Touch only artifacts within the mandate's `scope:`.
@@ -59,11 +60,16 @@ executes) and await instruction.
 
 6. **Escalate what exceeds authority**: anything the input requires that the
    mandate does not permit becomes an escalation to `escalate-to:` through the
-   instance's escalation channel (default binding: a forge issue via
-   `gh issue create`, assigned to that role's holder, describing what was
-   attempted, why it exceeds authority, and a proposed resolution). Never
-   silently attempt or silently drop it.
+   instance's escalation channel (default binding: an escalation record — a
+   fenced `yaml` block under `## Escalations` in the artifact the escalation
+   concerns, per `conventions.md`), describing what was attempted, why it
+   exceeds authority, and a proposed resolution. Write the record only into an
+   artifact this role owns; where it does not, or where no single artifact
+   carries the problem, put the same content in your report addressed to the
+   owner, who transcribes it. Never silently attempt or silently drop it.
 
 7. **Close out**: remove `.trellis/acting-role`. Report: the role acted, the
    trigger/input, artifacts changed (with commits or PR refs), escalations
-   opened (with refs), and anything left for humans to sample.
+   raised — quoting each record and where it landed, or stating it is the report
+   itself and whose transcription it awaits — and anything left for humans to
+   sample.

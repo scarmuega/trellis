@@ -98,3 +98,13 @@ escalation to the artifact's owner.
     steering hatches it when work touches the seam. Escalate to the publishing
     context's owner or the conforming context's owner as the case directs:
     hatch the contract, pin the ref, or re-annotate the relation.
+24. Escalation records are well-formed and blockers are stated. Every record
+    under an `## Escalations` heading is a fenced `yaml` block declaring a legal
+    `status: open|resolved`, a `raised:` date, and `by:`/`to:` refs resolving to
+    roles under `org/`. Every plan at `status: blocked` carries at least one
+    `open` record: `blocked` asserts a defect a human must clear, so a blocked
+    plan that names no blocker is a stall nobody can act on — escalate to the
+    plan's owner to state it or to flip the status back. (A held plan is not
+    this: `awaits:` holds a plan at `ready`, carries no defect, and owes no
+    record — item 4 owns its edges.) No record sits in a `generated` artifact;
+    escalations against generated output belong to its source.

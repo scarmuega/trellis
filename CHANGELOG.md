@@ -12,6 +12,47 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Changed
+
+- **Escalations are in-repo records, not forge issues (non-normative; decision
+  0036):** the escalation channel was a forge issue, hardcoded as `gh issue
+  create` in four members, which split one event across two systems — the
+  coder's `ready → blocked` flip landed as an artifact edit while the question
+  that would clear it went to an issue tracker no later session reads. That is
+  the Loop observability failure applied to escalations: a loop whose
+  termination condition is filed outside the tree. An escalation is now body
+  content in the artifact it concerns — a fenced `yaml` block under
+  `## Escalations` carrying `raised`, `by`, `to`, `status: open|resolved`, and
+  the question asked of a human — so a blocked plan states its own blocker and
+  the trail is git history. Not a new kind: an escalation has no lifecycle or
+  owner of its own (rule 7), and an artifact carries zero or many, so it is
+  neither a directory nor frontmatter. **Only the artifact's `owner:` writes a
+  record**, escalations being authored content like any other: an agent acting
+  *as* the owner writes its own (the coder owns the plan it was dispatched on),
+  while a role whose mandate does not reach the artifact reports the finding for
+  the owner to transcribe — which leaves `org/focus` ("writes nothing into the
+  root") and `org/steward` ("never edit `authored` artifacts") exactly as strict
+  as they were, and resolves the standing contradiction where the metric sweep
+  told the steward to "annotate plans" its boundary forbade. New lint item 24
+  makes the channel checkable as the forge never was: records well-formed, every
+  `blocked` plan carrying an open one, none in a `generated` artifact — a held
+  plan (`awaits:`) explicitly exempt, carrying no defect. The forge keeps
+  ingress and PR approvals; only escalation moves. Two costs taken knowingly and
+  recorded as binding limits: a committed record notifies nobody (the
+  contract service's audit-trail half is satisfied, its
+  channel-they-already-watch half is not), and an advisory role's finding is
+  durable only once its owner transcribes it, so a headless ritual nobody reads
+  leaves findings in a workflow log — the pull-triggered fix is a per-role
+  escalation inbox, not a carve-out in the ownership rule. Surfaces updated:
+  `spec/runtime.md` (binding row, an escalations paragraph, two known limits),
+  `spec/patterns.md` (Loop observability), `template/conventions.md` (an
+  "Escalation records" schema + the runtime-binding row), `template/rituals.md`,
+  `agents/coder.md`, `agents/focus.md`, `agents/steward.md`, `commands/act.md`,
+  `commands/focus.md`, `commands/ritual.md`, `checks/conventions-lint.md` item
+  24, `checks/plan-readiness.md`, and the conventions skill (map, placement
+  guide, a "Raise an escalation" procedure, lint summary). No schema, no new
+  status, no new kind, spec stays v16; eval fixtures untouched.
+
 ### Added
 
 - **Contract steering (non-normative; decision 0035):** contracts were the only

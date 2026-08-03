@@ -132,7 +132,7 @@ binding".
 | schedule | forge cron (reference: `template/.github/workflows/rituals.yml`) → headless `/trellis:ritual <name>` |
 | ingress | issues labeled `role:{name}` (reference: `template/.github/workflows/ingress.yml`) → headless act; relay non-forge events (email, tickets) into issues to keep one ingress and one ledger |
 | gate | plugin hooks (`hooks/hooks.json` → `hooks/gate.mjs`): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
-| escalation | forge issues assigned to the `escalate-to:` role's holder (human `ref.md` should carry the forge handle); approvals are PRs |
+| escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); approvals are PRs |
 | ledger | git history + forge threads; the acting role is recorded in the session marker and named in commits/comments |
 
 **Plan dispatch.** `.github/workflows/dispatch.yml` — a cron on its own cadence
@@ -163,6 +163,18 @@ as a PR (draft while unfinished) and never merges it, and files residue as a
 `draft` plan. The class still decides who lands the change: `generic` and
 `supporting` PRs may be auto-merged by this binding, `core` waits for its owner.
 
+**Escalations.** This binding keeps escalations *in the tree*: the artifact that
+carries the problem carries the escalation, as body content its owner authored
+(decision 0036). A blocked plan therefore states its own blocker, so what stops a
+loop is reconstructible from a checkout — the Loop observability pattern applied
+to the escalation channel, where a forge thread is state filed outside the tree.
+Because it is authored content, only the artifact's `owner:` writes a record: an
+agent acting *as* that owner (the coder under dispatch) writes its own, while an
+advisory role that owns nothing — `org/focus`, `org/steward` — reports its
+findings for the owner to transcribe, which leaves both roles' write boundaries
+exactly as they were. An escalation with no artifact to sit in stays in the
+acting session's report.
+
 **Acting-role attribution.** `/trellis:act` records the acting role in
 `.trellis/acting-role` at the root (ephemeral, gitignored) and removes it on
 completion. The gate uses it to distinguish a mandated generator refreshing a
@@ -176,6 +188,15 @@ stage 2/3):
 - The gate sees Write/Edit, not shell-mediated writes.
 - A crashed session can leave a stale `.trellis/acting-role`; the marker carries
   a timestamp so the steward's lint can flag it.
+- An escalation record notifies nobody: it satisfies the `escalation` service's
+  audit-trail half and not its "channel they already watch" half (decision 0036).
+  Recipients read the root, a generated view over open records, or the report of
+  the session that raised it. A binding that needs a push adds one *over* the
+  records — the record stays the system of record.
+- An advisory role's finding is durable only once its owner transcribes it, so a
+  headless ritual whose findings nobody transcribes leaves them in a workflow
+  log. Accepted with the ownership boundary it buys; a per-role escalation inbox
+  is the pull-triggered fix.
 
 ## Staging — extracted by pull, not built ahead
 
