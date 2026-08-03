@@ -197,11 +197,12 @@ choices:
   `plan dispatch` row in `rituals.md`, operated by `org/steward`); keep its cron
   in step. Each plan's work runs under its owner's authority. A plan whose
   `awaits:` targets are not all `retired` is held — skipped, still `ready`,
-  retried next tick; the hold and its release are both frontmatter reads inside
-  `dispatch.yml`. A plan's
-  `complexity:` tier maps to the dispatched session's reasoning effort, model,
-  and budget inside `dispatch.yml` — provider names, effort levels, and prices
-  live only in that workflow; retune the mapping there, never in a plan. The
+  retried next tick; the hold and its release are both declared-field reads in
+  the deterministic scan (`trellis dispatch scan`) that `dispatch.yml` runs. A
+  plan's `complexity:` tier maps to the dispatched session's reasoning effort,
+  model, and budget via the scan's `--map` flags inside `dispatch.yml` —
+  provider names, effort levels, and prices live only in that workflow; retune
+  the mapping there, never in a plan. The
   dispatched session runs with the full tool surface and auto-approved routine
   calls, so a role that writes code can build and test what it implements; what
   bounds it is the role's mandate, the automation class, the provenance gate, and
@@ -218,10 +219,15 @@ choices:
 - Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
   supporting → commit, sampled review on the ritual cadence; core → PR with
   required owner review, enforced by branch protection plus a generated
-  CODEOWNERS view over `owner:` frontmatter. An agent holder that writes code
-  (the plugin's `trellis:coder`) always opens a PR — draft while the work is
-  unfinished — and never merges its own; which PRs may land without review is
-  this instance's wiring, per the class above.
+  CODEOWNERS view over `owner:` frontmatter (`trellis view codeowners`). The
+  forge handle a role reviews under is binding data, not model data, so it
+  lives beside the holder's identity: an optional `github:` in
+  `org/{role}/holder/ref.md`. A role without one is emitted as a comment line
+  naming the gap rather than a silent omission — an owner missing from
+  CODEOWNERS is a review gate that quietly is not there. An agent holder that
+  writes code (the plugin's `trellis:coder`) always opens a PR — draft while
+  the work is unfinished — and never merges its own; which PRs may land without
+  review is this instance's wiring, per the class above.
 
 ## Secrets policy
 

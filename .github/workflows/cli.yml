@@ -1,0 +1,51 @@
+# CI for the deterministic kernel (decision 0037). The spec, the checklists,
+# template/, and the eval fixtures are all test inputs — the binary embeds the
+# spec version and the template, `tests/lockstep.rs` reads the checklists, and
+# the integration harness composes roots from the fixtures. They are in the
+# trigger paths because a model change that is not translated into the kernel
+# must fail here, in the commit that makes it, rather than drift.
+name: cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - "spec/**"
+      - "checks/**"
+      - "template/**"
+      - "evals/skeleton/**"
+      - "evals/fixtures/**"
+      - "evals/focus/fixtures/**"
+      - ".github/workflows/cli.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - "spec/**"
+      - "checks/**"
+      - "template/**"
+      - "evals/skeleton/**"
+      - "evals/fixtures/**"
+      - "evals/focus/fixtures/**"
+      - ".github/workflows/cli.yml"
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test

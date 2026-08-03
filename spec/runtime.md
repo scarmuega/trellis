@@ -131,7 +131,7 @@ binding".
 | act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …" --plugin-dir <trellis checkout>` |
 | schedule | forge cron (reference: `template/.github/workflows/rituals.yml`) → headless `/trellis:ritual <name>` |
 | ingress | issues labeled `role:{name}` (reference: `template/.github/workflows/ingress.yml`) → headless act; relay non-forge events (email, tickets) into issues to keep one ingress and one ledger |
-| gate | plugin hooks (`hooks/hooks.json` → `hooks/gate.mjs`): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
+| gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); approvals are PRs |
 | ledger | git history + forge threads; the acting role is recorded in the session marker and named in commits/comments |
 
@@ -205,6 +205,11 @@ stage 2/3):
   second binding worth having. Contents: deterministic lint, `mandate.md` →
   permission-profile compilation, `rituals.md` → cron generation, CODEOWNERS
   generation. The kernel is what makes pi/Codex/OpenCode bindings cheap.
+  **Landed** as `cli/` (`trellis`, decision 0037): mechanical lint with the
+  judgment remainder reported, dispatch scan, gate, lifecycle porcelain,
+  escalation records, the five generated views, readiness's mechanical share,
+  scaffold, and cron drift-check. Still open from the charter: `mandate.md` →
+  permission-profile compilation.
 - **Stage 3 — dispatcher daemon (Claude Agent SDK).** Pull-trigger: an ingress
   event that cannot be relayed through the forge, or needs conversational
   latency (live support). A thin always-on process owning only ingress — never

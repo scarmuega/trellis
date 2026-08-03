@@ -1,0 +1,34 @@
+[package]
+name = "trellis-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Deterministic kernel for Trellis domain roots: lint, dispatch scan, gate, lifecycle porcelain, generated views"
+license = "MIT"
+repository = "https://github.com/scarmuega/trellis"
+
+[lib]
+name = "trellis"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trellis"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env"] }
+yaml-rust2 = "0.10"
+regex = "1"
+walkdir = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+include_dir = "0.7"
+tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2"
+
+[profile.release]
+strip = true
+lto = true

@@ -12,6 +12,55 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Added
+
+- **The deterministic kernel: a `trellis` CLI (non-normative; decision 0037):**
+  Stage 2 of `spec/runtime.md`'s staging plan, pulled by dogfooding — the
+  conventions the members walk as prose had stopped moving, so twenty of the
+  lint checklist's twenty-four items were being re-derived (and occasionally
+  fumbled) by an LLM every ritual, the dispatch scan lived as awk one-liners,
+  the gate as a regex-over-4KB Node script, and every generated view the spec
+  names had gone unimplemented because prose is a poor place to keep a
+  generator. `cli/` is now a Rust crate shipping one binary: **lint** (the
+  mechanical items, findings shaped path + item + message + owner for relay to
+  each owner, and a `judgment` array naming exactly what remains — 7, 16, 2's
+  unstamped artifacts, 23's backing read — so the split is explicit rather than
+  silent), **`dispatch scan`** (the awk ported whole, hold semantics and
+  fail-closed dangling targets included, with the complexity→session mapping
+  still tuned in `dispatch.yml` via `--map` so no provider name or price enters
+  the binary — 0032 intact), **`gate`** (the PreToolUse hook, `gate.mjs` ported
+  guard-for-guard, fail-open through a panic), **lifecycle porcelain**
+  (`plan release|claim|block|unblock|retire` refusing illegal source states,
+  `block` writing the open escalation record lint item 24 demands in the same
+  move, format-preserving frontmatter edits that verify by re-parse and refuse
+  rather than reflow), **five view generators** (board, CODEOWNERS, tags,
+  orgchart, escalations — pure functions of tree plus git, so same tree and day
+  render byte-identical), **readiness**'s mechanical share tiered honestly as
+  pass/partial/judgment, plus `scaffold`, `rituals cron --check`, and the
+  derived-value queries every agent used to recompute per session. Two keys
+  added, both binding-owned rather than model-owned: `generated-by:` on
+  generated views (which turns lint item 2 into a byte-diff for them) and an
+  optional `github:` on `holder/ref.md` for CODEOWNERS handles. **The kernel
+  changes in lockstep with the model** — a model change is not complete until
+  the kernel carries it *in the same commit*, since a lagging kernel reports a
+  clean root against conventions the root no longer has, with the authority of
+  a deterministic check. Prose could not hold that line (the v14 bump shipped
+  with all three instance pins stale at v13), so `cli/tests/lockstep.rs`
+  enforces it: rule table against `checks/conventions-lint.md`, readiness walk
+  against `checks/plan-readiness.md`, embedded spec version against
+  `spec/model.md` and every shipped pin, closed enums against the schema prose —
+  with CI (this repo's first) triggering on `spec/**` and `checks/**`. Surfaces
+  updated: `hooks/hooks.json` (prefers `trellis gate`, falls back to `gate.mjs`
+  until distribution lands, so the guarantee never lapses),
+  `template/.github/workflows/dispatch.yml` (the awk loop replaced by the scan +
+  jq), `agents/steward.md` (lint ritual runs the binary and judges the
+  remainder; views prefer the generators), `spec/runtime.md` (gate binding row,
+  Stage 2 marked landed with permission-profile compilation still open),
+  `template/conventions.md` (dispatch + CODEOWNERS binding rows), and the README
+  (layout, quick start, a "Changing the model" procedure). No schema, no Rule,
+  no new status or kind, spec stays v16; eval fixtures untouched — the kernel
+  reads them as test inputs and writes nothing back.
+
 ### Changed
 
 - **Escalations are in-repo records, not forge issues (non-normative; decision

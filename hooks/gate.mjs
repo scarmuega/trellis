@@ -10,6 +10,11 @@
 // Outside a Trellis root the gate is inert. Mandate-scope enforcement is
 // stage-2 territory (spec/runtime.md). Fails open: a broken gate must never
 // brick a session.
+//
+// Superseded by `trellis gate` (cli/, decision 0037) — hooks.json prefers the
+// binary and falls back to this script only where the binary is not on PATH.
+// Kept byte-for-spirit identical to the Rust port until distribution lands,
+// then deleted.
 
 import fs from "node:fs";
 import path from "node:path";

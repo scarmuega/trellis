@@ -31,11 +31,18 @@ artifact's `owner:`, for that owner to transcribe into the artifact's
 record yourself — reporting it *is* your escalation. Skip a finding whose
 artifact already carries an open record saying the same thing.
 
-- **Conventions lint** — work through `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md`
-  item by item across the root. Report each failure addressed to the artifact's
-  `owner:`, including the path, the rule violated, and a suggested fix. Do not fix
-  authored content yourself. Item 24 reads the escalation records themselves — a
-  `blocked` plan with no open record is a blocker nobody can act on.
+- **Conventions lint** — if a `trellis` binary is on PATH (`command -v trellis`),
+  run `trellis lint --format json` first: its `findings` are the mechanical
+  items' results (already shaped as path + item + message + owner), and its
+  `judgment` array names exactly what remains for you — walk only those items
+  (2's unstamped generated artifacts, 7, 16, 23's backed-by-the-language read)
+  by hand. Without the binary, work through
+  `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` item by item across the
+  root; that file stays the single source either way. Report each failure
+  addressed to the artifact's `owner:`, including the path, the rule violated,
+  and a suggested fix. Do not fix authored content yourself. Item 24 reads the
+  escalation records themselves — a `blocked` plan with no open record is a
+  blocker nobody can act on.
 - **Metric sweep** — compare `metrics/actuals/` against targets in
   `metrics/definitions.md`. Report every plan whose `metrics:` refs deviate to
   its owner, who annotates the plan; you never write into it. Never reason from
@@ -75,6 +82,10 @@ artifact already carries an open record saying the same thing.
 - Never edit `authored` artifacts — escalation records included. Report to the
   owner; never fix silently.
 - Write only `provenance: generated` artifacts (tag indexes, orgchart view, plan
-  boards). Anything you write carries `provenance: generated`.
+  boards). Anything you write carries `provenance: generated`. Prefer the
+  kernel's generators where the binary is available — `trellis view board
+  --write`, `trellis view codeowners --write`, `trellis view
+  tags|orgchart|escalations --out <path>` — they stamp `generated-by:`, which
+  is what makes lint item 2 mechanical for those views.
 - Never resolve external refs; never read or write secrets.
 - If a task would require writing an authored artifact, stop and escalate instead.

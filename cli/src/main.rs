@@ -1,0 +1,1075 @@
+//! `trellis` — deterministic kernel for Trellis domain roots.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand, ValueEnum};
+
+use trellis::dates;
+use trellis::dispatch::{self, SessionMap};
+use trellis::escalate::{self, NewEscalation};
+use trellis::fmedit;
+use trellis::gitio::Git;
+use trellis::graph;
+use trellis::lint;
+use trellis::model::PlanStatus;
+use trellis::plan_ops;
+use trellis::readiness;
+use trellis::refs;
+use trellis::registries;
+use trellis::rituals;
+use trellis::root::Root;
+use trellis::scaffold;
+use trellis::tree::{Kind, Tree};
+use trellis::views;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum Format {
+    Text,
+    Json,
+}
+
+#[derive(Parser)]
+#[command(
+    name = "trellis",
+    version,
+    about = "Deterministic kernel for Trellis domain roots"
+)]
+struct Cli {
+    /// Operate on this root (or any directory inside it) instead of the cwd
+    #[arg(short = 'C', long = "root", global = true, value_name = "DIR")]
+    root: Option<PathBuf>,
+    /// Output format for read commands
+    #[arg(long, global = true, value_enum, default_value_t = Format::Text)]
+    format: Format,
+    /// Read spec/template from a live plugin checkout instead of the
+    /// embedded copy (flag > $CLAUDE_PLUGIN_ROOT > embedded)
+    #[arg(long, global = true, value_name = "DIR", env = "CLAUDE_PLUGIN_ROOT")]
+    plugin_root: Option<PathBuf>,
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Print the detected Trellis root
+    Root {
+        /// Exit code only
+        #[arg(long)]
+        quiet: bool,
+    },
+    /// Binary and embedded spec version
+    Version,
+    /// Run the mechanical conventions-lint items; judgment items are
+    /// reported as skipped
+    Lint {
+        /// Promote warnings into the failing set
+        #[arg(long)]
+        strict: bool,
+        /// Run only these items (comma-separated, e.g. 1,4,22)
+        #[arg(long, value_delimiter = ',')]
+        items: Option<Vec<u8>>,
+        /// Restrict findings to these paths
+        paths: Vec<String>,
+    },
+    /// Mechanical share of the plan-readiness gate
+    Readiness { plan: String },
+    /// Computed facts about one artifact
+    Show { artifact: String },
+    /// One computed value (class | band | dwell | held | status)
+    Query { what: QueryWhat, artifact: String },
+    /// Resolve any ref form against this root
+    Resolve { r#ref: String },
+    /// Plan lifecycle
+    Plan {
+        #[command(subcommand)]
+        cmd: PlanCmd,
+    },
+    /// Escalation records (fenced yaml under ## Escalations)
+    Escalate {
+        #[command(subcommand)]
+        cmd: EscalateCmd,
+    },
+    /// Plan-dispatch scan (the workflow's deterministic brain)
+    Dispatch {
+        #[command(subcommand)]
+        cmd: DispatchCmd,
+    },
+    /// Generated views (board | codeowners | tags | orgchart | escalations)
+    View {
+        name: String,
+        /// Write to the canonical path (or --out) instead of stdout
+        #[arg(long)]
+        write: bool,
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+        /// Regenerate and diff against the written file; exit 1 on drift
+        #[arg(long)]
+        check: bool,
+    },
+    /// Frontmatter plumbing (format-preserving)
+    Fm {
+        #[command(subcommand)]
+        cmd: FmCmd,
+    },
+    /// PreToolUse hook mode: stdin JSON, always exits 0, fails open
+    Gate,
+    /// Scaffold a domain instance from the embedded template
+    Scaffold {
+        dir: PathBuf,
+        /// Owner role for <owner> placeholders (founder or org/founder)
+        #[arg(long, default_value = "founder")]
+        owner: String,
+    },
+    /// rituals.md cadence ↔ workflow cron
+    Rituals {
+        #[command(subcommand)]
+        cmd: RitualsCmd,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum QueryWhat {
+    Class,
+    Band,
+    Dwell,
+    Held,
+    Status,
+}
+
+#[derive(Subcommand)]
+enum PlanCmd {
+    /// Census of plans/ with computed hold state
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        /// Only held plans (ready with unsatisfied awaits)
+        #[arg(long)]
+        held: bool,
+    },
+    /// draft → ready, gated on the mechanical readiness pass
+    Release {
+        plan: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// ready → active (the taker's claim)
+    Claim { plan: String },
+    /// → blocked, writing the open escalation record the status owes
+    Block {
+        plan: String,
+        #[arg(long)]
+        asks: String,
+        #[arg(long)]
+        attempted: Option<String>,
+        #[arg(long)]
+        blocked: Option<String>,
+        /// Raising role; defaults to the plan's owner
+        #[arg(long)]
+        by: Option<String>,
+    },
+    /// blocked → ready (warns if open records remain)
+    Unblock { plan: String },
+    /// → retired — the owner's verdict; releases awaits: dependents
+    Retire { plan: String },
+}
+
+#[derive(Subcommand)]
+enum EscalateCmd {
+    Add {
+        artifact: String,
+        #[arg(long)]
+        by: String,
+        /// Defaults to the raiser's escalate-to:, else the artifact's owner
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        asks: String,
+        #[arg(long)]
+        attempted: Option<String>,
+        #[arg(long)]
+        blocked: Option<String>,
+    },
+    List {
+        /// Include resolved records
+        #[arg(long)]
+        all: bool,
+    },
+    Resolve {
+        artifact: String,
+        /// Disambiguate when several records are open
+        #[arg(long)]
+        raised: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DispatchCmd {
+    Scan {
+        /// Override a tier's session: tier=model:effort:budget
+        #[arg(long, value_name = "SPEC")]
+        map: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum FmCmd {
+    Get {
+        file: PathBuf,
+        field: String,
+    },
+    Set {
+        file: PathBuf,
+        field: String,
+        value: String,
+        /// Insert the field when absent
+        #[arg(long)]
+        create: bool,
+    },
+    /// Append to a list field (flow or block form)
+    Add {
+        file: PathBuf,
+        field: String,
+        value: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RitualsCmd {
+    Cron {
+        /// Check a workflow file's crons against rituals.md cadences
+        #[arg(long, value_name = "WORKFLOW")]
+        check: Option<PathBuf>,
+        /// Emit a GitHub on.schedule block
+        #[arg(long)]
+        emit: bool,
+    },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    if matches!(cli.cmd, Cmd::Gate) {
+        trellis::gate::run(); // never returns; always exits 0
+    }
+    match run(cli) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("trellis: {e:#}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn spec_version(plugin_root: Option<&Path>) -> u32 {
+    if let Some(root) = plugin_root {
+        if let Ok(text) = std::fs::read_to_string(root.join("spec/model.md")) {
+            if let Some(v) = text
+                .lines()
+                .next()
+                .and_then(|t| t.split("(v").nth(1))
+                .and_then(|r| r.split(')').next())
+                .and_then(|d| d.parse().ok())
+            {
+                return v;
+            }
+        }
+    }
+    trellis::spec_version()
+}
+
+/// Normalize an artifact argument to a root-relative path.
+fn to_rel(root: &Root, arg: &str) -> String {
+    let p = Path::new(arg);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+    if abs.exists() {
+        let canon_abs = abs.canonicalize().unwrap_or(abs);
+        let canon_root = root
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| root.path.clone());
+        if let Ok(rel) = canon_abs.strip_prefix(&canon_root) {
+            return rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+        }
+    }
+    arg.trim_start_matches("./").to_string()
+}
+
+fn load(root_arg: Option<&Path>) -> anyhow::Result<(Tree, Git)> {
+    let root = Root::discover(root_arg)?;
+    if root.is_plugin_template() {
+        anyhow::bail!(
+            "{} is the plugin's own template, not a domain root",
+            root.path.display()
+        );
+    }
+    let git = Git::new(root.path.clone());
+    let tree = Tree::load(root)?;
+    Ok((tree, git))
+}
+
+fn print_json<T: serde::Serialize>(value: &T) {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(value).expect("serializable")
+    );
+}
+
+fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+    let ok = ExitCode::SUCCESS;
+    let findings_exit = ExitCode::from(1);
+
+    match cli.cmd {
+        Cmd::Gate => unreachable!("handled in main"),
+
+        Cmd::Root { quiet } => match Root::discover(cli.root.as_deref()) {
+            Ok(root) => {
+                if !quiet {
+                    println!("{}", root.path.display());
+                }
+                Ok(ok)
+            }
+            Err(e) => {
+                if !quiet {
+                    eprintln!("trellis: {e}");
+                }
+                Ok(ExitCode::from(2))
+            }
+        },
+
+        Cmd::Version => {
+            println!(
+                "trellis {} (spec v{})",
+                env!("CARGO_PKG_VERSION"),
+                spec_version(cli.plugin_root.as_deref())
+            );
+            Ok(ok)
+        }
+
+        Cmd::Lint {
+            strict,
+            items,
+            paths,
+        } => {
+            let (tree, git) = load(cli.root.as_deref())?;
+            let derived = graph::derive(&tree);
+            let reg = registries::load(&tree);
+            let ctx = lint::Ctx {
+                tree: &tree,
+                derived: &derived,
+                git: &git,
+                reg: &reg,
+                today: dates::today(),
+                spec_version: spec_version(cli.plugin_root.as_deref()),
+            };
+            let paths: Vec<String> = paths.iter().map(|p| to_rel(&tree.root, p)).collect();
+            let report = lint::run(&ctx, items.as_deref(), &paths);
+            match cli.format {
+                Format::Json => print_json(&report),
+                Format::Text => {
+                    for f in &report.findings {
+                        let line = f.line.map(|l| format!(":{l}")).unwrap_or_default();
+                        let sev = match f.severity {
+                            lint::Severity::Violation => "violation",
+                            lint::Severity::Warning => "warning",
+                        };
+                        let owner = f
+                            .owner
+                            .as_deref()
+                            .map(|o| format!(" → {o}"))
+                            .unwrap_or_default();
+                        println!(
+                            "{}{line}: [item {}] {sev}: {}{owner}",
+                            f.path, f.item, f.message
+                        );
+                    }
+                    for j in &report.judgment {
+                        println!("(judgment) item {}: {}", j.item, j.reason);
+                    }
+                    println!(
+                        "{} violation(s), {} warning(s); {} item(s) run, {} with a judgment remainder",
+                        report.summary.violations,
+                        report.summary.warnings,
+                        report.summary.items_run,
+                        report.summary.items_judgment
+                    );
+                }
+            }
+            let failing = report.summary.violations > 0 || (strict && report.summary.warnings > 0);
+            Ok(if failing { findings_exit } else { ok })
+        }
+
+        Cmd::Readiness { plan } => {
+            let (tree, _git) = load(cli.root.as_deref())?;
+            let derived = graph::derive(&tree);
+            let rel = to_rel(&tree.root, &plan);
+            let report = readiness::check(&tree, &derived, &rel)?;
+            match cli.format {
+                Format::Json => print_json(&report),
+                Format::Text => {
+                    for i in &report.items {
+                        let status = match i.status {
+                            readiness::ItemStatus::Pass => "pass",
+                            readiness::ItemStatus::Fail => "FAIL",
+                            readiness::ItemStatus::Partial => "partial",
+                            readiness::ItemStatus::Judgment => "judgment",
+                        };
+                        println!("[{:>2}] {status:<8} {} — {}", i.item, i.title, i.detail);
+                    }
+                    println!(
+                        "mechanical share: {}",
+                        if report.mechanical_pass {
+                            "pass"
+                        } else {
+                            "FAIL"
+                        }
+                    );
+                }
+            }
+            Ok(if report.mechanical_pass {
+                ok
+            } else {
+                findings_exit
+            })
+        }
+
+        Cmd::Show { artifact } => {
+            let (tree, git) = load(cli.root.as_deref())?;
+            let derived = graph::derive(&tree);
+            let rel = to_rel(&tree.root, &artifact);
+            let a = tree
+                .get(&rel)
+                .ok_or_else(|| anyhow::anyhow!("{rel} is not an artifact in this root"))?;
+            let mut obj = serde_json::Map::new();
+            let mut put = |k: &str, v: serde_json::Value| {
+                obj.insert(k.to_string(), v);
+            };
+            put("path", rel.clone().into());
+            put("kind", format!("{:?}", a.kind).to_lowercase().into());
+            put("provenance", a.provenance().into());
+            put("owner", a.owner().into());
+            if let Some(status) = a.status() {
+                put("status", status.clone().into());
+                if let Some(set) = git.status_set_date(&rel, &status) {
+                    put(
+                        "dwell_days",
+                        dates::days_between(set, dates::today()).into(),
+                    );
+                    put("status_since", set.to_string().into());
+                }
+            }
+            match a.kind {
+                Kind::Problem => {
+                    put(
+                        "effective_class",
+                        derived.effective_class(&rel).as_str().into(),
+                    );
+                    let edges: Vec<String> = derived
+                        .induced
+                        .get(&rel)
+                        .map(|v| {
+                            v.iter()
+                                .map(|e| {
+                                    format!(
+                                        "{} ({})",
+                                        e.strategy,
+                                        e.raw_class.as_deref().unwrap_or("no class")
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    put("induced_by", edges.into());
+                }
+                Kind::Strategy => {
+                    put(
+                        "band",
+                        derived.band(&rel).map(|b| b.as_str().to_string()).into(),
+                    );
+                }
+                Kind::Plan => {
+                    if let Some(fm) = &a.fm {
+                        put("type", fm.get_str("type").into());
+                        put("complexity", fm.get_str("complexity").into());
+                        put("awaits", fm.get_list("awaits").unwrap_or_default().into());
+                    }
+                    put(
+                        "effective_class",
+                        derived
+                            .plan_class(&tree, &rel)
+                            .map(|c| c.as_str().to_string())
+                            .into(),
+                    );
+                    if let Some((target, status)) = derived.hold(&rel) {
+                        put(
+                            "held",
+                            format!(
+                                "awaits {target} (status: {})",
+                                status
+                                    .map(|s| s.as_str().to_string())
+                                    .unwrap_or_else(|| "missing".into())
+                            )
+                            .into(),
+                        );
+                    }
+                    let open = trellis::model::escalation_records(a)
+                        .iter()
+                        .filter(|r| r.status.as_deref() == Some("open"))
+                        .count();
+                    put("open_escalations", open.into());
+                }
+                _ => {}
+            }
+            match cli.format {
+                Format::Json => print_json(&serde_json::Value::Object(obj)),
+                Format::Text => {
+                    for (k, v) in &obj {
+                        match v {
+                            serde_json::Value::Null => {}
+                            serde_json::Value::String(s) => println!("{k}: {s}"),
+                            other => println!("{k}: {other}"),
+                        }
+                    }
+                }
+            }
+            Ok(ok)
+        }
+
+        Cmd::Query { what, artifact } => {
+            let (tree, git) = load(cli.root.as_deref())?;
+            let derived = graph::derive(&tree);
+            let rel = to_rel(&tree.root, &artifact);
+            let a = tree
+                .get(&rel)
+                .ok_or_else(|| anyhow::anyhow!("{rel} is not an artifact in this root"))?;
+            match what {
+                QueryWhat::Status => println!(
+                    "{}",
+                    a.status()
+                        .ok_or_else(|| anyhow::anyhow!("{rel} declares no status:"))?
+                ),
+                QueryWhat::Band => println!(
+                    "{}",
+                    derived
+                        .band(&rel)
+                        .map(|b| b.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("{rel} has no strategy band"))?
+                ),
+                QueryWhat::Class => {
+                    let class = match a.kind {
+                        Kind::Problem => Some(derived.effective_class(&rel)),
+                        Kind::Plan => derived.plan_class(&tree, &rel),
+                        _ => None,
+                    };
+                    println!(
+                        "{}",
+                        class
+                            .map(|c| c.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("{rel} has no effective class"))?
+                    );
+                }
+                QueryWhat::Dwell => {
+                    let status = a
+                        .status()
+                        .ok_or_else(|| anyhow::anyhow!("{rel} declares no status:"))?;
+                    match git.status_set_date(&rel, &status) {
+                        Some(set) => println!("{}", dates::days_between(set, dates::today())),
+                        None => println!("0"),
+                    }
+                }
+                QueryWhat::Held => match derived.hold(&rel) {
+                    Some((target, status)) => println!(
+                        "held — awaits {target} (status: {})",
+                        status
+                            .map(|s| s.as_str().to_string())
+                            .unwrap_or_else(|| "missing".into())
+                    ),
+                    None => println!("not held"),
+                },
+            }
+            Ok(ok)
+        }
+
+        Cmd::Resolve { r#ref } => {
+            let (tree, _git) = load(cli.root.as_deref())?;
+            match refs::resolve(&r#ref, &tree) {
+                Ok(()) => {
+                    match refs::classify(&r#ref) {
+                        refs::RefKind::Path {
+                            path,
+                            anchor: Some(anchor),
+                        } => {
+                            let line = tree
+                                .get(&path)
+                                .and_then(|a| {
+                                    let want = trellis::markdown::slugify(&anchor);
+                                    a.headings.iter().find(|h| h.slug == want).map(|h| h.line)
+                                })
+                                .unwrap_or(0);
+                            println!("{path}:{line}");
+                        }
+                        refs::RefKind::Path { path, anchor: None } => println!("{path}"),
+                        refs::RefKind::Role(r) => {
+                            println!("{}/mandate.md", r)
+                        }
+                        refs::RefKind::SelfFunding => println!("self"),
+                        refs::RefKind::External(e) => println!("external: {e}"),
+                        refs::RefKind::Glob(g) => println!("glob: {g}"),
+                    }
+                    Ok(ok)
+                }
+                Err(reason) => {
+                    eprintln!("unresolved: {reason}");
+                    Ok(findings_exit)
+                }
+            }
+        }
+
+        Cmd::Plan { cmd } => plan_cmd(cli.root.as_deref(), cli.format, cmd),
+        Cmd::Escalate { cmd } => escalate_cmd(cli.root.as_deref(), cli.format, cmd),
+
+        Cmd::Dispatch {
+            cmd: DispatchCmd::Scan { map },
+        } => {
+            let (tree, _git) = load(cli.root.as_deref())?;
+            let mut sessions = SessionMap::default();
+            for spec in &map {
+                sessions.apply(spec)?;
+            }
+            let report = dispatch::scan(&tree, &sessions);
+            match cli.format {
+                Format::Json => print_json(&report),
+                Format::Text => {
+                    for w in &report.warnings {
+                        println!("warning: {w}");
+                    }
+                    for h in &report.held {
+                        println!(
+                            "held: {} — awaits {} (status: {})",
+                            h.plan,
+                            h.awaits,
+                            h.target_status.as_deref().unwrap_or("missing")
+                        );
+                    }
+                    for d in &report.dispatch {
+                        println!(
+                            "dispatch: {} → {} (complexity: {}, {} / {} / ${})",
+                            d.plan, d.owner, d.complexity, d.model, d.effort, d.budget_usd
+                        );
+                    }
+                    if report.dispatch.is_empty() && report.held.is_empty() {
+                        println!("(no ready plans)");
+                    }
+                }
+            }
+            Ok(ok)
+        }
+
+        Cmd::View {
+            name,
+            write,
+            out,
+            check,
+        } => {
+            let (tree, git) = load(cli.root.as_deref())?;
+            let today = dates::today();
+            let rendered = views::render_named(&name, &tree, &git, today).ok_or_else(|| {
+                anyhow::anyhow!("{name} is not a view ({})", views::NAMES.join(" | "))
+            })?;
+            let dest: Option<PathBuf> =
+                out.or_else(|| views::default_path(&name).map(|p| tree.root.path.join(p)));
+            if check {
+                let dest = dest.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "view {name} has no canonical path — pass --out to check a written copy"
+                    )
+                })?;
+                let existing = std::fs::read_to_string(&dest).unwrap_or_default();
+                let normalize = |s: &str| -> String {
+                    s.lines()
+                        .filter(|l| !l.starts_with("date:"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                if normalize(&existing) == normalize(&rendered) {
+                    println!("{}: fresh", dest.display());
+                    Ok(ok)
+                } else {
+                    println!(
+                        "{}: differs from `trellis view {name}` output — regenerate with --write",
+                        dest.display()
+                    );
+                    Ok(findings_exit)
+                }
+            } else if write {
+                let dest = dest.ok_or_else(|| {
+                    anyhow::anyhow!("view {name} has no canonical path — pass --out (register one in conventions.md)")
+                })?;
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&dest, &rendered)?;
+                println!("{}", dest.display());
+                Ok(ok)
+            } else {
+                print!("{rendered}");
+                Ok(ok)
+            }
+        }
+
+        Cmd::Fm { cmd } => match cmd {
+            FmCmd::Get { file, field } => match fmedit::get(&file, &field)? {
+                Some(v) => {
+                    println!("{v}");
+                    Ok(ok)
+                }
+                None => Ok(findings_exit),
+            },
+            FmCmd::Set {
+                file,
+                field,
+                value,
+                create,
+            } => {
+                fmedit::set_scalar(&file, &field, &value, create)?;
+                Ok(ok)
+            }
+            FmCmd::Add { file, field, value } => {
+                fmedit::append_list(&file, &field, &value)?;
+                Ok(ok)
+            }
+        },
+
+        Cmd::Scaffold { dir, owner } => {
+            let written =
+                scaffold::scaffold(&dir, &owner, dates::today(), cli.plugin_root.as_deref())?;
+            println!("scaffolded {} files into {}", written.len(), dir.display());
+            Ok(ok)
+        }
+
+        Cmd::Rituals {
+            cmd: RitualsCmd::Cron { check, emit },
+        } => {
+            let (tree, _git) = load(cli.root.as_deref())?;
+            let reg = registries::load(&tree);
+            if emit {
+                print!("{}", rituals::emit_github(&reg));
+                return Ok(ok);
+            }
+            match check {
+                Some(workflow) => {
+                    let text = std::fs::read_to_string(&workflow)?;
+                    let checks = rituals::check(&reg, &text);
+                    let mut drift = false;
+                    match cli.format {
+                        Format::Json => print_json(&checks),
+                        Format::Text => {
+                            for c in &checks {
+                                let verdict = match (&c.expected_cron, c.satisfied) {
+                                    (None, _) => "no cron mapping for this cadence — wire manually"
+                                        .to_string(),
+                                    (Some(e), Some(true)) => format!("ok ({e})"),
+                                    (Some(e), _) => {
+                                        drift = true;
+                                        format!("MISSING — expected {e}")
+                                    }
+                                };
+                                println!("{} ({}): {verdict}", c.ritual, c.cadence);
+                            }
+                        }
+                    }
+                    if cli.format == Format::Json {
+                        drift = checks
+                            .iter()
+                            .any(|c| c.expected_cron.is_some() && c.satisfied != Some(true));
+                    }
+                    Ok(if drift { findings_exit } else { ok })
+                }
+                None => {
+                    for r in &reg.rituals {
+                        println!(
+                            "{} ({}) → {}",
+                            r.name,
+                            r.cadence,
+                            rituals::expected_cron(&r.cadence)
+                                .unwrap_or_else(|| "no mapping".into())
+                        );
+                    }
+                    Ok(ok)
+                }
+            }
+        }
+    }
+}
+
+fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Result<ExitCode> {
+    let ok = ExitCode::SUCCESS;
+    let (tree, git) = load(root_arg)?;
+    let derived = graph::derive(&tree);
+
+    match cmd {
+        PlanCmd::List { status, held } => {
+            #[derive(serde::Serialize)]
+            struct Row {
+                plan: String,
+                status: Option<String>,
+                r#type: Option<String>,
+                owner: Option<String>,
+                complexity: Option<String>,
+                held: Option<String>,
+                dwell_days: Option<i64>,
+            }
+            let mut rows = Vec::new();
+            let mut plans: Vec<_> = tree.by_kind(Kind::Plan).collect();
+            plans.sort_by(|a, b| a.rel.cmp(&b.rel));
+            for p in plans {
+                let hold = derived.hold(&p.rel).map(|(t, _)| t);
+                if held && hold.is_none() {
+                    continue;
+                }
+                let s = p.status();
+                if let Some(want) = &status {
+                    if s.as_deref() != Some(want.as_str()) {
+                        continue;
+                    }
+                }
+                let dwell = s.as_ref().and_then(|s| {
+                    git.status_set_date(&p.rel, s)
+                        .map(|d| dates::days_between(d, dates::today()))
+                });
+                rows.push(Row {
+                    plan: p.rel.clone(),
+                    r#type: p.fm.as_ref().and_then(|f| f.get_str("type")),
+                    owner: p.owner(),
+                    complexity: p.fm.as_ref().and_then(|f| f.get_str("complexity")),
+                    status: s,
+                    held: hold,
+                    dwell_days: dwell,
+                });
+            }
+            match format {
+                Format::Json => print_json(&rows),
+                Format::Text => {
+                    for r in &rows {
+                        let held = r
+                            .held
+                            .as_deref()
+                            .map(|t| format!(" [held — awaits {t}]"))
+                            .unwrap_or_default();
+                        println!(
+                            "{} — {} ({}, {}){}{}",
+                            r.plan,
+                            r.status.as_deref().unwrap_or("no status"),
+                            r.r#type.as_deref().unwrap_or("no type"),
+                            r.owner.as_deref().unwrap_or("no owner"),
+                            r.dwell_days.map(|d| format!(" {d}d")).unwrap_or_default(),
+                            held,
+                        );
+                    }
+                    if rows.is_empty() {
+                        println!("(no plans match)");
+                    }
+                }
+            }
+            Ok(ok)
+        }
+
+        PlanCmd::Release { plan, force } => {
+            let rel = to_rel(&tree.root, &plan);
+            if !force {
+                let report = readiness::check(&tree, &derived, &rel)?;
+                if !report.mechanical_pass {
+                    for i in report
+                        .items
+                        .iter()
+                        .filter(|i| i.status == readiness::ItemStatus::Fail)
+                    {
+                        eprintln!("readiness [{:>2}] FAIL {} — {}", i.item, i.title, i.detail);
+                    }
+                    anyhow::bail!(
+                        "{rel} fails the mechanical readiness share — it stays draft (walk checks/plan-readiness.md, or --force past the gate)"
+                    );
+                }
+            }
+            let abs = tree.root.path.join(&rel);
+            plan_ops::flip(&abs, &[PlanStatus::Draft], PlanStatus::Ready)?;
+            println!("{rel}: draft → ready (judgment readiness items stay the owner's call)");
+            Ok(ok)
+        }
+
+        PlanCmd::Claim { plan } => {
+            let rel = to_rel(&tree.root, &plan);
+            if let Some((target, status)) = derived.hold(&rel) {
+                anyhow::bail!(
+                    "{rel} is held — awaits {target} (status: {}); the hold clears when every target retires",
+                    status.map(|s| s.as_str().to_string()).unwrap_or_else(|| "missing".into())
+                );
+            }
+            let abs = tree.root.path.join(&rel);
+            plan_ops::flip(&abs, &[PlanStatus::Ready], PlanStatus::Active)?;
+            println!("{rel}: ready → active");
+            Ok(ok)
+        }
+
+        PlanCmd::Block {
+            plan,
+            asks,
+            attempted,
+            blocked,
+            by,
+        } => {
+            let rel = to_rel(&tree.root, &plan);
+            let artifact = tree
+                .get(&rel)
+                .ok_or_else(|| anyhow::anyhow!("{rel} is not an artifact in this root"))?;
+            let by = match by {
+                Some(b) => b,
+                None => artifact
+                    .owner()
+                    .ok_or_else(|| anyhow::anyhow!("{rel} has no owner: — pass --by"))?,
+            };
+            let to = escalate::add(
+                &tree,
+                &rel,
+                &NewEscalation {
+                    by,
+                    to: None,
+                    asks,
+                    attempted,
+                    blocked,
+                },
+                dates::today(),
+            )?;
+            let abs = tree.root.path.join(&rel);
+            plan_ops::flip(
+                &abs,
+                &[PlanStatus::Ready, PlanStatus::Active],
+                PlanStatus::Blocked,
+            )?;
+            println!("{rel}: → blocked, open escalation recorded (to: {to})");
+            Ok(ok)
+        }
+
+        PlanCmd::Unblock { plan } => {
+            let rel = to_rel(&tree.root, &plan);
+            let abs = tree.root.path.join(&rel);
+            plan_ops::flip(&abs, &[PlanStatus::Blocked], PlanStatus::Ready)?;
+            let open = tree
+                .get(&rel)
+                .map(|a| {
+                    trellis::model::escalation_records(a)
+                        .iter()
+                        .filter(|r| r.status.as_deref() == Some("open"))
+                        .count()
+                })
+                .unwrap_or(0);
+            println!("{rel}: blocked → ready");
+            if open > 0 {
+                println!(
+                    "note: {open} open escalation record(s) remain — resolution is the owner's edit (trellis escalate resolve)"
+                );
+            }
+            Ok(ok)
+        }
+
+        PlanCmd::Retire { plan } => {
+            let rel = to_rel(&tree.root, &plan);
+            let abs = tree.root.path.join(&rel);
+            let from = [
+                PlanStatus::Draft,
+                PlanStatus::Ready,
+                PlanStatus::Active,
+                PlanStatus::Blocked,
+            ];
+            plan_ops::flip(&abs, &from, PlanStatus::Retired)?;
+            let dependents: Vec<String> = derived
+                .plan_awaits
+                .iter()
+                .filter(|(_, targets)| targets.contains(&rel))
+                .map(|(p, _)| p.clone())
+                .collect();
+            println!("{rel}: → retired");
+            if !dependents.is_empty() {
+                let mut d = dependents;
+                d.sort();
+                println!("awaits dependents that may now clear: {}", d.join(", "));
+            }
+            Ok(ok)
+        }
+    }
+}
+
+fn escalate_cmd(
+    root_arg: Option<&Path>,
+    format: Format,
+    cmd: EscalateCmd,
+) -> anyhow::Result<ExitCode> {
+    let ok = ExitCode::SUCCESS;
+    let (tree, _git) = load(root_arg)?;
+    match cmd {
+        EscalateCmd::Add {
+            artifact,
+            by,
+            to,
+            asks,
+            attempted,
+            blocked,
+        } => {
+            let rel = to_rel(&tree.root, &artifact);
+            let to = escalate::add(
+                &tree,
+                &rel,
+                &NewEscalation {
+                    by,
+                    to,
+                    asks,
+                    attempted,
+                    blocked,
+                },
+                dates::today(),
+            )?;
+            println!("{rel}: open escalation recorded (to: {to})");
+            Ok(ok)
+        }
+        EscalateCmd::List { all } => {
+            let records = escalate::list(&tree, all);
+            match format {
+                Format::Json => print_json(&records),
+                Format::Text => {
+                    for r in &records {
+                        println!(
+                            "{}:{} [{}] raised {} by {} to {} — {}",
+                            r.artifact,
+                            r.line,
+                            r.status.as_deref().unwrap_or("?"),
+                            r.raised.as_deref().unwrap_or("?"),
+                            r.by.as_deref().unwrap_or("?"),
+                            r.to.as_deref().unwrap_or("?"),
+                            r.asks.as_deref().unwrap_or("—"),
+                        );
+                    }
+                    if records.is_empty() {
+                        println!("(no {}records)", if all { "" } else { "open " });
+                    }
+                }
+            }
+            Ok(ok)
+        }
+        EscalateCmd::Resolve { artifact, raised } => {
+            let rel = to_rel(&tree.root, &artifact);
+            let record = escalate::resolve(&tree, &rel, raised.as_deref())?;
+            println!(
+                "{rel}: record raised {} flipped open → resolved — answer in prose beneath it; any status flip it unblocks is a separate change",
+                record.raised.as_deref().unwrap_or("?")
+            );
+            Ok(ok)
+        }
+    }
+}

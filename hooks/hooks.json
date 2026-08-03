@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs\""
+            "command": "if command -v trellis >/dev/null 2>&1; then exec trellis gate; else exec node \"${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs\"; fi"
           }
         ]
       }
