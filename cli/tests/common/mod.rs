@@ -145,6 +145,90 @@ impl Fixture {
         cmd
     }
 
+    /// A stand-in for `claude`: records the argv it was handed, one argument
+    /// per line, and — when its first argument names a plan file — claims it
+    /// the way a real taker does, by flipping `ready → active`. Lives under
+    /// `.trellis/`, which the tree walker skips, so it is never an artifact.
+    ///
+    /// Every serve test runs against this rather than a harness, which is the
+    /// point of the command template: the reference adapter is configuration,
+    /// so a hermetic one is too.
+    pub fn fake_harness(&self) -> String {
+        let rel = ".trellis/bin/harness";
+        let path = self.root().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // One file per invocation, named by second and pid. Sessions run
+        // concurrently and a shared append log interleaves their lines —
+        // shell printf is no more atomic than a sequence of echoes.
+        std::fs::write(
+            &path,
+            "#!/bin/sh\n\
+             dir=.trellis/runtime/argv\n\
+             mkdir -p \"$dir\"\n\
+             for a in \"$@\"; do echo \"$a\"; done > \"$dir/$(date +%s)-$$\"\n\
+             if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
+             \x20 sed 's/^status: ready$/status: active/' \"$1\" > \"$1.claimed\" \\\n\
+             \x20   && mv \"$1.claimed\" \"$1\"\n\
+             fi\n\
+             exit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        rel.to_string()
+    }
+
+    /// Every invocation the fake harness recorded, as argv vectors. Ordered
+    /// by the second each session started, so passes are in order and
+    /// sessions within one pass are not — which is all the daemon promises.
+    pub fn invocations(&self) -> Vec<Vec<String>> {
+        let dir = self.root().join(".trellis/runtime/argv");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        files.sort();
+        files
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
+            .map(|text| text.lines().map(str::to_string).collect())
+            .collect()
+    }
+
+    pub fn state(&self) -> serde_json::Value {
+        let path = self.root().join(".trellis/runtime/state.json");
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(serde_json::Value::Null)
+    }
+
+    /// `trellis serve --once …` at a given date, returning its stdout.
+    pub fn serve_once(&self, today: &str, args: &[&str]) -> String {
+        let out = self
+            .bin()
+            .env("TRELLIS_TODAY", today)
+            .args(["serve", "--once", "--no-http"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "serve --once failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// The built binary, for the cases that must not block on completion.
+    pub fn bin_path() -> PathBuf {
+        assert_cmd::cargo::cargo_bin("trellis")
+    }
+
     pub fn lint_json(&self, extra: &[&str]) -> serde_json::Value {
         let out = self
             .bin()

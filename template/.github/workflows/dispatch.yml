@@ -1,4 +1,8 @@
-# <trellis runtime binding> Plan dispatch: on a cadence, scan plans/ for the ones
+# <trellis runtime binding> [FORGE CLOCK] If this domain runs `trellis serve`,
+# this workflow is the redundant clock — delete it. A domain runs one clock,
+# never two (decision 0038).
+#
+# Plan dispatch: on a cadence, scan plans/ for the ones
 # an owner has released for a taker (`status: ready`) and start an `act` session
 # per plan to advance it. The scan is deterministic (no judgment); each plan's
 # work runs as a separate `/trellis:act <owner>` under that owner's authority —

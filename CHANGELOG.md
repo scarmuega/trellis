@@ -14,6 +14,40 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **The canonical local runtime: `trellis serve` (non-normative; decision
+  0038):** Stage 3 of `spec/runtime.md`'s staging plan — landed, and not as
+  staged. That entry promised a thin ingress-only dispatcher on the Claude
+  Agent SDK, pulled by an event the forge could not relay; that pull never
+  fired. What fired was that the reference binding made the *forge* structural
+  for three of seven contract services, so a domain operated from a laptop
+  against a bare git remote had an interactive plane and no clock at all;
+  0036's chartered escalation push seam had no substrate to attach to; and 0037
+  collapsed the daemon's cost from a build to a loop over the existing kernel.
+  `trellis serve` is a daemon mode of the same binary that **owns the clock**
+  (rituals fired on their `rituals.md` cadences, read at every pass so nothing
+  needs keeping in step with a cron; the dispatch scan run in-process with hold
+  semantics and the `ready → active` idempotence unchanged), **invokes
+  harnesses through argv command templates** in a committed `runtime.toml` so
+  `claude -p` is the reference adapter rather than a hardcode and a placeholder
+  fills exactly one argument slot, **serves the tree read-only** over a JSON API
+  that is a projection of what the commands already print — `plan list`,
+  `show`, `escalate list`, `dispatch scan`, the rendered views — plus an
+  embedded static plan board over that API with no build step and no package
+  manager, and **defines the escalation channel-adapter seam** with no adapter
+  shipped, so the pull surface is the live channel and a configured-but-absent
+  transport is refused at startup rather than silently dropped. Read-only is
+  structural, not a setting: there is no write path, which is also why the
+  surface is not ingress. Serve is never the interactive plane and never
+  judgment — it starts sessions, roles act. The forge binding stays the
+  *reference* (it alone covers all seven services, serve defers ingress); serve
+  is the canonical *local* binding, and `template/` now ships both with
+  `conventions.md` making the instance pick one — two clocks run every ritual
+  twice. New limits recorded rather than left to be discovered: a sleeping
+  machine misses cadences (catch-up fires once, never once per missed window),
+  the board and session logs are single-machine, and the API is unauthenticated
+  behind a loopback default. Spec stays v16; no lockstep entry, argued rather
+  than omitted — serve encodes no normative rule.
+
 - **The deterministic kernel: a `trellis` CLI (non-normative; decision 0037):**
   Stage 2 of `spec/runtime.md`'s staging plan, pulled by dogfooding — the
   conventions the members walk as prose had stopped moving, so twenty of the

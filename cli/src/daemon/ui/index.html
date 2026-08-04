@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis board</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf8; --panel: #fff; --ink: #1d1c1a; --muted: #6b6862;
+    --line: #e2ded7; --accent: #7a5c2e; --warn: #9c3b28; --hold: #7a6a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16151a; --panel: #1e1d23; --ink: #eceaf2; --muted: #9d99a8;
+      --line: #2f2d36; --accent: #cfa763; --warn: #e08a76; --hold: #cbbb72;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 1rem; margin: 0; font-weight: 650; letter-spacing: .01em; }
+  header .meta { color: var(--muted); font-size: .8rem; }
+  header .meta code { font-size: .78rem; }
+  main { display: flex; gap: .75rem; padding: 1rem 1.25rem; align-items: flex-start; overflow-x: auto; }
+  .column { flex: 1 0 15rem; min-width: 15rem; }
+  .column > h2 {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 .5rem .15rem; font-weight: 650;
+  }
+  .column > h2 .count { color: var(--ink); opacity: .55; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: .6rem .7rem; margin-bottom: .5rem;
+  }
+  .card .name { font-weight: 600; overflow-wrap: anywhere; }
+  .card .owner { color: var(--muted); font-size: .8rem; margin-top: .1rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .45rem; }
+  .badge {
+    font-size: .68rem; padding: .1rem .4rem; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); white-space: nowrap;
+  }
+  .badge.dwell { border-color: transparent; background: color-mix(in srgb, var(--ink) 7%, transparent); }
+  .badge.escalation { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .badge.held { color: var(--hold); border-color: color-mix(in srgb, var(--hold) 45%, transparent); }
+  .badge.complexity { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .empty { color: var(--muted); font-size: .8rem; font-style: italic; padding: .2rem .15rem; }
+  footer {
+    padding: .7rem 1.25rem; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .78rem;
+    display: flex; gap: 1rem; flex-wrap: wrap;
+  }
+  .problem { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trellis board</h1>
+  <span class="meta" id="root"></span>
+  <span class="meta" id="clock"></span>
+</header>
+<main id="board"></main>
+<footer>
+  <span id="daemon"></span>
+  <span id="notes"></span>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// A hold is a property of a ready plan, not a column: it is shown on the
+// card so the board never implies a status the model does not have.
+function card(plan) {
+  const el = document.createElement("article");
+  el.className = "card";
+
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = plan.plan.replace(/^plans\//, "").replace(/\.md$/, "");
+  el.append(name);
+
+  const owner = document.createElement("div");
+  owner.className = "owner";
+  owner.textContent = plan.owner || "no owner";
+  el.append(owner);
+
+  const badges = document.createElement("div");
+  badges.className = "badges";
+  const add = (text, cls) => {
+    const b = document.createElement("span");
+    b.className = "badge" + (cls ? " " + cls : "");
+    b.textContent = text;
+    badges.append(b);
+  };
+  if (plan.type) add(plan.type);
+  if (plan.complexity) add(plan.complexity, "complexity");
+  if (plan.dwell_days !== null && plan.dwell_days !== undefined) add(plan.dwell_days + "d", "dwell");
+  if (plan.held) add("held — awaits " + plan.held.replace(/^plans\//, ""), "held");
+  if (plan.open_escalations > 0) {
+    add(plan.open_escalations + (plan.open_escalations === 1 ? " escalation" : " escalations"), "escalation");
+  }
+  if (badges.children.length) el.append(badges);
+  return el;
+}
+
+function column(title, plans) {
+  const el = document.createElement("section");
+  el.className = "column";
+  const h = document.createElement("h2");
+  h.textContent = title + " ";
+  const count = document.createElement("span");
+  count.className = "count";
+  count.textContent = plans.length;
+  h.append(count);
+  el.append(h);
+  if (!plans.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "none";
+    el.append(empty);
+  }
+  plans.forEach((p) => el.append(card(p)));
+  return el;
+}
+
+async function refresh() {
+  try {
+    const [board, status] = await Promise.all([
+      fetch("/api/board").then((r) => r.json()),
+      fetch("/api/status").then((r) => r.json()),
+    ]);
+
+    const main = $("board");
+    main.replaceChildren();
+    board.order.forEach((name) => main.append(column(name, board.columns[name] || [])));
+    if (board.unplaced && board.unplaced.length) {
+      main.append(column("no status", board.unplaced));
+    }
+
+    $("root").innerHTML = "";
+    const root = document.createElement("code");
+    root.textContent = status.root || "";
+    $("root").append(root);
+
+    const flight = (status.in_flight || []).map((f) => f.label);
+    const parts = [];
+    parts.push(flight.length ? flight.length + " session(s) in flight: " + flight.join(", ") : "no sessions in flight");
+    if (status.last_pass) parts.push("last pass " + status.last_pass);
+    if (status.dry_run) parts.push("dry run");
+    $("daemon").textContent = parts.join(" · ");
+
+    // Holds are not listed here: status.held is whatever the last scan saw,
+    // while every card carries its own hold computed fresh with the board.
+    const notes = [];
+    (status.unscheduled || []).forEach((r) => notes.push("never auto-fired: " + r));
+    (status.warnings || []).forEach((w) => notes.push(w));
+    $("notes").textContent = notes.join(" · ");
+    $("notes").className = notes.length ? "problem" : "";
+    $("clock").textContent = "refreshed " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("clock").textContent = "cannot reach the daemon — " + e;
+  }
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,313 @@
+//! The serving surface. Every assertion here is the same question: does the
+//! API say what the command says? A UI that disagreed with `trellis plan
+//! list` would be a second encoding of the domain, which is the drift the
+//! kernel exists to prevent.
+
+mod common;
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
+use std::process::{Child, Command, Stdio};
+
+use common::{Fixture, ANCHOR};
+
+/// A `trellis serve` running in the background, killed when it goes out of
+/// scope. Started on port 0, so tests never collide over a fixed port.
+struct Daemon {
+    child: Child,
+    port: u16,
+}
+
+impl Daemon {
+    fn start(f: &Fixture) -> Daemon {
+        let mut child = Command::new(Fixture::bin_path())
+            .args(["serve", "--port", "0", "--tick-secs", "3600"])
+            .current_dir(f.root())
+            .env("TRELLIS_TODAY", ANCHOR)
+            .env_remove("CLAUDE_PLUGIN_ROOT")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        let port = loop {
+            match lines.next() {
+                Some(Ok(line)) => {
+                    if let Some(addr) = line.strip_prefix("listening on ") {
+                        break addr.rsplit(':').next().unwrap().parse().unwrap();
+                    }
+                }
+                _ => {
+                    let mut err = String::new();
+                    if let Some(mut e) = child.stderr.take() {
+                        let _ = e.read_to_string(&mut err);
+                    }
+                    panic!("the daemon exited before it listened: {err}");
+                }
+            }
+        };
+        // Keep draining stdout so a full pipe can never stall the daemon.
+        std::thread::spawn(move || lines.for_each(drop));
+        Daemon { child, port }
+    }
+
+    fn request(&self, method: &str, path: &str) -> (u16, String) {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        write!(
+            stream,
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).unwrap();
+        let text = String::from_utf8_lossy(&raw).into_owned();
+        let (head, body) = text.split_once("\r\n\r\n").expect("a complete response");
+        let code = head
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|c| c.parse().ok())
+            .expect("a status line");
+        (code, body.to_string())
+    }
+
+    fn get(&self, path: &str) -> (u16, String) {
+        self.request("GET", path)
+    }
+
+    fn json(&self, path: &str) -> serde_json::Value {
+        let (code, body) = self.get(path);
+        assert_eq!(code, 200, "GET {path} → {code}: {body}");
+        serde_json::from_str(&body)
+            .unwrap_or_else(|e| panic!("GET {path} is not JSON: {e}\n{body}"))
+    }
+
+    /// The socket accepts before the first tick finishes, so `/api/status`
+    /// truthfully reports no pass yet for a moment. Everything tree-backed is
+    /// already correct — only the daemon's own facts need the wait.
+    fn await_first_pass(&self) -> serde_json::Value {
+        for _ in 0..100 {
+            let status = self.json("/api/status");
+            if !status["last_pass"].is_null() {
+                return status;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("no scheduling pass completed within five seconds");
+    }
+}
+
+impl Drop for Daemon {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+const RECORD: &str = "
+## Escalations
+
+```yaml
+raised: 2026-08-01
+by: org/founder
+to: org/founder
+status: open
+asks: decide whether the second region waits for restock capacity
+```
+";
+
+fn fixture() -> Fixture {
+    let f = Fixture::healthy();
+    let harness = f.fake_harness();
+    // A harness that names no plugin checkout, so the daemon starts without
+    // one; nothing here is meant to actually run a session.
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[harness]\n\
+             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
+             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\ncomplexity: deep\n---\n# Ship\n"),
+    );
+    f.write(
+        "plans/waits.md",
+        &format!("{FM}status: ready\ntype: initiative\nawaits: [plans/ship-it.md]\n---\n# Waits\n"),
+    );
+    f.write(
+        "plans/stuck.md",
+        &format!("{FM}status: blocked\ntype: initiative\n---\n# Stuck\n{RECORD}"),
+    );
+    f.commit_at(common::BACKDATE, "fixture plans");
+    f
+}
+
+fn cli_json(f: &Fixture, args: &[&str]) -> serde_json::Value {
+    let out = f
+        .bin()
+        .args(args)
+        .args(["--format", "json"])
+        .output()
+        .unwrap();
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+#[test]
+fn the_plan_census_matches_the_command_exactly() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    assert_eq!(d.json("/api/plans"), cli_json(&f, &["plan", "list"]));
+}
+
+#[test]
+fn one_plans_facts_match_trellis_show() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    assert_eq!(
+        d.json("/api/plans/ship-it"),
+        cli_json(&f, &["show", "plans/ship-it.md"])
+    );
+    assert_eq!(
+        d.json("/api/plans/ship-it.md"),
+        cli_json(&f, &["show", "plans/ship-it.md"]),
+        "the .md is optional in the path"
+    );
+}
+
+#[test]
+fn the_board_partitions_every_plan_and_keeps_a_hold_off_the_columns() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let board = d.json("/api/board");
+    let all = d.json("/api/plans");
+
+    let placed: usize = board["columns"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|c| c.as_array().unwrap().len())
+        .sum();
+    assert_eq!(
+        placed + board["unplaced"].as_array().unwrap().len(),
+        all.as_array().unwrap().len(),
+        "every plan lands in exactly one column"
+    );
+
+    let ready = board["columns"]["ready"].as_array().unwrap();
+    let waits = ready
+        .iter()
+        .find(|p| p["plan"] == "plans/waits.md")
+        .expect("a held plan is still ready");
+    assert_eq!(waits["held"], "plans/ship-it.md", "the hold rides the card");
+    assert_eq!(board["order"][1], "ready");
+}
+
+#[test]
+fn open_escalations_are_served_as_the_command_lists_them() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let records = d.json("/api/escalations");
+    assert_eq!(records, cli_json(&f, &["escalate", "list"]));
+    assert_eq!(records[0]["artifact"], "plans/stuck.md");
+    assert_eq!(records[0]["status"], "open");
+
+    let plans = d.json("/api/plans");
+    let stuck = plans
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["plan"] == "plans/stuck.md")
+        .unwrap();
+    assert_eq!(stuck["open_escalations"], 1, "the board card can show it");
+}
+
+#[test]
+fn the_dispatch_endpoint_reports_the_scan_without_running_it() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let report = d.json("/api/dispatch");
+    assert_eq!(report["dispatch"][0]["plan"], "plans/ship-it.md");
+    assert_eq!(report["dispatch"][0]["model"], "fable", "the deep session");
+    assert_eq!(report["held"][0]["plan"], "plans/waits.md");
+    assert!(
+        f.invocations().is_empty(),
+        "reading the scan starts nothing"
+    );
+}
+
+#[test]
+fn views_are_served_as_the_markdown_they_are() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let (code, body) = d.get("/api/views/board");
+    assert_eq!(code, 200);
+    assert!(body.contains("provenance: generated"), "{body}");
+    assert!(body.contains("generated-by: trellis view board"), "{body}");
+    assert_eq!(d.get("/api/views/nonesuch").0, 404);
+}
+
+#[test]
+fn artifacts_are_served_by_their_root_relative_path() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let artifact = d.json("/api/artifacts/plans/ship-it.md");
+    assert_eq!(artifact["path"], "plans/ship-it.md");
+    assert_eq!(artifact["kind"], "plan");
+    assert!(artifact["text"].as_str().unwrap().contains("# Ship"));
+    assert_eq!(artifact["facts"]["complexity"], "deep");
+}
+
+#[test]
+fn nothing_outside_the_tree_is_reachable() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    for path in [
+        "/api/artifacts/../../../etc/passwd",
+        "/api/artifacts/.trellis/runtime/state.json",
+        "/api/artifacts/runtime.toml",
+        "/api/plans/nonesuch",
+        "/etc/passwd",
+    ] {
+        assert_eq!(d.get(path).0, 404, "{path} must not resolve");
+    }
+}
+
+#[test]
+fn the_surface_is_read_only() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let (code, body) = d.request("POST", "/api/plans");
+    assert_eq!(code, 405);
+    assert!(body.contains("read-only"), "{body}");
+}
+
+#[test]
+fn the_daemon_reports_its_own_state() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let status = d.await_first_pass();
+    assert_eq!(status["port"], d.port);
+    assert_eq!(status["last_pass"], ANCHOR);
+    assert!(status["pid"].as_u64().unwrap() > 0);
+    assert!(status["root"]
+        .as_str()
+        .unwrap()
+        .ends_with(f.root().file_name().unwrap().to_str().unwrap()));
+    assert_eq!(status["held"][0], "plans/waits.md");
+}
+
+#[test]
+fn the_board_page_is_served_at_the_root() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let (code, body) = d.get("/");
+    assert_eq!(code, 200);
+    assert!(body.contains("<title>Trellis board</title>"), "{body}");
+    assert!(body.contains("/api/board"), "the page reads the API");
+}

@@ -5,9 +5,11 @@
 //! while leaving every judgment call to the mandated roles. The judgment
 //! boundary is explicit: whatever this kernel skips, it reports as skipped.
 
+pub mod daemon;
 pub mod dates;
 pub mod dispatch;
 pub mod escalate;
+pub mod facts;
 pub mod fmedit;
 pub mod frontmatter;
 pub mod gate;

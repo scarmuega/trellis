@@ -11,7 +11,8 @@ instructions, invokes mandated roles, runs rituals on cadence, routes external
 events, enforces authority, and channels escalations to humans. This document
 defines the shape any runtime must have — the trigger planes, the one primitive
 they share, and seven contract services — then specifies the **reference
-binding**: Claude Code plus a git forge.
+binding**: Claude Code plus a git forge, and the **local binding**: `trellis
+serve`, the kernel's daemon mode, for a domain operated without forge coupling.
 
 ## Trigger planes
 
@@ -135,6 +136,9 @@ binding".
 | escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); approvals are PRs |
 | ledger | git history + forge threads; the acting role is recorded in the session marker and named in commits/comments |
 
+The `schedule` and dispatch rows above are this binding's clock. The local
+binding below owns the clock instead — a domain runs one, never both.
+
 **Plan dispatch.** `.github/workflows/dispatch.yml` — a cron on its own cadence
 (daily by default, distinct from `rituals.yml`) scans `plans/` for `status:
 ready` and fires one headless `/trellis:act <owner> advance …` per plan, modeled
@@ -190,13 +194,57 @@ stage 2/3):
   a timestamp so the steward's lint can flag it.
 - An escalation record notifies nobody: it satisfies the `escalation` service's
   audit-trail half and not its "channel they already watch" half (decision 0036).
-  Recipients read the root, a generated view over open records, or the report of
-  the session that raised it. A binding that needs a push adds one *over* the
-  records — the record stays the system of record.
+  Recipients read the root, a generated view over open records, the board and
+  API where the local binding runs, or the report of the session that raised it.
+  A binding that needs a push adds one *over* the records — the channel-adapter
+  seam in `trellis serve` (decision 0038) is where it attaches, and the record
+  stays the system of record.
 - An advisory role's finding is durable only once its owner transcribes it, so a
   headless ritual whose findings nobody transcribes leaves them in a workflow
   log. Accepted with the ownership boundary it buys; a per-role escalation inbox
   is the pull-triggered fix.
+
+## Local binding: `trellis serve`
+
+The kernel's daemon mode, run at a domain root (decision 0038). It shares the
+harness, the gate, and git-as-ledger with the reference binding and differs in
+one thing: it owns the clock itself instead of borrowing the forge's, which is
+what lets a domain be operated from a checkout and a binary with no forge at
+all. It also adds a serving surface, which the reference binding has none of.
+
+| service | binding |
+|---|---|
+| session | unchanged — Claude Code interactive at the root; serve never owns this plane |
+| act | argv command templates in `runtime.toml`; one headless process per act (`claude -p "/trellis:act …"` is the default template, not a hardcode) |
+| schedule | an in-process timer over `rituals.md` rows, read at every tick — no cron to keep in step; a window missed while the machine slept fires once on waking, never once per missed window |
+| ingress | **deferred** — relay through the forge binding or the interactive plane. The HTTP surface is read-only by construction and is not an ingress door |
+| gate | unchanged — the plugin hook binds every spawned session; serve itself has no write path |
+| escalation | records per 0036 remain the system of record; pulled via `/api/escalations` and the board; the channel-adapter seam is where a push transport attaches, and none ships |
+| ledger | git history and the acting-role marker as before, plus per-session logs under `.trellis/runtime/logs/` — gitignored and single-machine; the durable trail is git |
+
+Plan dispatch is the same deterministic scan, run in-process on its own
+cadence, with hold semantics and idempotence unchanged: the taker's `ready →
+active` flip on disk is still what keeps a re-scan from starting a second
+session. The complexity→session map lives in `runtime.toml` for this binding,
+which is the same rule as 0032 — the map lives with whoever runs the scan.
+A concurrency cap bounds how many sessions run at once, never how much work a
+cadence may start: a scan that could not start everything it found is not
+recorded as run, so the overflow starts as slots free rather than waiting a
+full cadence.
+
+**Known limits of this binding:**
+
+- A machine that sleeps or shuts down misses cadences. Catch-up on waking fires
+  each overdue row once; `catchup = "skip"` records the window instead, for a
+  domain that would rather wait for the next one.
+- The serving surface and the session logs are single-machine. Two operators
+  see two boards over one shared repository, and neither log is the ledger.
+- The API carries no authentication. It binds loopback by default; binding
+  anything else publishes an unauthenticated read of the whole domain.
+- A domain running serve *and* the forge crons runs two clocks and will run its
+  rituals twice. The instance's `conventions.md` picks one.
+- Push is still unshipped: 0036's limit softens from "notifies nobody" to
+  "notifies nobody until an adapter is configured," and no adapter is.
 
 ## Staging — extracted by pull, not built ahead
 
@@ -210,9 +258,19 @@ stage 2/3):
   escalation records, the five generated views, readiness's mechanical share,
   scaffold, and cron drift-check. Still open from the charter: `mandate.md` →
   permission-profile compilation.
-- **Stage 3 — dispatcher daemon (Claude Agent SDK).** Pull-trigger: an ingress
-  event that cannot be relayed through the forge, or needs conversational
-  latency (live support). A thin always-on process owning only ingress — never
-  the interactive plane.
+- **Stage 3 — local runtime daemon (`trellis serve`, decision 0038).**
+  **Landed**, and not as this entry staged it. The entry promised a thin
+  ingress-only dispatcher on the Claude Agent SDK, pulled by an event the forge
+  could not relay or by conversational latency. That pull never fired. What
+  fired was different: local-first operation, where planes 2 and 3 had no
+  binding at all without a forge; 0036's chartered push seam with no substrate
+  to attach to; and 0037 collapsing the daemon's cost from a build to a loop
+  over the existing kernel. So serve owns the clock (rituals and dispatch), a
+  read-only serving surface (computed facts and a plan board), and the
+  escalation channel-adapter seam — and still never the interactive plane.
+  Ingress, the one service this stage originally promised, remains deferred to
+  the forge relay. The staging discipline is worth keeping only if a stage can
+  be recorded as wrongly predicted rather than retrofitted; this one was.
 - **Rejected until evidence demands otherwise:** a hosted cloud runtime
-  (premise 5: infrastructure ahead of evidence).
+  (premise 5: infrastructure ahead of evidence); push transports beyond the
+  adapter seam; any write or ingress path on the serving surface.

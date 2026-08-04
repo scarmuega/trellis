@@ -181,6 +181,15 @@ choices:
 
 - Harness: Claude Code with the `trellis` plugin — interactive sessions at the
   root; headless `claude -p` for the scheduled and event-driven planes.
+- Clock — **pick one**: either `trellis serve` (the local binding; config in
+  `runtime.toml`, board and API on localhost) or the forge crons in
+  `.github/workflows/`. Both ship; disable whichever this instance does not
+  run. Two clocks run every ritual twice. Under serve the cadences are read
+  from `rituals.md` at every pass, so nothing needs keeping in step; under the
+  forge crons, the "keep its cron in step" notes below apply and
+  `trellis rituals cron --check` is the drift check. Ingress and the approval
+  gate stay with the forge either way — serve defers ingress and serves
+  read-only.
 - Role invocation: `/trellis:act {role} [input]`; rituals: `/trellis:ritual
   {name}`. An agent acting under a role records it in `.trellis/acting-role`
   (ephemeral, gitignored, never committed).
@@ -200,9 +209,10 @@ choices:
   retried next tick; the hold and its release are both declared-field reads in
   the deterministic scan (`trellis dispatch scan`) that `dispatch.yml` runs. A
   plan's `complexity:` tier maps to the dispatched session's reasoning effort,
-  model, and budget via the scan's `--map` flags inside `dispatch.yml` —
-  provider names, effort levels, and prices live only in that workflow; retune
-  the mapping there, never in a plan. The
+  model, and budget through the chosen clock's config — `dispatch.yml`'s
+  `--map` flags, or `runtime.toml`'s `[sessions]` under serve. Provider names,
+  effort levels, and prices live only there; retune the mapping in the binding,
+  never in a plan. The
   dispatched session runs with the full tool surface and auto-approved routine
   calls, so a role that writes code can build and test what it implements; what
   bounds it is the role's mandate, the automation class, the provenance gate, and
@@ -215,7 +225,9 @@ choices:
   blocker is reconstructible from the tree rather than from a forge thread. The
   trade this instance accepts: a committed record notifies nobody. Recipients
   find escalations by reading the root (a `blocked` plan carries an open record
-  by lint item 24) or a generated view over them, not by inbox.
+  by lint item 24), a generated view over them, or — where `trellis serve`
+  runs — the board and `/api/escalations`. Not by inbox: no push transport
+  ships, and the record stays the system of record if one is added.
 - Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
   supporting → commit, sampled review on the ritual cadence; core → PR with
   required owner review, enforced by branch protection plus a generated

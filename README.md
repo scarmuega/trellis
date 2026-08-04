@@ -23,7 +23,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `spec/model.md` | the specification (normative core + front door): what Trellis is, the doc map, hierarchy, schemas, rules |
 | `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
 | `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, automation shapes, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
-| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, plan dispatch, contract services, the Claude Code + forge reference binding |
+| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, plan dispatch, contract services, the Claude Code + forge reference binding, and the `trellis serve` local binding |
 | `template/` | copy to scaffold a new domain root (steward and focus roles included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
 | `checks/plan-effectiveness.md` | canonical plan-effectiveness checklist, shared by the focus agent and `/trellis:focus` |
@@ -37,7 +37,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `agents/coder.md` | `trellis:coder` — implementation agent; the portable holder for a domain's own code-bearing roles: gates on plan readiness, delivers code as a PR, files residue as a draft plan |
 | `commands/` | slash commands: `/trellis:act` (role-invocation primitive), `/trellis:ritual` (ritual runner), `/trellis:plan` (plan authoring through harness plan mode), `/trellis:focus` (plan-effectiveness review) |
 | `hooks/hooks.json` | deterministic enforcement gate: append-only decisions, no hand-edits to `generated` artifacts |
-| `cli/` | the deterministic kernel (`trellis`): mechanical lint with the judgment remainder reported, dispatch scan, the gate, lifecycle porcelain, generated views (decision 0037). Changes in lockstep with the model — see "Extending the plugin" |
+| `cli/` | the deterministic kernel (`trellis`): mechanical lint with the judgment remainder reported, dispatch scan, the gate, lifecycle porcelain, generated views (decision 0037), and `serve` — the local runtime daemon that owns the clock and serves a read-only board and API (decision 0038). Changes in lockstep with the model — see "Extending the plugin" |
 | `CHANGELOG.md` | the release ledger; notable changes per version |
 | `decisions/` | ADRs governing this spec — the framework eats its own mechanics |
 
@@ -63,9 +63,12 @@ artifacts that every skill and agent draws on, not the property of any one skill
    because it operates the business, not the model (decision 0031).
 5. Operate: work interactively at the domain root; invoke roles with
    `/trellis:act`, rituals with `/trellis:ritual`, draft plans with
-   `/trellis:plan`, and challenge them with `/trellis:focus`; wire the
-   scheduled and event-driven planes with the template's `.github/workflows/`.
-   The runtime contract and its reference binding: `spec/runtime.md`.
+   `/trellis:plan`, and challenge them with `/trellis:focus`. For the scheduled
+   and dispatch planes, pick one clock: run `trellis serve` at the root (local
+   binding — config in `runtime.toml`, board and API on
+   `http://127.0.0.1:7357`), or wire the template's `.github/workflows/` (forge
+   binding). Ingress stays with the forge either way. The runtime contract and
+   both bindings: `spec/runtime.md`.
 
 ## Extending the plugin
 

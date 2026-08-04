@@ -5,9 +5,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use trellis::daemon;
 use trellis::dates;
 use trellis::dispatch::{self, SessionMap};
 use trellis::escalate::{self, NewEscalation};
+use trellis::facts;
 use trellis::fmedit;
 use trellis::gitio::Git;
 use trellis::graph;
@@ -126,6 +128,38 @@ enum Cmd {
         #[command(subcommand)]
         cmd: RitualsCmd,
     },
+    /// Run the local runtime: rituals on cadence, plan dispatch, and a
+    /// read-only board and API over this root
+    Serve {
+        /// Listen on this port (0 asks the OS; the chosen port is printed)
+        #[arg(long)]
+        port: Option<u16>,
+        /// Listen on this address — anything but loopback exposes an
+        /// unauthenticated read surface
+        #[arg(long, value_name = "ADDR")]
+        bind: Option<String>,
+        /// Runtime config (default: runtime.toml at the root)
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
+        /// One scheduling pass, wait for the sessions it starts, exit
+        #[arg(long)]
+        once: bool,
+        /// Report what would be spawned; spawn nothing, record nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Scheduler and dispatcher only, no serving surface
+        #[arg(long)]
+        no_http: bool,
+        /// Seconds between scheduling passes
+        #[arg(long, value_name = "N")]
+        tick_secs: Option<u64>,
+        /// Sessions that may run at once
+        #[arg(long, value_name = "N")]
+        max_concurrent: Option<usize>,
+        /// Override a tier's session: tier=model:effort:budget
+        #[arg(long, value_name = "SPEC")]
+        map: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -236,6 +270,8 @@ enum FmCmd {
 
 #[derive(Subcommand)]
 enum RitualsCmd {
+    /// Forge-binding drift check: under `trellis serve` the cadences are
+    /// read from rituals.md at every pass, so there is no cron to drift
     Cron {
         /// Check a workflow file's crons against rituals.md cadences
         #[arg(long, value_name = "WORKFLOW")]
@@ -444,93 +480,15 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             let (tree, git) = load(cli.root.as_deref())?;
             let derived = graph::derive(&tree);
             let rel = to_rel(&tree.root, &artifact);
-            let a = tree
-                .get(&rel)
+            let value = facts::artifact(&tree, &git, &derived, &rel, dates::today())
                 .ok_or_else(|| anyhow::anyhow!("{rel} is not an artifact in this root"))?;
-            let mut obj = serde_json::Map::new();
-            let mut put = |k: &str, v: serde_json::Value| {
-                obj.insert(k.to_string(), v);
-            };
-            put("path", rel.clone().into());
-            put("kind", format!("{:?}", a.kind).to_lowercase().into());
-            put("provenance", a.provenance().into());
-            put("owner", a.owner().into());
-            if let Some(status) = a.status() {
-                put("status", status.clone().into());
-                if let Some(set) = git.status_set_date(&rel, &status) {
-                    put(
-                        "dwell_days",
-                        dates::days_between(set, dates::today()).into(),
-                    );
-                    put("status_since", set.to_string().into());
-                }
-            }
-            match a.kind {
-                Kind::Problem => {
-                    put(
-                        "effective_class",
-                        derived.effective_class(&rel).as_str().into(),
-                    );
-                    let edges: Vec<String> = derived
-                        .induced
-                        .get(&rel)
-                        .map(|v| {
-                            v.iter()
-                                .map(|e| {
-                                    format!(
-                                        "{} ({})",
-                                        e.strategy,
-                                        e.raw_class.as_deref().unwrap_or("no class")
-                                    )
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    put("induced_by", edges.into());
-                }
-                Kind::Strategy => {
-                    put(
-                        "band",
-                        derived.band(&rel).map(|b| b.as_str().to_string()).into(),
-                    );
-                }
-                Kind::Plan => {
-                    if let Some(fm) = &a.fm {
-                        put("type", fm.get_str("type").into());
-                        put("complexity", fm.get_str("complexity").into());
-                        put("awaits", fm.get_list("awaits").unwrap_or_default().into());
-                    }
-                    put(
-                        "effective_class",
-                        derived
-                            .plan_class(&tree, &rel)
-                            .map(|c| c.as_str().to_string())
-                            .into(),
-                    );
-                    if let Some((target, status)) = derived.hold(&rel) {
-                        put(
-                            "held",
-                            format!(
-                                "awaits {target} (status: {})",
-                                status
-                                    .map(|s| s.as_str().to_string())
-                                    .unwrap_or_else(|| "missing".into())
-                            )
-                            .into(),
-                        );
-                    }
-                    let open = trellis::model::escalation_records(a)
-                        .iter()
-                        .filter(|r| r.status.as_deref() == Some("open"))
-                        .count();
-                    put("open_escalations", open.into());
-                }
-                _ => {}
-            }
             match cli.format {
-                Format::Json => print_json(&serde_json::Value::Object(obj)),
+                Format::Json => print_json(&value),
                 Format::Text => {
-                    for (k, v) in &obj {
+                    let obj = value
+                        .as_object()
+                        .expect("facts::artifact returns an object");
+                    for (k, v) in obj {
                         match v {
                             serde_json::Value::Null => {}
                             serde_json::Value::String(s) => println!("{k}: {s}"),
@@ -754,6 +712,30 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ok)
         }
 
+        Cmd::Serve {
+            port,
+            bind,
+            config,
+            once,
+            dry_run,
+            no_http,
+            tick_secs,
+            max_concurrent,
+            map,
+        } => daemon::run(daemon::ServeOpts {
+            root: cli.root,
+            plugin_root: cli.plugin_root,
+            config,
+            bind,
+            port,
+            tick_secs,
+            max_concurrent,
+            map,
+            once,
+            dry_run,
+            no_http,
+        }),
+
         Cmd::Rituals {
             cmd: RitualsCmd::Cron { check, emit },
         } => {
@@ -816,44 +798,14 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
 
     match cmd {
         PlanCmd::List { status, held } => {
-            #[derive(serde::Serialize)]
-            struct Row {
-                plan: String,
-                status: Option<String>,
-                r#type: Option<String>,
-                owner: Option<String>,
-                complexity: Option<String>,
-                held: Option<String>,
-                dwell_days: Option<i64>,
-            }
-            let mut rows = Vec::new();
-            let mut plans: Vec<_> = tree.by_kind(Kind::Plan).collect();
-            plans.sort_by(|a, b| a.rel.cmp(&b.rel));
-            for p in plans {
-                let hold = derived.hold(&p.rel).map(|(t, _)| t);
-                if held && hold.is_none() {
-                    continue;
-                }
-                let s = p.status();
-                if let Some(want) = &status {
-                    if s.as_deref() != Some(want.as_str()) {
-                        continue;
-                    }
-                }
-                let dwell = s.as_ref().and_then(|s| {
-                    git.status_set_date(&p.rel, s)
-                        .map(|d| dates::days_between(d, dates::today()))
-                });
-                rows.push(Row {
-                    plan: p.rel.clone(),
-                    r#type: p.fm.as_ref().and_then(|f| f.get_str("type")),
-                    owner: p.owner(),
-                    complexity: p.fm.as_ref().and_then(|f| f.get_str("complexity")),
-                    status: s,
-                    held: hold,
-                    dwell_days: dwell,
-                });
-            }
+            let rows: Vec<facts::PlanRow> = facts::plan_rows(&tree, &git, &derived, dates::today())
+                .into_iter()
+                .filter(|r| !held || r.held.is_some())
+                .filter(|r| match &status {
+                    Some(want) => r.status.as_deref() == Some(want.as_str()),
+                    None => true,
+                })
+                .collect();
             match format {
                 Format::Json => print_json(&rows),
                 Format::Text => {

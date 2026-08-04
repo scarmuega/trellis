@@ -1,0 +1,82 @@
+# <trellis runtime binding> Local runtime config for `trellis serve` — the
+# clock, the harness, and the serving surface for this domain when it is
+# operated locally rather than from forge crons (decision 0038). Delete this
+# file if this instance runs the workflows in .github/workflows/ instead: a
+# domain runs one clock, never two.
+#
+# Secrets never live here. The daemon's own environment carries them
+# (ANTHROPIC_API_KEY and anything else the harness needs) and every spawned
+# session inherits it. Lint item 10 sweeps this file for credentials.
+#
+# Every field below is a default made explicit. An absent runtime.toml is
+# legal and means exactly what is written here.
+
+[server]
+# Loopback is deliberate: the API and board carry no authentication, so
+# binding anything else publishes a read of the whole domain.
+bind = "127.0.0.1"
+port = 7357
+
+[scheduler]
+# Seconds between passes. A pass is cheap — it reads the tree and compares
+# dates — so this is latency, not load.
+tick_secs = 60
+# Sessions that may run at once. A task that finds no slot stays due and
+# starts on the next pass; nothing is dropped.
+max_concurrent = 2
+# "once": a cadence missed while the machine slept fires once on waking.
+# "skip": the missed window is recorded and never run, so the next fire lands
+# a full period out. Either way, never once per missed window.
+catchup = "once"
+# Overrides the `plan dispatch` row's cadence in rituals.md.
+# dispatch_cadence = "daily"
+
+[harness]
+# argv arrays, never shell strings: a placeholder fills exactly one argument,
+# so nothing an artifact carries can become a shell word. Placeholders:
+# {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
+# {ritual} {complexity}. A second harness (pi, Codex, OpenCode) is these two
+# lines rewritten — Claude Code is the reference adapter, not a hardcode.
+#
+# {plugin_dir} comes from --plugin-root or $CLAUDE_PLUGIN_ROOT; the daemon
+# refuses to start if a template names it and neither is set.
+#
+# No --allowedTools on the act session, for the reason dispatch.yml gives at
+# length: what bounds the session is the role's mandate, the artifact's
+# automation class, the provenance gate, and the approval gate — not a flag.
+act_cmd = [
+  "claude", "-p", "{prompt}",
+  "--plugin-dir", "{plugin_dir}",
+  "--permission-mode", "auto",
+  "--model", "{model}",
+  "--effort", "{effort}",
+  "--max-budget-usd", "{budget}",
+]
+ritual_cmd = [
+  "claude", "-p", "{prompt}",
+  "--plugin-dir", "{plugin_dir}",
+  "--permission-mode", "acceptEdits",
+  "--allowedTools", "Read", "Grep", "Glob", "Write", "Edit", "Bash(gh *)", "Bash(git *)",
+  "--max-budget-usd", "5",
+]
+
+[prompts]
+act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority; flip its status ready→active as you claim it, blocked if you hit an uncleared blocker; leave a trail."
+ritual = "/trellis:ritual {ritual}"
+
+# Complexity → session resources. The spec defines the tiers (reasoning depth,
+# never size); this is where this binding turns them into a model, an effort
+# level, and a budget. Retune here, never in a plan (decision 0032). Absent
+# complexity means standard. The forge binding tunes the same mapping through
+# dispatch.yml's --map flags: the map lives with whoever runs the scan.
+[sessions]
+mechanical = "opus:high:5"
+standard = "opus:xhigh:10"
+deep = "fable:xhigh:25"
+
+# Push transports for newly opened escalation records. The seam exists; no
+# adapter ships (decision 0038), and a configured one is refused at startup
+# rather than silently dropped — escalation records are read from the board,
+# /api/escalations, or the root itself.
+# [[channels]]
+# kind = "webhook"

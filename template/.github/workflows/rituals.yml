@@ -1,4 +1,8 @@
-# <trellis runtime binding> Scheduled plane: run rituals.md rows headlessly.
+# <trellis runtime binding> [FORGE CLOCK] If this domain runs `trellis serve`,
+# this workflow is the redundant clock — delete it. A domain runs one clock,
+# never two (decision 0038).
+#
+# Scheduled plane: run rituals.md rows headlessly.
 # Adjust before enabling: the cron (keep it in step with rituals.md cadences —
 # split into separate jobs if cadences diverge), the RITUALS list (rows whose
 # executor is an agent role), the plugin checkout ref, and the budget cap.
