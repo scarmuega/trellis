@@ -91,6 +91,13 @@ impl Default for Scheduler {
 pub struct Harness {
     /// argv for one `act` session. Claude Code is the reference adapter;
     /// another harness is this array, rewritten.
+    ///
+    /// The defaults name no `{plugin_dir}`: the daemon runs on a machine
+    /// where the plugin is installed in the harness, which is the whole
+    /// premise of operating locally. A checkout that is *not* installed —
+    /// running against a working tree, say — adds `--plugin-dir
+    /// {plugin_dir}` here and supplies it with `--plugin-root` or
+    /// `CLAUDE_PLUGIN_ROOT`.
     pub act_cmd: Vec<String>,
     /// argv for one ritual session.
     pub ritual_cmd: Vec<String>,
@@ -104,8 +111,6 @@ impl Default for Harness {
                 "claude",
                 "-p",
                 "{prompt}",
-                "--plugin-dir",
-                "{plugin_dir}",
                 "--permission-mode",
                 "auto",
                 "--model",
@@ -119,8 +124,6 @@ impl Default for Harness {
                 "claude",
                 "-p",
                 "{prompt}",
-                "--plugin-dir",
-                "{plugin_dir}",
                 "--permission-mode",
                 "acceptEdits",
                 "--allowedTools",

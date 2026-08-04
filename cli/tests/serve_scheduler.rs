@@ -154,23 +154,39 @@ fn a_dry_run_reports_the_command_and_changes_nothing() {
 }
 
 #[test]
-fn the_default_config_renders_the_reference_harness_invocation() {
+fn the_default_config_runs_the_installed_plugin_without_pointing_at_a_checkout() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
-    // No runtime.toml at all: the defaults are the reference binding's.
-    let out = f.serve_once(ANCHOR, &["--dry-run", "--plugin-root", "/tmp/plugin"]);
+    // No runtime.toml at all, and no CLAUDE_PLUGIN_ROOT: the defaults are the
+    // reference binding's, and they must start on a machine where the plugin
+    // is simply installed in the harness — which is every machine a local
+    // daemon runs on.
+    let out = f.serve_once(ANCHOR, &["--dry-run"]);
 
     assert!(
-        out.contains("claude -p '/trellis:ritual conventions lint' --plugin-dir /tmp/plugin"),
+        out.contains("claude -p '/trellis:ritual conventions lint'"),
         "{out}"
     );
     assert!(out.contains("--permission-mode acceptEdits"), "{out}");
+    assert!(
+        !out.contains("--plugin-dir"),
+        "the default points at no checkout: {out}"
+    );
 }
 
 #[test]
 fn a_template_naming_the_plugin_without_one_configured_refuses_to_start() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
+    // Naming {plugin_dir} is how a domain operating against an uninstalled
+    // checkout opts in; doing so without supplying one must refuse rather
+    // than quietly run against whatever plugin the harness finds.
+    f.write(
+        "runtime.toml",
+        r#"[harness]
+ritual_cmd = ["claude", "--plugin-dir", "{plugin_dir}"]
+"#,
+    );
     let out = f
         .bin()
         .args(["serve", "--once", "--no-http"])
@@ -180,4 +196,18 @@ fn a_template_naming_the_plugin_without_one_configured_refuses_to_start() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("no plugin checkout is known"), "{err}");
+}
+
+#[test]
+fn a_domain_may_still_point_its_sessions_at_a_checkout() {
+    let f = Fixture::healthy();
+    f.write("rituals.md", RITUALS);
+    f.write(
+        "runtime.toml",
+        r#"[harness]
+ritual_cmd = ["claude", "-p", "{prompt}", "--plugin-dir", "{plugin_dir}"]
+"#,
+    );
+    let out = f.serve_once(ANCHOR, &["--dry-run", "--plugin-root", "/tmp/plugin"]);
+    assert!(out.contains("--plugin-dir /tmp/plugin"), "{out}");
 }

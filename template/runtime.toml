@@ -38,8 +38,11 @@ catchup = "once"
 # {ritual} {complexity}. A second harness (pi, Codex, OpenCode) is these two
 # lines rewritten — Claude Code is the reference adapter, not a hardcode.
 #
-# {plugin_dir} comes from --plugin-root or $CLAUDE_PLUGIN_ROOT; the daemon
-# refuses to start if a template names it and neither is set.
+# No --plugin-dir below: the daemon runs where the plugin is installed in the
+# harness, which is the premise of operating locally. Against a checkout that
+# is not installed, add "--plugin-dir", "{plugin_dir}" and supply it with
+# --plugin-root or CLAUDE_PLUGIN_ROOT — naming {plugin_dir} without either is
+# refused at startup rather than pointing a session at the wrong plugin.
 #
 # No --allowedTools on the act session: an allowlist that omits Bash leaves
 # every PR draft by construction, and what actually bounds the session is the
@@ -47,7 +50,6 @@ catchup = "once"
 # approval gate — never a flag list.
 act_cmd = [
   "claude", "-p", "{prompt}",
-  "--plugin-dir", "{plugin_dir}",
   "--permission-mode", "auto",
   "--model", "{model}",
   "--effort", "{effort}",
@@ -55,7 +57,6 @@ act_cmd = [
 ]
 ritual_cmd = [
   "claude", "-p", "{prompt}",
-  "--plugin-dir", "{plugin_dir}",
   "--permission-mode", "acceptEdits",
   "--allowedTools", "Read", "Grep", "Glob", "Write", "Edit", "Bash(gh *)", "Bash(git *)",
   "--max-budget-usd", "5",
