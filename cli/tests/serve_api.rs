@@ -19,9 +19,16 @@ struct Daemon {
 }
 
 impl Daemon {
+    /// Started with `--dry-run` deliberately. These tests are about what the
+    /// surface *says*, and a live dispatcher would claim the fixture's ready
+    /// plan (`ready → active`) partway through, so every comparison against
+    /// the CLI would race the daemon's first tick. Dry run still loads the
+    /// tree, runs the scan, and serves — it just never spawns, which makes
+    /// the tree the fixed thing it needs to be here. Dispatch behaviour is
+    /// `serve_dispatch.rs`'s subject, against a daemon that does spawn.
     fn start(f: &Fixture) -> Daemon {
         let mut child = Command::new(Fixture::bin_path())
-            .args(["serve", "--port", "0", "--tick-secs", "3600"])
+            .args(["serve", "--port", "0", "--tick-secs", "3600", "--dry-run"])
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
@@ -228,16 +235,19 @@ fn open_escalations_are_served_as_the_command_lists_them() {
 }
 
 #[test]
-fn the_dispatch_endpoint_reports_the_scan_without_running_it() {
+fn the_dispatch_endpoint_reports_what_the_daemon_would_start() {
     let f = fixture();
     let d = Daemon::start(&f);
     let report = d.json("/api/dispatch");
     assert_eq!(report["dispatch"][0]["plan"], "plans/ship-it.md");
-    assert_eq!(report["dispatch"][0]["model"], "fable", "the deep session");
+    assert_eq!(
+        report["dispatch"][0]["model"], "fable",
+        "the deep session this daemon is configured with, not a stock default"
+    );
     assert_eq!(report["held"][0]["plan"], "plans/waits.md");
     assert!(
-        f.invocations().is_empty(),
-        "reading the scan starts nothing"
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "reading the scan is not running it"
     );
 }
 
