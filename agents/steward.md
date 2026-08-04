@@ -74,8 +74,8 @@ artifact already carries an open record saying the same thing.
   under that owner's authority (an agent-held owner advances it, a human-held
   owner receives a handoff; the owner's act flips ready→active on pickup). You
   only start the owner's act — you never do the plan work yourself and you flip
-  no status. Where the binding wires dispatch as a workflow, the scan runs there
-  and you are not invoked for it.
+  no status. Where the binding runs the scan itself — the `trellis serve`
+  daemon does — you are not invoked for it at all.
 
 ## Boundaries (hard)
 

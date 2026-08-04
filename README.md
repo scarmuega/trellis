@@ -23,7 +23,7 @@ skills, agents, commands, and hooks from the conventional directories below.
 | `spec/model.md` | the specification (normative core + front door): what Trellis is, the doc map, hierarchy, schemas, rules |
 | `spec/rationale.md` | rationale: the premises the framework rests on — grounds the rules in `spec/model.md` |
 | `spec/patterns.md` | patterns & practices companion (non-normative): recurring content inside the structure — business functions, requirements, procedures, automation shapes, personas, journeys, vendors, pivot, stratified alternation, portfolio inversion |
-| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, plan dispatch, contract services, the Claude Code + forge reference binding, and the `trellis serve` local binding |
+| `spec/runtime.md` | runtime companion (non-normative): trigger planes, the `act` primitive, plan dispatch, contract services, and the reference binding — Claude Code, the `trellis serve` daemon, and a git forge for review |
 | `template/` | copy to scaffold a new domain root (steward and focus roles included) |
 | `checks/conventions-lint.md` | canonical lint checklist, shared by the steward agent and the conventions skill |
 | `checks/plan-effectiveness.md` | canonical plan-effectiveness checklist, shared by the focus agent and `/trellis:focus` |
@@ -63,12 +63,11 @@ artifacts that every skill and agent draws on, not the property of any one skill
    because it operates the business, not the model (decision 0031).
 5. Operate: work interactively at the domain root; invoke roles with
    `/trellis:act`, rituals with `/trellis:ritual`, draft plans with
-   `/trellis:plan`, and challenge them with `/trellis:focus`. For the scheduled
-   and dispatch planes, pick one clock: run `trellis serve` at the root (local
-   binding — config in `runtime.toml`, board and API on
-   `http://127.0.0.1:7357`), or wire the template's `.github/workflows/` (forge
-   binding). Ingress stays with the forge either way. The runtime contract and
-   both bindings: `spec/runtime.md`.
+   `/trellis:plan`, and challenge them with `/trellis:focus`. Run `trellis
+   serve` at the root for the scheduled and dispatch planes — it owns the
+   clock, and serves a read-only board and API on `http://127.0.0.1:7357`
+   (config: `runtime.toml`). The runtime contract and its binding:
+   `spec/runtime.md`.
 
 ## Extending the plugin
 

@@ -22,7 +22,6 @@ pub mod plan_ops;
 pub mod readiness;
 pub mod refs;
 pub mod registries;
-pub mod rituals;
 pub mod root;
 pub mod scaffold;
 pub mod tree;

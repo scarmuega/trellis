@@ -19,7 +19,6 @@ use trellis::plan_ops;
 use trellis::readiness;
 use trellis::refs;
 use trellis::registries;
-use trellis::rituals;
 use trellis::root::Root;
 use trellis::scaffold;
 use trellis::tree::{Kind, Tree};
@@ -122,11 +121,6 @@ enum Cmd {
         /// Owner role for <owner> placeholders (founder or org/founder)
         #[arg(long, default_value = "founder")]
         owner: String,
-    },
-    /// rituals.md cadence ↔ workflow cron
-    Rituals {
-        #[command(subcommand)]
-        cmd: RitualsCmd,
     },
     /// Run the local runtime: rituals on cadence, plan dispatch, and a
     /// read-only board and API over this root
@@ -265,20 +259,6 @@ enum FmCmd {
         file: PathBuf,
         field: String,
         value: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum RitualsCmd {
-    /// Forge-binding drift check: under `trellis serve` the cadences are
-    /// read from rituals.md at every pass, so there is no cron to drift
-    Cron {
-        /// Check a workflow file's crons against rituals.md cadences
-        #[arg(long, value_name = "WORKFLOW")]
-        check: Option<PathBuf>,
-        /// Emit a GitHub on.schedule block
-        #[arg(long)]
-        emit: bool,
     },
 }
 
@@ -735,59 +715,6 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             dry_run,
             no_http,
         }),
-
-        Cmd::Rituals {
-            cmd: RitualsCmd::Cron { check, emit },
-        } => {
-            let (tree, _git) = load(cli.root.as_deref())?;
-            let reg = registries::load(&tree);
-            if emit {
-                print!("{}", rituals::emit_github(&reg));
-                return Ok(ok);
-            }
-            match check {
-                Some(workflow) => {
-                    let text = std::fs::read_to_string(&workflow)?;
-                    let checks = rituals::check(&reg, &text);
-                    let mut drift = false;
-                    match cli.format {
-                        Format::Json => print_json(&checks),
-                        Format::Text => {
-                            for c in &checks {
-                                let verdict = match (&c.expected_cron, c.satisfied) {
-                                    (None, _) => "no cron mapping for this cadence — wire manually"
-                                        .to_string(),
-                                    (Some(e), Some(true)) => format!("ok ({e})"),
-                                    (Some(e), _) => {
-                                        drift = true;
-                                        format!("MISSING — expected {e}")
-                                    }
-                                };
-                                println!("{} ({}): {verdict}", c.ritual, c.cadence);
-                            }
-                        }
-                    }
-                    if cli.format == Format::Json {
-                        drift = checks
-                            .iter()
-                            .any(|c| c.expected_cron.is_some() && c.satisfied != Some(true));
-                    }
-                    Ok(if drift { findings_exit } else { ok })
-                }
-                None => {
-                    for r in &reg.rituals {
-                        println!(
-                            "{} ({}) → {}",
-                            r.name,
-                            r.cadence,
-                            rituals::expected_cron(&r.cadence)
-                                .unwrap_or_else(|| "no mapping".into())
-                        );
-                    }
-                    Ok(ok)
-                }
-            }
-        }
     }
 }
 

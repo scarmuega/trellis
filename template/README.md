@@ -19,17 +19,10 @@ Then:
 6. Review `conventions.md` — it is YOUR instance's authoritative copy; adjust the
    tag registry, plan types, and boundary guarantees to your tooling.
 7. Record `decisions/0000-adopt-trellis.md` (pre-written; pin your spec version).
-8. Wire the runtime (see `conventions.md` → Runtime binding) and pick one
-   clock:
-   - **Local** — keep `runtime.toml`, delete `.github/workflows/dispatch.yml`
-     and `rituals.yml`, and run `trellis serve` at the root (board and API on
-     `http://127.0.0.1:7357`). `ANTHROPIC_API_KEY` lives in the daemon's
-     environment, never in the root.
-   - **Forge** — delete `runtime.toml`, add `ANTHROPIC_API_KEY` to the forge's
-     secrets, align `rituals.yml` with your `rituals.md` cadences, and pin the
-     plugin checkout ref in both workflows.
-
-   Either way: create a `role:{name}` label per role reachable from ingress
-   (`ingress.yml`, which both clocks keep), and protect core-class paths
-   (branch protection + CODEOWNERS).
+8. Wire the runtime (see `conventions.md` → Runtime binding): review
+   `runtime.toml`, then run `trellis serve` at the root — it is the domain's
+   clock, and its board and API are on `http://127.0.0.1:7357`.
+   `ANTHROPIC_API_KEY` lives in the daemon's environment, never in this root.
+   Protect core-class paths on your forge (branch protection plus a generated
+   CODEOWNERS: `trellis view codeowners --write`).
 9. Delete this file.

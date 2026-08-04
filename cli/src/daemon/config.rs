@@ -2,11 +2,11 @@
 //! root.
 //!
 //! Binding-owned, never model-owned: the harness command templates and the
-//! complexity→session map live with whoever runs the scan (decision 0032), so
-//! this file is the local binding's tuning point exactly as `dispatch.yml`'s
-//! `--map` flags are the forge binding's. Every field has a default, so a root
-//! with no `runtime.toml` still serves. Secrets never live here — the daemon's
-//! own environment carries them and spawned sessions inherit it.
+//! complexity→session map live with whoever runs the scan (decision 0032), and
+//! since the daemon runs it, this file is where they live. Every field has a
+//! default, so a root with no `runtime.toml` still serves. Secrets never live
+//! here — the daemon's own environment carries them and spawned sessions
+//! inherit it.
 
 use std::path::{Path, PathBuf};
 

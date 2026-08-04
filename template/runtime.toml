@@ -1,8 +1,8 @@
-# <trellis runtime binding> Local runtime config for `trellis serve` — the
-# clock, the harness, and the serving surface for this domain when it is
-# operated locally rather than from forge crons (decision 0038). Delete this
-# file if this instance runs the workflows in .github/workflows/ instead: a
-# domain runs one clock, never two.
+# <trellis runtime binding> Runtime config for `trellis serve` — the clock,
+# the harness, and the serving surface for this domain (decisions 0038, 0039).
+# The daemon is the domain's only clock: run it wherever this repository is
+# checked out, under whatever supervises long-running processes there
+# (launchd, systemd, a terminal).
 #
 # Secrets never live here. The daemon's own environment carries them
 # (ANTHROPIC_API_KEY and anything else the harness needs) and every spawned
@@ -41,9 +41,10 @@ catchup = "once"
 # {plugin_dir} comes from --plugin-root or $CLAUDE_PLUGIN_ROOT; the daemon
 # refuses to start if a template names it and neither is set.
 #
-# No --allowedTools on the act session, for the reason dispatch.yml gives at
-# length: what bounds the session is the role's mandate, the artifact's
-# automation class, the provenance gate, and the approval gate — not a flag.
+# No --allowedTools on the act session: an allowlist that omits Bash leaves
+# every PR draft by construction, and what actually bounds the session is the
+# role's mandate, the artifact's automation class, the provenance gate, and the
+# approval gate — never a flag list.
 act_cmd = [
   "claude", "-p", "{prompt}",
   "--plugin-dir", "{plugin_dir}",
@@ -67,8 +68,9 @@ ritual = "/trellis:ritual {ritual}"
 # Complexity → session resources. The spec defines the tiers (reasoning depth,
 # never size); this is where this binding turns them into a model, an effort
 # level, and a budget. Retune here, never in a plan (decision 0032). Absent
-# complexity means standard. The forge binding tunes the same mapping through
-# dispatch.yml's --map flags: the map lives with whoever runs the scan.
+# complexity means standard; an illegal tier dispatches as standard with a
+# warning (conventions-lint item 4). `trellis serve --map` overrides a tier for
+# one run without editing this file.
 [sessions]
 mechanical = "opus:high:5"
 standard = "opus:xhigh:10"

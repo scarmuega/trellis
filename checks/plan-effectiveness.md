@@ -148,7 +148,7 @@ On a root predating v14 (no `ready` status), skip this group. Items 20–21 read
     finding — dispatch skips it by design and no act is owed; it answers to
     item 20.
 19. A plan `status: ready` that dispatch has acted on across more than one
-    cadence — workflow runs, dispatch commits, a session's branch or draft PR
+    cadence — session logs, dispatch commits, a session's branch or draft PR
     naming it — yet never flipped `ready → active` (or `→ blocked`): the takers
     are dying before the claim, and the budget burns every tick while the queue
     believes the plan is untaken. The claim is a default-branch edit, so a flip

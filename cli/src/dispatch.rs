@@ -1,7 +1,8 @@
-//! The plan-dispatch scan: an exact port of the awk in
-//! `template/.github/workflows/dispatch.yml`. Deterministic by construction —
-//! declared-field reads only. The complexity→session mapping ships as
-//! defaults but stays the *workflow's* tuning point via `--map` overrides
+//! The plan-dispatch scan. Deterministic by construction — declared-field
+//! reads only, no judgment. Originally an awk brain inside a forge workflow,
+//! ported here whole by decision 0037 and now run in-process by the daemon
+//! (0039). The complexity→session mapping ships as defaults but stays the
+//! *binding's* tuning point, through `--map` or `runtime.toml`'s `[sessions]`
 //! (decision 0032: retuned in the binding, never in a plan).
 
 use serde::Serialize;

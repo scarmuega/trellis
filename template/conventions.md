@@ -180,16 +180,12 @@ the spec version pinned in `decisions/0000-adopt-trellis.md`). This instance's
 choices:
 
 - Harness: Claude Code with the `trellis` plugin — interactive sessions at the
-  root; headless `claude -p` for the scheduled and event-driven planes.
-- Clock — **pick one**: either `trellis serve` (the local binding; config in
-  `runtime.toml`, board and API on localhost) or the forge crons in
-  `.github/workflows/`. Both ship; disable whichever this instance does not
-  run. Two clocks run every ritual twice. Under serve the cadences are read
-  from `rituals.md` at every pass, so nothing needs keeping in step; under the
-  forge crons, the "keep its cron in step" notes below apply and
-  `trellis rituals cron --check` is the drift check. Ingress and the approval
-  gate stay with the forge either way — serve defers ingress and serves
-  read-only.
+  root; headless `claude -p` for the scheduled plane.
+- Clock: `trellis serve`, run wherever this repository is checked out
+  (config: `runtime.toml`; board and API on `http://127.0.0.1:7357`). It reads
+  `rituals.md` at every pass, so cadences need no wiring kept in step with
+  them, and it is the domain's only clock — a second scheduler would run every
+  ritual twice.
 - Role invocation: `/trellis:act {role} [input]`; rituals: `/trellis:ritual
   {name}`. An agent acting under a role records it in `.trellis/acting-role`
   (ephemeral, gitignored, never committed).
@@ -199,35 +195,37 @@ choices:
 - Plan effectiveness: `/trellis:focus [scope]` interactively; on the scheduled
   plane the weekly `focus` ritual runs the same checklist through `org/focus` —
   one escalation per finding, owners decide.
-- Scheduled plane: `.github/workflows/rituals.yml` — keep its cron in step with
-  `rituals.md`.
-- Plan dispatch: `.github/workflows/dispatch.yml` — a daily cron scans `plans/`
-  for `status: ready` and starts a `/trellis:act {owner} advance …` per plan (the
-  `plan dispatch` row in `rituals.md`, operated by `org/steward`); keep its cron
-  in step. Each plan's work runs under its owner's authority. A plan whose
-  `awaits:` targets are not all `retired` is held — skipped, still `ready`,
-  retried next tick; the hold and its release are both declared-field reads in
-  the deterministic scan (`trellis dispatch scan`) that `dispatch.yml` runs. A
-  plan's `complexity:` tier maps to the dispatched session's reasoning effort,
-  model, and budget through the chosen clock's config — `dispatch.yml`'s
-  `--map` flags, or `runtime.toml`'s `[sessions]` under serve. Provider names,
-  effort levels, and prices live only there; retune the mapping in the binding,
-  never in a plan. The
+- Scheduled plane: `trellis serve` fires each `rituals.md` row on its cadence.
+  A row whose cadence has no day count (`on demand`) is never fired
+  automatically and is reported as unscheduled, so its silence is visible.
+- Plan dispatch: the daemon runs the deterministic scan (`trellis dispatch
+  scan`) on its cadence and starts a `/trellis:act {owner} advance …` per
+  `status: ready` plan — the `plan dispatch` row in `rituals.md`, carrying no
+  judgment and so run as wiring rather than as a steward session. Each plan's
+  work runs under its owner's authority. A plan whose `awaits:` targets are not
+  all `retired` is held — skipped, still `ready`, retried next pass; the hold
+  and its release are both declared-field reads. A plan's `complexity:` tier
+  maps to the dispatched session's reasoning effort, model, and budget through
+  `runtime.toml`'s `[sessions]`; provider names, effort levels, and prices live
+  only there — retune the mapping in the binding, never in a plan. The
   dispatched session runs with the full tool surface and auto-approved routine
   calls, so a role that writes code can build and test what it implements; what
   bounds it is the role's mandate, the automation class, the provenance gate, and
   the approval gate below — not a tool allowlist.
-- Ingress: label a forge issue `role:{name}` to invoke that role
-  (`.github/workflows/ingress.yml`). Relay outside events (email, tickets,
-  webhooks) into labeled issues so the domain keeps one ingress and one ledger.
+- Ingress: **unbound**. This instance has no event-driven plane: an outside
+  event (email, ticket, webhook) reaches the domain when a human brings it into
+  an interactive session. The daemon's HTTP surface is read-only by
+  construction and is deliberately not a trigger door — a call that could
+  invoke a role would be a plane with no mandate behind it. Bind one when a
+  real event needs it, and record the choice here.
 - Escalation channel: escalation records in the repo, per "Escalation records"
   above — the artifact that carries the problem carries the escalation, so a
   blocker is reconstructible from the tree rather than from a forge thread. The
   trade this instance accepts: a committed record notifies nobody. Recipients
   find escalations by reading the root (a `blocked` plan carries an open record
-  by lint item 24), a generated view over them, or — where `trellis serve`
-  runs — the board and `/api/escalations`. Not by inbox: no push transport
-  ships, and the record stays the system of record if one is added.
+  by lint item 24), a generated view over them, or the daemon's board and
+  `/api/escalations`. Not by inbox: no push transport ships, and the record
+  stays the system of record if one is added.
 - Approval gate: PRs. Automation-policy mechanics: generic → direct commit;
   supporting → commit, sampled review on the ritual cadence; core → PR with
   required owner review, enforced by branch protection plus a generated

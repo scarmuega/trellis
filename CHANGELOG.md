@@ -95,6 +95,37 @@ here and a matching `vx.y.z` git tag.
   no new status or kind, spec stays v16; eval fixtures untouched — the kernel
   reads them as test inputs and writes nothing back.
 
+### Removed
+
+- **The GitHub Actions binding (non-normative; decision 0039):** the three
+  template workflows (`dispatch.yml`, `rituals.yml`, `ingress.yml`) and the
+  `trellis rituals cron` subcommand with its `cli/src/rituals.rs` module are
+  gone. 0038 had shipped both clocks and made each instance pick one; on the
+  evidence — the workflows were never really used — that was the wrong call.
+  An unexercised alternative is not free: it is described in the spec, the
+  template, and every instance's own `conventions.md`, chosen against in every
+  scaffold, and stale before anyone notices. `trellis serve` is no longer "the
+  local binding" beside a forge one; it is **the** binding, and `spec/runtime.md`
+  now describes one. **The forge keeps review and loses triggering**: PRs remain
+  the approval gate, CODEOWNERS is still generated, branch protection still makes
+  core-class review structural, and `github:` stays on `holder/ref.md` — none of
+  that is Actions, all of it is `spec/model.md`'s automation policy reaching its
+  mechanics. What goes is the forge as a trigger. **`ingress` is now unbound and
+  says so**: it was bound only by `ingress.yml`, so the event-driven plane has no
+  binding at all, recorded as a binding choice in `spec/runtime.md` and the
+  template rather than left to be discovered — an outside event reaches the
+  domain when a human brings it into a session. Binding it from the daemon's
+  already-open socket is refused deliberately: that would be a trigger plane with
+  no mandate behind it, which is the argument 0038 made for the serving surface
+  being read-only by construction. Cron generation retires with the clock it
+  served — the daemon reads `rituals.md` at every pass, so there is no cron to
+  emit and no drift to check. The costs are recorded rather than softened: the
+  clock now runs where the daemon runs, so a sleeping machine misses cadences
+  (catch-up fires each overdue row once); there is no event-driven plane at all;
+  and the serving surface is single-machine. Spec stays v16 — the three trigger
+  planes remain the shape a runtime must have, and this binding leaves one empty,
+  which the conforming-binding checklist now asks bindings to declare.
+
 ### Changed
 
 - **Escalations are in-repo records, not forge issues (non-normative; decision

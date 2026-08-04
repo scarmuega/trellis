@@ -204,26 +204,3 @@ fn scaffold_produces_a_pinned_owned_instance() {
         .assert()
         .success();
 }
-
-#[test]
-fn rituals_cron_check_flags_drift() {
-    let f = Fixture::healthy();
-    f.write(
-        "rituals.md",
-        "---\nprovenance: authored\nowner: org/founder\n---\n# Rituals\n\n| ritual | cadence | executor | procedure |\n|---|---|---|---|\n| conventions lint | weekly | org/founder | lint |\n| plan dispatch | daily | org/founder | scan |\n",
-    );
-    f.write("wf.yml", "on:\n  schedule:\n    - cron: \"0 9 * * 1\"\n");
-    // Weekly is wired; daily is missing → drift.
-    f.bin()
-        .args(["rituals", "cron", "--check", "wf.yml"])
-        .assert()
-        .code(1);
-    f.write(
-        "wf.yml",
-        "on:\n  schedule:\n    - cron: \"0 9 * * 1\"\n    - cron: \"0 9 * * *\"\n",
-    );
-    f.bin()
-        .args(["rituals", "cron", "--check", "wf.yml"])
-        .assert()
-        .success();
-}
