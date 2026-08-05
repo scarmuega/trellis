@@ -1,5 +1,5 @@
 //! Git access by shelling out — the whole reference binding presumes `git`
-//! on PATH (gate.mjs spawned it; every workflow checks out). Four plumbing
+//! on PATH (gate.mjs spawned it; every workflow checks out). Five plumbing
 //! operations, memoized per run. Dwell and flow derive from the status
 //! timeline: the frontmatter `status:` value at each commit that touched
 //! the file.
@@ -18,6 +18,7 @@ pub type Timeline = Vec<(Date, Option<String>)>;
 pub struct Git {
     root: PathBuf,
     is_repo: RefCell<Option<bool>>,
+    ignored: RefCell<Option<Vec<String>>>,
     timelines: RefCell<HashMap<String, Timeline>>,
 }
 
@@ -26,6 +27,7 @@ impl Git {
         Git {
             root,
             is_repo: RefCell::new(None),
+            ignored: RefCell::new(None),
             timelines: RefCell::new(HashMap::new()),
         }
     }
@@ -51,6 +53,41 @@ impl Git {
         let v = self.run(&["rev-parse", "--git-dir"]).is_some();
         *self.is_repo.borrow_mut() = Some(v);
         v
+    }
+
+    /// Paths git excludes, root-relative, sorted; a wholly-ignored directory
+    /// collapses to one entry with a trailing `/` rather than its contents —
+    /// which is what keeps a `node_modules/` a single line instead of forty
+    /// thousand. Empty outside a repo (and on any git failure), so a
+    /// non-repo root sees exactly the pre-scope behavior.
+    ///
+    /// Deliberately *not* `--no-empty-directory`: paired with `--ignored` it
+    /// drops a wholly-ignored directory whose parent is itself untracked —
+    /// exactly the `node_modules/` under a not-yet-committed deployment unit
+    /// this is for. An empty directory in the prune set costs nothing.
+    pub fn ignored_paths(&self) -> Vec<String> {
+        if let Some(v) = self.ignored.borrow().as_ref() {
+            return v.clone();
+        }
+        let mut paths: Vec<String> = self
+            .run(&[
+                "ls-files",
+                "-z",
+                "--others",
+                "--ignored",
+                "--directory",
+                "--exclude-standard",
+            ])
+            .map(|out| {
+                out.split('\0')
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        paths.sort();
+        *self.ignored.borrow_mut() = Some(paths.clone());
+        paths
     }
 
     /// File content at HEAD, or None when not in HEAD / not a repo.

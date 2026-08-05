@@ -73,6 +73,17 @@ enum Cmd {
         /// Restrict findings to these paths
         paths: Vec<String>,
     },
+    /// Census of the artifacts discovery took in, and what it left out
+    Tree {
+        /// Only artifacts of this kind (as `trellis show` spells it)
+        #[arg(long, value_name = "KIND")]
+        kind: Option<String>,
+        /// One root-relative path per line, no drawing — for piping
+        #[arg(long)]
+        flat: bool,
+        /// Restrict to these paths
+        paths: Vec<String>,
+    },
     /// Mechanical share of the plan-readiness gate
     Readiness { plan: String },
     /// Computed facts about one artifact
@@ -331,6 +342,116 @@ fn load(root_arg: Option<&Path>) -> anyhow::Result<(Tree, Git)> {
     Ok((tree, git))
 }
 
+/// A directory of the census, or an artifact in one. Children stay in the
+/// order rows arrived, which is sorted by path.
+enum Node {
+    Dir(String, Vec<Node>),
+    Artifact(String, usize),
+}
+
+fn insert(children: &mut Vec<Node>, segments: &[&str], row: usize) {
+    let Some((head, rest)) = segments.split_first() else {
+        return;
+    };
+    if rest.is_empty() {
+        children.push(Node::Artifact(head.to_string(), row));
+        return;
+    }
+    // Sorted input keeps a directory's entries contiguous, so the match — if
+    // there is one — is the most recent child.
+    if let Some(Node::Dir(name, sub)) = children.last_mut() {
+        if name == head {
+            insert(sub, rest, row);
+            return;
+        }
+    }
+    let mut sub = Vec::new();
+    insert(&mut sub, rest, row);
+    children.push(Node::Dir(head.to_string(), sub));
+}
+
+fn draw(children: &[Node], prefix: &str, out: &mut Vec<(String, Option<usize>)>) {
+    for (i, child) in children.iter().enumerate() {
+        let last = i + 1 == children.len();
+        let (connector, carry) = if last {
+            ("└── ", "    ")
+        } else {
+            ("├── ", "│   ")
+        };
+        match child {
+            Node::Dir(name, sub) => {
+                out.push((format!("{prefix}{connector}{name}/"), None));
+                draw(sub, &format!("{prefix}{carry}"), out);
+            }
+            Node::Artifact(name, row) => {
+                out.push((format!("{prefix}{connector}{name}"), Some(*row)));
+            }
+        }
+    }
+}
+
+fn print_artifact_tree(report: &facts::TreeReport) {
+    println!("{}", report.root);
+    if report.artifacts.is_empty() {
+        println!("(no artifacts match)");
+    } else {
+        let mut roots = Vec::new();
+        for (i, a) in report.artifacts.iter().enumerate() {
+            insert(&mut roots, &a.path.split('/').collect::<Vec<_>>(), i);
+        }
+        let mut lines = Vec::new();
+        draw(&roots, "", &mut lines);
+
+        // Pad so the annotations line up as columns rather than as drift.
+        let width = lines
+            .iter()
+            .filter(|(_, row)| row.is_some())
+            .map(|(text, _)| text.chars().count())
+            .max()
+            .unwrap_or(0);
+        let kind_width = report
+            .artifacts
+            .iter()
+            .map(|a| a.kind.len())
+            .max()
+            .unwrap_or(0);
+        for (text, row) in &lines {
+            let Some(a) = row.map(|r| &report.artifacts[r]) else {
+                println!("{text}");
+                continue;
+            };
+            let pad = " ".repeat(width.saturating_sub(text.chars().count()));
+            let owner = a.owner.as_deref().unwrap_or("no owner");
+            let status = a
+                .status
+                .as_deref()
+                .map(|s| format!("  [{s}]"))
+                .unwrap_or_default();
+            println!(
+                "{text}{pad}  {:<kind_width$}  {owner}{status}",
+                a.kind,
+                kind_width = kind_width
+            );
+        }
+        println!("\n{} artifact(s)", report.artifacts.len());
+    }
+    print_scope(&report.scope);
+}
+
+/// What discovery left out. Silent when it left out nothing; never silent
+/// when it did.
+fn print_scope(scope: &trellis::tree::Scope) {
+    if scope.is_empty() {
+        return;
+    }
+    println!(
+        "scope: {} git-ignored path(s), {} declared carried path(s), {} nested repo(s) excluded from artifact discovery",
+        scope.git_ignored.len(),
+        scope.carried.len(),
+        scope.nested_repos.len()
+    );
+}
+
 fn print_json<T: serde::Serialize>(value: &T) {
     println!(
         "{}",
@@ -409,6 +530,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     for j in &report.judgment {
                         println!("(judgment) item {}: {}", j.item, j.reason);
                     }
+                    print_scope(&report.scope);
                     println!(
                         "{} violation(s), {} warning(s); {} item(s) run, {} with a judgment remainder",
                         report.summary.violations,
@@ -420,6 +542,34 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
             let failing = report.summary.violations > 0 || (strict && report.summary.warnings > 0);
             Ok(if failing { findings_exit } else { ok })
+        }
+
+        Cmd::Tree { kind, flat, paths } => {
+            let (tree, _git) = load(cli.root.as_deref())?;
+            let paths: Vec<String> = paths.iter().map(|p| to_rel(&tree.root, p)).collect();
+            let mut artifacts = facts::artifact_rows(&tree);
+            if !paths.is_empty() {
+                artifacts.retain(|a| trellis::tree::under_any(&a.path, &paths));
+            }
+            if let Some(want) = &kind {
+                artifacts.retain(|a| &a.kind == want);
+            }
+            let report = facts::TreeReport {
+                version: 1,
+                root: tree.root.path.display().to_string(),
+                artifacts,
+                scope: tree.scope.clone(),
+            };
+            match cli.format {
+                Format::Json => print_json(&report),
+                Format::Text if flat => {
+                    for a in &report.artifacts {
+                        println!("{}", a.path);
+                    }
+                }
+                Format::Text => print_artifact_tree(&report),
+            }
+            Ok(ok)
         }
 
         Cmd::Readiness { plan } => {

@@ -14,6 +14,21 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **`trellis tree` — the artifact census (non-normative; decision 0040):** the
+  companion the discovery-scope work needs. Every other read command answers a
+  question about an artifact you already know the path of; nothing answered
+  "which files does the kernel consider mine?", so the only way to find out was
+  to read the findings and infer it from what did *not* appear. `trellis tree`
+  draws the artifacts as a tree with each one's kind, owner, and status, and
+  prints the same `scope` report lint does — because a census that showed only
+  what it found would answer half the question, and the half it omitted is the
+  one behind "why is that README being linted?". `--format json` gives the same
+  data machine-shaped, `--flat` gives one path per line for piping, and
+  `--kind` plus path positionals narrow it (segment-matched, so `tree org`
+  means the directory and not every path starting with those letters). The row
+  shape lives in `facts.rs` beside the plan census, so the daemon can serve it
+  without a second encoding.
+
 - **The canonical local runtime: `trellis serve` (non-normative; decision
   0038):** Stage 3 of `spec/runtime.md`'s staging plan — landed, and not as
   staged. That entry promised a thin ingress-only dispatcher on the Claude
@@ -128,6 +143,44 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- **Artifact discovery is declared, not inferred (non-normative; decision
+  0040):** `Tree::load` answered "what is an artifact?" with one rule — every
+  `.md` under the root outside a dot-directory — which is less a heuristic than
+  the absence of one, and which `spec/model.md` has never described: it puts
+  real code inside a root at `solution/{bc}/{deployment unit}/`, and code brings
+  markdown belonging to its own project. A JavaScript deployment unit's
+  `node_modules/` was swept in whole, firing lint item 1 ("no frontmatter") on
+  every dependency README with `owner: None` — an escalation with no addressee —
+  while item 10 byte-read every file in it and, since 0038, the daemon re-walked
+  it on every scheduling pass. `conventions.md` compounds it: the boundary
+  guarantees name submodules and vendored copies as tools for imported material,
+  so a root is *expected* to hold other people's repositories. The `paths`
+  positional was never the remedy — it retains findings *after* every rule has
+  run over the whole tree. **Three rules now bound the walk, two declared and one
+  structural, and the differences between them are the point.** `.gitignore` says
+  a path is not in this repository. **A directory holding its own `.git`** says it
+  is a *different* repository — a submodule (a `.git` file), a nested clone or
+  worktree (a `.git` directory); this one cannot be a declaration, because a
+  submodule enters the parent's index as a single gitlink and never as its
+  contents, so no ignore list can name it and no `.gitignore` discipline will
+  hide it. Both are pruned during traversal, so nothing sees them, item 10
+  included: one is what git refuses to store, the other belongs to a repo with
+  its own owner and is materialized read-only here anyway (`.env` has always been
+  invisible under the dot rule; this is consistent, not new). `conventions.md`'s
+  new **carried-content registry** — a third registry beside plan-types and tags,
+  read by the same `registry_items` machinery, so no new parsing — covers what
+  neither structural rule can: a path committed into *this* repo but authored
+  elsewhere, whose markdown stops being an artifact while item 10 keeps sweeping
+  it, precisely because it *is* tracked here. Symlinked material needs no rule;
+  the walk never followed symlinks, which is now true on purpose. All three hold
+  in `Tree::load`, so lint, dispatch, views, readiness, and the daemon inherit
+  them together. The scope is reported and never silent — `--format json` carries
+  a `scope` object, the text format one line — because a narrowing nobody states
+  reads as "everything was checked", and the honest cost here is that a
+  `.gitignore` line can hide an artifact with no violation to show for it.
+  Nothing normative moves: which files a tool considers is a binding concern, and
+  obliging every future binding to implement this mechanism is exactly what
+  keeping it out of `spec/model.md` avoids.
 - **Escalations are in-repo records, not forge issues (non-normative; decision
   0036):** the escalation channel was a forge issue, hardcoded as `gh issue
   create` in four members, which split one event across two systems — the

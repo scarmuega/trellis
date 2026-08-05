@@ -38,7 +38,12 @@ artifact already carries an open record saying the same thing.
   (2's unstamped generated artifacts, 7, 16, 23's backed-by-the-language read)
   by hand. Without the binary, work through
   `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` item by item across the
-  root; that file stays the single source either way. Report each failure
+  root; that file stays the single source either way, and its **Scope**
+  paragraph bounds what "across the root" means — read `.gitignore` and
+  `conventions.md`'s carried-content registry before you start, treat any
+  directory holding its own `.git` as another repository, and never open a
+  dependency, submodule, or vendored tree looking for artifacts. (With the
+  binary, its `scope` output reports the same three lists.) Report each failure
   addressed to the artifact's `owner:`, including the path, the rule violated,
   and a suggested fix. Do not fix authored content yourself. Item 24 reads the
   escalation records themselves — a `blocked` plan with no open record is a

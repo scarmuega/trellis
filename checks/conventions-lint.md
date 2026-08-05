@@ -6,6 +6,30 @@ skill — this file is the single source; keep both pointing here rather than co
 the list. Each item is a pass/fail check across the root; each failure becomes an
 escalation to the artifact's owner.
 
+**Scope — what "across the root" covers.** A root carries material it does not
+author: `solution/{bc}/{deployment unit}/` is code by design, code brings its own
+markdown, and the boundary guarantees sanction submodules and vendored trees for
+imported material. Three things bound the sweep (decision 0040).
+
+- **`.gitignore`** — the path is not in this repository. Skip it entirely, item
+  10 included: a secret git refuses to store is not in the repo the secrets
+  policy speaks about.
+- **A directory holding its own `.git`** — a submodule, a nested clone, a
+  worktree. It is another repository, materialized read-only per the boundary
+  guarantees, and a finding there is not this domain's to fix. Skip it entirely,
+  item 10 included. Nothing declares this: a submodule enters the parent's index
+  as a single gitlink, never as its contents, so no ignore list will ever name
+  one.
+- **`conventions.md`'s carried-content registry** — the path is committed here
+  but authored elsewhere. Its markdown is not an artifact, so items 1, 2, 8, and
+  24 stay silent over it, but item 10 still sweeps it because it *is* in this
+  repo.
+
+Everything else under the root is in scope, dot-directories excepted (runtime and
+VCS state, never artifacts). `trellis lint` reports all three lists in its output;
+a hand-walked pass reads `.gitignore` and `conventions.md` before starting, and
+treats any directory with a `.git` in it as somebody else's.
+
 1. Every artifact has frontmatter with valid `provenance:` and `owner:`.
 2. No `generated` artifact has hand-edits (diff against its generator's output
    where feasible; otherwise flag suspicious edits).

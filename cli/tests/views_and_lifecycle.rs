@@ -204,3 +204,97 @@ fn scaffold_produces_a_pinned_owned_instance() {
         .assert()
         .success();
 }
+
+#[test]
+fn tree_censuses_the_artifacts_and_names_what_it_skipped() {
+    let f = Fixture::healthy();
+    f.write(".gitignore", "node_modules/\n");
+    f.write(
+        "solution/kit-kitchen/storefront/node_modules/left-pad/README.md",
+        "# left-pad\n",
+    );
+
+    let out = f.bin().arg("tree").output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("├── ") && text.contains("└── "),
+        "the text form draws a tree:\n{text}"
+    );
+    assert!(
+        text.contains("conventions.md") && text.contains("conventions"),
+        "artifacts carry their kind:\n{text}"
+    );
+    assert!(
+        !text.contains("left-pad"),
+        "the census shows artifacts, not dependencies:\n{text}"
+    );
+    assert!(
+        text.contains("1 git-ignored path(s)"),
+        "and says what it skipped:\n{text}"
+    );
+
+    // JSON is the same census, machine-shaped.
+    let out = f.bin().args(["--format", "json", "tree"]).output().unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let paths: Vec<&str> = report["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["path"].as_str().unwrap())
+        .collect();
+    assert!(paths.contains(&"conventions.md"), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.contains("left-pad")), "{paths:?}");
+    assert!(
+        paths.windows(2).all(|w| w[0] <= w[1]),
+        "sorted by path: {paths:?}"
+    );
+    assert_eq!(report["scope"]["git_ignored"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn tree_narrows_by_kind_and_by_path() {
+    let f = Fixture::healthy();
+
+    let json = |args: &[&str]| -> Vec<String> {
+        let mut cmd = f.bin();
+        cmd.args(["--format", "json", "tree"]).args(args);
+        let out = cmd.output().unwrap();
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        report["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["path"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let mandates = json(&["--kind", "mandate"]);
+    assert!(!mandates.is_empty());
+    assert!(
+        mandates.iter().all(|p| p.ends_with("/mandate.md")),
+        "{mandates:?}"
+    );
+
+    let under_org = json(&["org"]);
+    assert!(!under_org.is_empty());
+    assert!(
+        under_org.iter().all(|p| p.starts_with("org/")),
+        "{under_org:?}"
+    );
+
+    // The positional matches on segments, not on text.
+    assert!(
+        json(&["or"]).is_empty(),
+        "a partial segment matches nothing"
+    );
+
+    // --flat is the pipeable form: one path per line, nothing else.
+    let out = f.bin().args(["tree", "--flat", "org"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        text.lines().collect::<Vec<_>>(),
+        under_org.iter().map(String::as_str).collect::<Vec<_>>(),
+        "--flat prints exactly the paths"
+    );
+}

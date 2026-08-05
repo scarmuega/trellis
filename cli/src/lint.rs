@@ -12,7 +12,7 @@ use crate::model::escalation_records;
 use crate::model::{Band, Class, Complexity, PlanStatus, Provenance, StrategyStatus};
 use crate::refs;
 use crate::registries::Registries;
-use crate::tree::{Kind, Tree};
+use crate::tree::{Kind, Scope, Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -58,6 +58,9 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub judgment: Vec<JudgmentNote>,
     pub summary: Summary,
+    /// What the walk was not allowed to see. Carried here because a narrowing
+    /// nobody reports reads as "everything was checked".
+    pub scope: Scope,
 }
 
 pub struct Ctx<'a> {
@@ -167,12 +170,8 @@ pub fn run(ctx: &Ctx, items: Option<&[u8]>, paths: &[String]) -> Report {
     }
 
     if !paths.is_empty() {
-        sink.findings.retain(|f| {
-            paths.iter().any(|p| {
-                let p = p.trim_end_matches('/');
-                f.path == p || f.path.starts_with(&format!("{p}/"))
-            })
-        });
+        sink.findings
+            .retain(|f| crate::tree::under_any(&f.path, paths));
     }
 
     sink.findings
@@ -202,6 +201,7 @@ pub fn run(ctx: &Ctx, items: Option<&[u8]>, paths: &[String]) -> Report {
         },
         findings: sink.findings,
         judgment: sink.judgment,
+        scope: ctx.tree.scope.clone(),
     }
 }
 

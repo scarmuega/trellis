@@ -170,6 +170,193 @@ fn stale_actuals_fire_item_12_once_a_window_exists() {
 }
 
 #[test]
+fn git_ignored_trees_are_not_artifacts() {
+    let f = Fixture::healthy();
+    // A deployment unit with its dependencies installed — the shape
+    // spec/model.md puts inside solution/{bc}/ by design.
+    f.write(".gitignore", "node_modules/\n");
+    f.write(
+        "solution/kit-kitchen/storefront/node_modules/left-pad/README.md",
+        "# left-pad\n\nNo frontmatter, and none of the domain's business.\n",
+    );
+    let report = f.lint_json(&[]);
+    assert_eq!(
+        report["summary"]["violations"], 0,
+        "a git-ignored dependency tree is not the domain's markdown: {report:#}"
+    );
+    assert!(
+        !report["scope"]["git_ignored"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "the exclusion must be reported, never silent: {report:#}"
+    );
+
+    // The same tree once the deployment unit is committed: git reports an
+    // ignored directory differently depending on whether its parent is
+    // tracked, and both readings must prune.
+    f.commit_at("2026-07-01", "commit the deployment unit");
+    let report = f.lint_json(&[]);
+    assert_eq!(
+        report["summary"]["violations"], 0,
+        "committing the parent must not resurrect the dependency tree: {report:#}"
+    );
+}
+
+#[test]
+fn a_nested_repository_is_never_this_domains_markdown() {
+    let f = Fixture::healthy();
+
+    // A submodule as `conventions.md`'s boundary guarantees sanction it: a
+    // gitlink in the index, so no ignore query will ever name it, and a
+    // `.git` *file* on disk.
+    let src = tempfile::TempDir::new().unwrap();
+    let upstream = src.path().join("upstream");
+    std::fs::create_dir_all(upstream.join("docs")).unwrap();
+    std::fs::write(upstream.join("README.md"), "# Upstream\n").unwrap();
+    std::fs::write(upstream.join("docs/guide.md"), "# Guide\n").unwrap();
+    for args in [
+        vec!["init", "-q", "."],
+        vec!["config", "user.email", "up@example.invalid"],
+        vec!["config", "user.name", "upstream"],
+        vec!["add", "-A"],
+        vec!["commit", "-q", "-m", "upstream"],
+    ] {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&upstream)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+    let url = upstream.to_str().unwrap();
+    f.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "user.name=fixture",
+        "submodule",
+        "add",
+        "-q",
+        url,
+        "solution/kit-kitchen/vendor/upstream",
+    ]);
+
+    // And a stray clone nobody registered — a `.git` directory, equally
+    // invisible to every ignore query.
+    f.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "clone",
+        "-q",
+        url,
+        "solution/kit-kitchen/stray",
+    ]);
+
+    let report = f.lint_json(&[]);
+    let paths: Vec<&str> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.contains("vendor/upstream") || p.contains("stray")),
+        "another repository's markdown is never this domain's: {paths:?}"
+    );
+
+    let nested: Vec<&str> = report["scope"]["nested_repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        nested,
+        vec![
+            "solution/kit-kitchen/stray",
+            "solution/kit-kitchen/vendor/upstream",
+        ],
+        "both are reported, so the narrowing is never silent: {report:#}"
+    );
+}
+
+#[test]
+fn carried_content_is_not_an_artifact_but_is_still_swept() {
+    let f = Fixture::healthy();
+    // Tracked code inside a bounded context: markdown that belongs to the
+    // app, plus a file carrying something the secrets policy forbids.
+    f.write(
+        "solution/kit-kitchen/storefront/README.md",
+        "# Storefront\n\nThe app's own README.\n",
+    );
+    f.write(
+        "solution/kit-kitchen/storefront/deploy.md",
+        "# Deploy\n\n    aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n",
+    );
+
+    // Control: undeclared, it is an artifact like any other and fails item 1.
+    let report = f.lint_json(&[]);
+    let paths: Vec<&str> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["item"] == 1)
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        paths.contains(&"solution/kit-kitchen/storefront/README.md"),
+        "undeclared markdown is still an artifact: {report:#}"
+    );
+
+    // Declare it carried.
+    let conv = f.read("conventions.md");
+    f.write(
+        "conventions.md",
+        &format!(
+            "{conv}\n## Carried-content registry\n\n\
+             - `solution/kit-kitchen/storefront/` — the storefront app's own tree\n"
+        ),
+    );
+
+    let report = f.lint_json(&[]);
+    let item1: Vec<&str> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["item"] == 1)
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        item1.is_empty(),
+        "declared carried markdown is not an artifact: {item1:?}"
+    );
+    assert_eq!(
+        report["scope"]["carried"][0], "solution/kit-kitchen/storefront/",
+        "{report:#}"
+    );
+
+    // But it is tracked, so the secrets sweep still reaches it.
+    let item10: Vec<&str> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["item"] == 10)
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        item10,
+        vec!["solution/kit-kitchen/storefront/deploy.md"],
+        "carried content leaves item 10's reach untouched: {report:#}"
+    );
+}
+
+#[test]
 fn owner_escalation_shape_travels_in_findings() {
     let f = Fixture::healthy();
     f.write("problem/bare.md", "# Bare\n");

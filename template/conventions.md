@@ -149,6 +149,23 @@ Register tags here before use so generated views stay coherent.
 
 - (none yet)
 
+## Carried-content registry
+
+Root-relative path prefixes this root *carries* but does not author — a
+deployment unit's own docs, a vendored tree, an imported corpus. Their markdown
+is excluded from artifact discovery, so it owes no frontmatter and no owner;
+because it is still committed here, it is still swept for secrets (decision
+0040). Two kinds of foreign material need no entry, because the tooling already
+recognizes them: anything `.gitignore` names (git already says it is not in this
+repository), and any directory holding its own `.git` — a submodule, a nested
+clone — which is another repository outright.
+
+Declare a prefix only for material the domain genuinely does not author —
+an entry silences every check over that subtree, and the kernel cannot tell an
+excluded artifact from an excluded dependency.
+
+- (none yet)
+
 ## Need anchors
 
 Market needs get stable anchored headings in `market.md` (`## N-{slug}`),

@@ -1,11 +1,17 @@
 //! Load a Trellis root into memory: every `.md` artifact parsed once
 //! (frontmatter, headings, fences), plus the directory census the structural
 //! lints need. Dot-directories are runtime/VCS state, never artifacts.
+//!
+//! A root holds more than the domain authors — `spec/model.md` puts real code
+//! under `solution/{bc}/{deployment unit}/`, and code brings markdown that
+//! belongs to its own project. What is an artifact is therefore *declared*,
+//! never inferred, by two statements the domain already makes (see `Scope`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::frontmatter::{self, Frontmatter};
+use crate::gitio::Git;
 use crate::markdown::{self, FencedBlock, Heading};
 use crate::root::Root;
 
@@ -73,13 +79,117 @@ impl Artifact {
     }
 }
 
+/// What the walk did not take in. Two declarations and one structural fact.
+///
+/// The declarations: `.gitignore` says "not in this repo"; the
+/// carried-content registry in `conventions.md` says "in the repo, but the
+/// domain carries it rather than authors it".
+///
+/// The structural fact: a directory holding its own `.git` is a *different
+/// repository* — a submodule (a `.git` file), a nested clone or worktree (a
+/// `.git` directory). Its files belong to that repo, are not in this one's
+/// index, and — per the boundary guarantees — are materialized read-only, so
+/// this domain could not fix a finding in them if it wanted to. Git says so
+/// itself: a submodule enters this repo's index as one gitlink, never as its
+/// contents, so no ignore query will ever name it. Nothing declares this and
+/// nothing needs to.
+///
+/// The three are enforced at two points, and the difference is the point.
+/// Git-ignored paths and nested repositories are pruned from the walk
+/// outright — nothing sees them, not even item 10's secrets sweep, because
+/// neither is in the repo the secrets policy speaks about. A carried path is
+/// still walked and still swept — it *is* tracked here — it simply stops
+/// being an artifact.
+#[derive(Debug, Default, Clone, serde::Serialize)]
+pub struct Scope {
+    /// Root-relative prefixes git excludes; empty outside a repo.
+    pub git_ignored: Vec<String>,
+    /// Root-relative prefixes `conventions.md` declares carried.
+    pub carried: Vec<String>,
+    /// Root-relative directories holding their own `.git`. Unlike the two
+    /// above this is discovered by the walk, not declared before it.
+    pub nested_repos: Vec<String>,
+}
+
+impl Scope {
+    pub fn discover(root: &Root) -> Scope {
+        let git_ignored = Git::new(root.path.clone()).ignored_paths();
+
+        // Read conventions.md straight off disk: the tree it would normally
+        // come from is what this scope is about to build.
+        let text = std::fs::read_to_string(root.path.join("conventions.md")).unwrap_or_default();
+        let skip = frontmatter::extract(&text)
+            .map(|fm| fm.close_line)
+            .unwrap_or(0);
+        let (headings, _) = markdown::scan(&text, skip);
+        let carried = markdown::registry_items(&text, &headings, "carried-content-registry");
+
+        Scope {
+            git_ignored: minimal(git_ignored),
+            carried: minimal(carried),
+            nested_repos: vec![], // filled by the walk
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.git_ignored.is_empty() && self.carried.is_empty() && self.nested_repos.is_empty()
+    }
+
+    /// Pruned from the walk entirely.
+    pub fn is_git_ignored(&self, rel: &str) -> bool {
+        under_any(rel, &self.git_ignored)
+    }
+
+    /// Walked and swept, but never an artifact.
+    pub fn is_carried(&self, rel: &str) -> bool {
+        under_any(rel, &self.carried)
+    }
+
+    /// A submodule's `.git` is a file; a nested clone's is a directory.
+    /// Either way the directory is another repository's worktree.
+    fn is_nested_repo(dir: &std::path::Path) -> bool {
+        dir.join(".git").exists()
+    }
+}
+
+/// Whether `rel` is at or under any prefix in `prefixes`. Matching is on path
+/// segments, so `node_modules` covers `node_modules/left-pad/README.md` and
+/// leaves `node_modules_v2/README.md` alone. Shared by every path-narrowing
+/// surface — the scope's two declarations, `lint`'s and `tree`'s positionals —
+/// so a path means the same thing whichever one you hand it to.
+pub fn under_any(rel: &str, prefixes: &[String]) -> bool {
+    prefixes.iter().any(|p| {
+        let p = p.trim_end_matches('/');
+        !p.is_empty() && (rel == p || rel.starts_with(&format!("{p}/")))
+    })
+}
+
+/// Sorted, with any prefix already covered by a shorter one dropped. Git
+/// reports both a wholly-ignored directory and its ignored child, and a
+/// hand-written registry can do the same; the redundant entry changes no
+/// outcome and overstates what was excluded.
+fn minimal(mut prefixes: Vec<String>) -> Vec<String> {
+    prefixes.sort();
+    let mut out: Vec<String> = Vec::new();
+    for p in prefixes {
+        if !under_any(p.trim_end_matches('/'), &out) {
+            out.push(p);
+        }
+    }
+    out
+}
+
 pub struct Tree {
     pub root: Root,
     pub artifacts: Vec<Artifact>,
     /// Every non-dot directory, root-relative.
     pub dirs: Vec<String>,
-    /// Non-markdown files (for the secrets sweep), root-relative.
+    /// Files the domain carries but does not author: non-markdown, plus
+    /// markdown under a carried-content path. Swept for secrets, never
+    /// artifacts. Root-relative.
     pub other_files: Vec<String>,
+    /// The declared boundary this tree was loaded under.
+    pub scope: Scope,
     index: HashMap<String, usize>,
 }
 
@@ -108,19 +218,45 @@ pub fn classify(rel: &str) -> Kind {
 
 impl Tree {
     pub fn load(root: Root) -> anyhow::Result<Tree> {
+        let scope = Scope::discover(&root);
+        Tree::load_scoped(root, scope)
+    }
+
+    pub fn load_scoped(root: Root, mut scope: Scope) -> anyhow::Result<Tree> {
         let mut artifacts = Vec::new();
         let mut dirs = Vec::new();
         let mut other_files = Vec::new();
+        // Discovered mid-walk rather than declared up front, so it is
+        // collected here and folded back into the scope afterwards.
+        let nested = std::cell::RefCell::new(Vec::new());
 
         let walker = walkdir::WalkDir::new(&root.path)
             .sort_by_file_name()
             .into_iter()
             .filter_entry(|e| {
-                !(e.depth() > 0
-                    && e.file_name()
-                        .to_str()
-                        .map(|n| n.starts_with('.'))
-                        .unwrap_or(false))
+                if e.depth() == 0 {
+                    return true;
+                }
+                if e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with('.'))
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
+                // Pruning here rather than after the fact is what keeps a
+                // node_modules/ — or a submodule — from ever being enumerated.
+                let Some(rel) = root.rel(e.path()) else {
+                    return true;
+                };
+                if scope.is_git_ignored(&rel) {
+                    return false;
+                }
+                if e.file_type().is_dir() && Scope::is_nested_repo(e.path()) {
+                    nested.borrow_mut().push(rel);
+                    return false;
+                }
+                true
             });
 
         for entry in walker {
@@ -138,7 +274,7 @@ impl Tree {
             if !entry.file_type().is_file() {
                 continue;
             }
-            if rel.ends_with(".md") {
+            if rel.ends_with(".md") && !scope.is_carried(&rel) {
                 let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
                 let fm = frontmatter::extract(&text);
                 let skip = fm.as_ref().map(|f| f.close_line).unwrap_or(0);
@@ -157,6 +293,9 @@ impl Tree {
             }
         }
 
+        scope.nested_repos = nested.into_inner();
+        scope.nested_repos.sort();
+
         let index = artifacts
             .iter()
             .enumerate()
@@ -167,6 +306,7 @@ impl Tree {
             artifacts,
             dirs,
             other_files,
+            scope,
             index,
         })
     }
@@ -206,5 +346,48 @@ impl Tree {
             return false;
         };
         !role.contains('/') && self.get(&format!("org/{role}/mandate.md")).is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope(carried: &[&str]) -> Scope {
+        Scope {
+            git_ignored: vec![],
+            carried: carried.iter().map(|s| s.to_string()).collect(),
+            nested_repos: vec![],
+        }
+    }
+
+    #[test]
+    fn prefixes_match_whole_segments() {
+        let s = scope(&["node_modules", "solution/app/storefront/"]);
+        assert!(s.is_carried("node_modules"));
+        assert!(s.is_carried("node_modules/left-pad/README.md"));
+        assert!(s.is_carried("solution/app/storefront/docs/guide.md"));
+        // A shared textual prefix is not a shared path.
+        assert!(!s.is_carried("node_modules_v2/README.md"));
+        assert!(!s.is_carried("solution/app/storefront-legacy/README.md"));
+        assert!(!s.is_carried("solution/app/README.md"));
+    }
+
+    #[test]
+    fn redundant_prefixes_collapse_to_the_shortest() {
+        let out = minimal(vec![
+            "a/node_modules/".into(),
+            "a/".into(),
+            "b/dist".into(),
+            "a-sibling/".into(),
+        ]);
+        assert_eq!(out, vec!["a-sibling/", "a/", "b/dist"]);
+    }
+
+    #[test]
+    fn an_empty_registry_covers_nothing() {
+        let s = scope(&[]);
+        assert!(!s.is_carried("problem/anything.md"));
+        assert!(s.is_empty());
     }
 }

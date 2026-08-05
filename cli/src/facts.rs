@@ -9,7 +9,13 @@ use crate::dates::{self, Date};
 use crate::gitio::Git;
 use crate::graph::Derived;
 use crate::model::escalation_records;
-use crate::tree::{Kind, Tree};
+use crate::tree::{Kind, Scope, Tree};
+
+/// The one wire encoding of a `Kind`. Every command that names a kind spells
+/// it this way; a second spelling is the drift 0037 exists to prevent.
+pub fn kind_name(kind: Kind) -> String {
+    format!("{kind:?}").to_lowercase()
+}
 
 /// Open escalation records carried by one artifact.
 pub fn open_escalations(tree: &Tree, rel: &str) -> usize {
@@ -38,7 +44,7 @@ pub fn artifact(
         obj.insert(k.to_string(), v);
     };
     put("path", rel.to_string().into());
-    put("kind", format!("{:?}", a.kind).to_lowercase().into());
+    put("kind", kind_name(a.kind).into());
     put("provenance", a.provenance().into());
     put("owner", a.owner().into());
     if let Some(status) = a.status() {
@@ -107,6 +113,45 @@ pub fn artifact(
         _ => {}
     }
     Some(serde_json::Value::Object(obj))
+}
+
+/// One row of the artifact census.
+#[derive(Debug, Serialize)]
+pub struct ArtifactRow {
+    pub path: String,
+    pub kind: String,
+    pub provenance: Option<String>,
+    pub owner: Option<String>,
+    pub status: Option<String>,
+}
+
+/// `trellis tree`: the artifacts, and — inseparably — what discovery left out.
+/// A census that showed only what it found would answer half the question.
+#[derive(Debug, Serialize)]
+pub struct TreeReport {
+    pub version: u32,
+    pub root: String,
+    pub artifacts: Vec<ArtifactRow>,
+    pub scope: Scope,
+}
+
+/// Every artifact discovery took in, sorted by path — the answer to "what does
+/// the kernel consider mine?", which is the question behind a lint finding on a
+/// file nobody here wrote.
+pub fn artifact_rows(tree: &Tree) -> Vec<ArtifactRow> {
+    let mut rows: Vec<ArtifactRow> = tree
+        .artifacts
+        .iter()
+        .map(|a| ArtifactRow {
+            path: a.rel.clone(),
+            kind: kind_name(a.kind),
+            provenance: a.provenance(),
+            owner: a.owner(),
+            status: a.status(),
+        })
+        .collect();
+    rows.sort_by(|a, b| a.path.cmp(&b.path));
+    rows
 }
 
 /// One row of the plan census.
