@@ -525,6 +525,7 @@ dependencies = [
  "basic-toml",
  "clap",
  "include_dir",
+ "libc",
  "regex",
  "serde",
  "serde_json",

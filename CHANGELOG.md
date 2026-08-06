@@ -14,6 +14,45 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Sessions talk back (non-normative; decision 0041):** the spawn was one-way
+  — argv in, an exit code out — so a session that met an underspecified plan
+  could only block it, write an escalation record, and exit, spending a full
+  dispatch cycle on an answer that was often one sentence. The daemon now
+  serves MCP on the socket it already listens on and hands each session its own
+  endpoint as one more argv element, so a session can `trellis_ask` a question
+  with options, `trellis_await` the answer, and `trellis_progress` a note the
+  operator can watch without opening a gitignored log. **`trellis inbox` is the
+  surface that answers** — `inbox` lists what is waiting, `inbox answer
+  <ticket> <choice>` resolves it (a bare number picks that option), `--watch`
+  blocks until something asks. The board grew a sessions strip and an answer
+  form over the same state, and is deliberately *not* the contract: it is a
+  plan view, and a question raised by a ritual or by the dispatch scan has no
+  card to appear on.
+
+  This is what shipped instead of a client-to-agent protocol. ACP was evaluated
+  and refused with a pull-trigger: Claude is adapter-mediated, so the reference
+  binding would gain an undeclared Node dependency; ACP has no budget
+  expression and its model and effort controls are agent-defined option lists,
+  so 0032's complexity map would get harder rather than portable. MCP is native
+  everywhere, so the channel costs no adapter, no async runtime, and no second
+  listener — and a template that omits `{mcp}`, or a daemon run with
+  `--no-http`, runs exactly as before.
+
+  Two consequences worth naming. The daemon gains its first non-GET routes —
+  `/mcp/{token}` and `POST /api/sessions/{token}/answer` — and the read-only
+  claim in `server.rs` is amended in the same commit rather than left standing:
+  the *tree* stays read-only, both routes write only `.trellis/runtime/`, and
+  neither is ingress, because the session they concern is already running under
+  a mandate. And where there is no socket to call back on — `--no-http`, or
+  `--once`, which is a cron pass with no operator watching — the channel is off
+  and the daemon says so once, rather than refusing to start.
+
+- **`trellis serve` stops the sessions it started:** `SIGTERM` now cancels
+  in-flight sessions, waits for them, and records the exits, instead of exiting
+  and orphaning children that are process-group leaders by design. `SIGINT`
+  keeps its default deliberately — a stray Ctrl-C still must not kill a session
+  mid-artifact, which is why the process groups exist.
+
 - **`trellis tree` — the artifact census (non-normative; decision 0040):** the
   companion the discovery-scope work needs. Every other read command answers a
   question about an artifact you already know the path of; nothing answered

@@ -135,7 +135,7 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | service | binding |
 |---|---|
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`) |
-| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template `trellis serve` spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml` |
+| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template `trellis serve` spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041) |
 | schedule | `trellis serve` — an in-process timer over `rituals.md` rows, read at every pass, spawning one headless `/trellis:ritual <name>` per due row |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. An instance that needs one binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
@@ -188,6 +188,22 @@ findings for the owner to transcribe, which leaves both roles' write boundaries
 exactly as they were. An escalation with no artifact to sit in stays in the
 acting session's report.
 
+**Asking rather than blocking.** The daemon serves MCP at `/mcp/{token}` and
+hands each session its own endpoint as one argv element. A session that meets an
+underspecified plan can `trellis_ask` a question with options and
+`trellis_await` the answer, instead of flipping the plan `blocked` and waiting a
+full cadence for a one-sentence reply; it can `trellis_progress` a semantic note
+so the operator sees what it is doing without opening a log. `trellis inbox` is
+the surface that answers — the board shows the same state but cannot represent
+ritual or dispatch sessions, which have no plan card. Every harness speaks MCP
+natively, so this costs no adapter, and a template that omits `{mcp}` — or a
+daemon with no socket to call back on, which is `--no-http` and also `--once` —
+runs exactly as before: the channel is opt-in per binding, and its absence
+degrades rather than refuses. It shortens the loop
+rather than closing it — a question nobody answers still ends in the session
+deciding for itself, and blocking with an escalation record remains the right
+move for anything an answer cannot clear.
+
 **Acting-role attribution.** `/trellis:act` records the acting role in
 `.trellis/acting-role` at the root (ephemeral, gitignored) and removes it on
 completion. The gate uses it to distinguish a mandated generator refreshing a
@@ -207,7 +223,18 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
 - The serving surface and the session logs are single-machine: two operators
   see two boards over one shared repository, and neither log is the ledger.
 - The API carries no authentication. It binds loopback by default; binding
-  anything else publishes an unauthenticated read of the whole domain.
+  anything else publishes an unauthenticated read of the whole domain. The
+  session token in `/mcp/{token}` is attribution, not authentication: it says
+  which session is calling so a question can name its plan, and it is not a
+  secret.
+- The ask channel shortens the escalation loop; it does not close it. A question
+  nobody answers ends in the session deciding for itself. `--once` and
+  `--no-http` have no channel at all, so a scheduled pass run that way is
+  exactly as blind as it was before.
+- Progress is what a session chooses to report, not an observed event stream, so
+  a session that reports nothing looks idle. Parsing the harness's own
+  structured output would fix that for one harness at a time; deferred
+  deliberately (decision 0041).
 - There is no event-driven plane at all (the `ingress` row above). A domain
   whose work arrives as outside events has to bring them in by hand.
 - An escalation record notifies nobody: it satisfies the `escalation` service's
@@ -220,7 +247,9 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
 - An advisory role's finding is durable only once its owner transcribes it, so a
   headless ritual whose findings nobody transcribes leaves them in a session
   log. Accepted with the ownership boundary it buys; a per-role escalation inbox
-  is the pull-triggered fix.
+  is the pull-triggered fix. `trellis_progress` surfaces a finding while the
+  session runs, which makes it *visible* — durability is still the owner's
+  transcription, and no channel changes that.
 
 ## Staging — extracted by pull, not built ahead
 
@@ -254,6 +283,20 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   event that actually arrives and that a human bringing it into a session
   handles too slowly. Whatever binds it must carry a mandate — the reason the
   read-only serving surface is not quietly widened into one.
+- **Refused with a pull-trigger: a client-to-agent protocol (ACP) as the session
+  transport (decision 0041).** Evaluated and declined — Claude is
+  adapter-mediated, so the reference binding would gain an undeclared Node
+  dependency; ACP has no budget expression and agent-defined model/effort
+  options, so 0032's complexity map gets harder rather than portable. What
+  shipped instead is a channel *back* from the session over MCP, which every
+  harness speaks natively. Pull-trigger for revisiting: Claude Code speaking ACP
+  natively, **or** a second harness adopted and blocked by the placeholder set's
+  Claude Code vocabulary, **or** `mandate.md` → permission-profile compilation
+  being built. Trellis as an ACP *agent* — `act` exposed to editors as
+  `available_commands` — is a separate and still-open question about the
+  `session` service, not about the spawn.
 - **Rejected until evidence demands otherwise:** a hosted cloud runtime
   (premise 5: infrastructure ahead of evidence); push transports beyond the
-  adapter seam; any write path on the serving surface.
+  adapter seam; any write path on the serving surface *beyond* the single answer
+  route 0041 buys, which relays a reply to a session already running under a
+  mandate and touches no artifact.

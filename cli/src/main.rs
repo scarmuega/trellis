@@ -124,6 +124,18 @@ enum Cmd {
         #[command(subcommand)]
         cmd: FmCmd,
     },
+    /// Questions the running sessions are waiting on you to answer
+    Inbox {
+        #[command(subcommand)]
+        cmd: Option<InboxCmd>,
+        /// Block until a session asks something
+        #[arg(long)]
+        watch: bool,
+        /// Reach a daemon at this host:port instead of the one serving this
+        /// root
+        #[arg(long, value_name = "ADDR")]
+        addr: Option<String>,
+    },
     /// PreToolUse hook mode: stdin JSON, always exits 0, fails open
     Gate,
     /// Scaffold a domain instance from the embedded template
@@ -239,6 +251,16 @@ enum EscalateCmd {
         /// Disambiguate when several records are open
         #[arg(long)]
         raised: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum InboxCmd {
+    /// Answer an open question
+    Answer {
+        ticket: String,
+        /// The answer, or the number of one of the options offered
+        choice: String,
     },
 }
 
@@ -722,6 +744,35 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 
         Cmd::Plan { cmd } => plan_cmd(cli.root.as_deref(), cli.format, cmd),
         Cmd::Escalate { cmd } => escalate_cmd(cli.root.as_deref(), cli.format, cmd),
+
+        Cmd::Inbox { cmd, watch, addr } => {
+            let root = Root::discover(cli.root.as_deref())?.path;
+            let addr = addr.as_deref();
+            match cmd {
+                Some(InboxCmd::Answer { ticket, choice }) => {
+                    let resolved = daemon::client::answer(&root, addr, &ticket, &choice)?;
+                    match cli.format {
+                        Format::Json => print_json(&serde_json::json!({
+                            "ticket": ticket, "answer": resolved,
+                        })),
+                        Format::Text => println!("answered {ticket}: {resolved}"),
+                    }
+                    Ok(ExitCode::SUCCESS)
+                }
+                None => {
+                    let open = if watch {
+                        daemon::client::watch(&root, addr)?
+                    } else {
+                        daemon::client::pending(&root, addr)?
+                    };
+                    match cli.format {
+                        Format::Json => print_json(&open),
+                        Format::Text => println!("{}", daemon::client::render(&open)),
+                    }
+                    Ok(ExitCode::SUCCESS)
+                }
+            }
+        }
 
         Cmd::Dispatch {
             cmd: DispatchCmd::Scan { map },

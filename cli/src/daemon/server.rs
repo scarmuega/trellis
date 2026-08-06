@@ -5,11 +5,20 @@
 //! rendered views — so a UI reading this API and an operator reading the CLI
 //! never see two different domains.
 //!
-//! **Read-only is structural, not a policy.** There is no write path here and
-//! none is coming: a change to the domain enters through a session bound by
-//! its mandate, the gate, and the artifact's automation class. That is also
-//! why this surface is not ingress — an HTTP door into `act` would be a
-//! trigger plane with no mandate behind it (decision 0038).
+//! **Read-only over the tree, structurally.** A change to the domain enters
+//! through a session bound by its mandate, the gate, and the artifact's
+//! automation class — never through here. That is also why this surface is not
+//! ingress: an HTTP door into `act` would be a trigger plane with no mandate
+//! behind it (decision 0038).
+//!
+//! Two routes are not reads, and neither weakens that. `/mcp/{token}` is the
+//! back-channel a spawned session calls to ask a question or report progress,
+//! and `POST /api/sessions/{token}/answer` carries the reply (decision 0041).
+//! Both write `.trellis/runtime/` and no artifact; both concern a session
+//! already running under a mandate this surface did not grant and cannot
+//! widen. Relaying a question to a human and the answer back is the "relay"
+//! the daemon is chartered for, not judgment. Every other non-GET is still
+//! 405, and that is worth keeping true.
 //!
 //! Handlers hold no cache: each recomputes from a fresh tree. The bind
 //! address defaults to loopback because the surface carries no authentication
@@ -36,7 +45,12 @@ const COLUMNS: &[PlanStatus] = &[
     PlanStatus::Retired,
 ];
 
-const WORKERS: usize = 3;
+/// Enough that a parked `trellis_await` cannot starve the board.
+///
+/// A session waiting on a question holds its worker for the length of one
+/// bounded wait, and `max_concurrent` sessions may all be waiting at once. Three
+/// workers was right when every request returned promptly; it is not now.
+const WORKERS: usize = 12;
 
 /// Bind, start the worker threads, and return the port actually bound —
 /// which is what the caller asked for unless it asked for 0.
@@ -88,27 +102,105 @@ fn error(request: Request, code: u16, message: &str) -> std::io::Result<()> {
 }
 
 fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
-    if request.method() != &Method::Get {
-        return error(request, 405, "this surface is read-only");
-    }
     let url = request.url().to_string();
     let (path, query) = match url.split_once('?') {
         Some((p, q)) => (p, q),
         None => (url.as_str(), ""),
     };
-    let path = path.trim_end_matches('/');
+    let path = path.trim_end_matches('/').to_string();
 
-    match path {
+    // The two routes that are not reads. Both concern a session already
+    // running under a mandate, and both write `.trellis/runtime/` and no
+    // artifact — see the module doc, which is where the argument lives.
+    if request.method() == &Method::Post {
+        if let Some(token) = path.strip_prefix("/mcp/").map(str::to_string) {
+            return session_call(request, shared, &token);
+        }
+        if let Some(ticket) = path
+            .strip_prefix("/api/sessions/")
+            .and_then(|rest| rest.strip_suffix("/answer"))
+            .map(str::to_string)
+        {
+            return answer(request, shared, &ticket);
+        }
+    }
+    if request.method() != &Method::Get {
+        return error(request, 405, "this surface is read-only");
+    }
+
+    match path.as_str() {
         "" => request
             .respond(Response::from_string(INDEX).with_header(header("text/html; charset=utf-8"))),
         "/api/status" => {
             let status = shared.status.lock().unwrap();
-            let value = serde_json::to_value(&*status).unwrap_or(serde_json::Value::Null);
+            let mut value = serde_json::to_value(&*status).unwrap_or(serde_json::Value::Null);
             drop(status);
+            // Merged live rather than served from `status`, which only the
+            // tick refreshes: a question raised between ticks has to be
+            // answerable before the next one.
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert(
+                    "sessions".into(),
+                    serde_json::to_value(shared.inbox.view()).unwrap(),
+                );
+                obj.insert(
+                    "pending".into(),
+                    serde_json::to_value(shared.inbox.pending()).unwrap(),
+                );
+            }
             json(request, &value)
         }
-        _ if path.starts_with("/api/") => tree_backed(request, shared, path, query),
+        p if p.starts_with("/api/") => tree_backed(request, shared, p, query),
         _ => error(request, 404, "no such path"),
+    }
+}
+
+/// `POST /mcp/{token}` — one JSON-RPC message from a running session.
+fn session_call(mut request: Request, shared: &Shared, token: &str) -> std::io::Result<()> {
+    if !shared.inbox.known(token) {
+        // Not an auth check — the token is attribution. An unknown one means
+        // the session it belonged to is over.
+        return error(request, 404, "no such session");
+    }
+    let mut body = String::new();
+    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+        return error(request, 400, &format!("cannot read the request body: {e}"));
+    }
+    match super::mcp::handle(&shared.inbox, token, &body) {
+        Some(response) => {
+            request.respond(Response::from_string(response).with_header(json_header()))
+        }
+        // A notification: accepted, nothing to say back.
+        None => request.respond(Response::empty(202)),
+    }
+}
+
+/// `POST /api/sessions/{ticket}/answer` — the reply, from `trellis inbox` or
+/// the board. Body is `{"answer": "..."}`, or the bare text.
+fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Result<()> {
+    let mut body = String::new();
+    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+        return error(request, 400, &format!("cannot read the request body: {e}"));
+    }
+    let choice = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| {
+            v.get("answer")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.trim().to_string());
+    if choice.is_empty() {
+        return error(request, 400, "an empty answer is not an answer");
+    }
+    if shared.inbox.answer(ticket, &choice) {
+        json(request, &serde_json::json!({ "answered": ticket }))
+    } else {
+        error(
+            request,
+            404,
+            "no such open question — it was answered already, or its session ended",
+        )
     }
 }
 

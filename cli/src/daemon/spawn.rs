@@ -26,6 +26,10 @@ pub struct InFlight {
     pub label: String,
     pub log: String,
     pub started: String,
+    /// This session's back-channel handle, when the daemon is serving one
+    /// (`mcp`). Carried here so reaping can close the channel with the
+    /// process that owned it.
+    token: Option<String>,
     child: Child,
 }
 
@@ -36,6 +40,7 @@ pub struct InFlightView {
     pub label: String,
     pub log: String,
     pub started: String,
+    pub token: Option<String>,
 }
 
 #[derive(Debug)]
@@ -43,6 +48,7 @@ pub struct Finished {
     pub key: String,
     pub label: String,
     pub exit: Option<i32>,
+    pub token: Option<String>,
 }
 
 pub struct Spawner {
@@ -106,6 +112,7 @@ impl Spawner {
                 label: f.label.clone(),
                 log: f.log.clone(),
                 started: f.started.clone(),
+                token: f.token.clone(),
             })
             .collect();
         views.sort_by(|a, b| a.key.cmp(&b.key));
@@ -114,7 +121,13 @@ impl Spawner {
 
     /// Launch one session. Returns the log path, relative to the runtime
     /// directory.
-    pub fn spawn(&mut self, key: &str, label: &str, argv: &[String]) -> anyhow::Result<String> {
+    pub fn spawn(
+        &mut self,
+        key: &str,
+        label: &str,
+        argv: &[String],
+        token: Option<String>,
+    ) -> anyhow::Result<String> {
         let (program, rest) = argv
             .split_first()
             .ok_or_else(|| anyhow::anyhow!("{label}: empty command"))?;
@@ -161,6 +174,7 @@ impl Spawner {
                 label: label.to_string(),
                 log: name.clone(),
                 started: stamp,
+                token,
                 child,
             },
         );
@@ -176,6 +190,7 @@ impl Spawner {
                     key: key.clone(),
                     label: f.label.clone(),
                     exit: status.code(),
+                    token: f.token.clone(),
                 });
                 false
             }
@@ -186,6 +201,7 @@ impl Spawner {
                     key: key.clone(),
                     label: f.label.clone(),
                     exit: None,
+                    token: f.token.clone(),
                 });
                 false
             }
@@ -203,16 +219,52 @@ impl Spawner {
                 key,
                 label: f.label.clone(),
                 exit,
+                token: f.token.clone(),
             });
         }
         done.sort_by(|a, b| a.key.cmp(&b.key));
         done
     }
+
+    /// Ask every session to stop, and report how many were signalled.
+    ///
+    /// The children stay tracked: cancelling is not a second way for a session
+    /// to end, it is a reason for the ordinary one. `reap`/`wait_all` collect
+    /// them as normal and record the exit the signal produced, which
+    /// `report_exit` already renders as "killed by signal".
+    pub fn cancel_all(&self) -> usize {
+        self.in_flight
+            .values()
+            .filter(|f| signal_group(f.child.id()))
+            .count()
+    }
+}
+
+/// `SIGTERM` to the session's whole process group — the tools it started, not
+/// just the harness that started them. Children have been group leaders since
+/// they were first spawned, so the negative pid is the whole feature.
+///
+/// Shelling out matches `alive()`'s precedent next door, and buys the same
+/// thing: no dependency for one signal.
+#[cfg(unix)]
+fn signal_group(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-TERM", &format!("-{pid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn signal_group(_pid: u32) -> bool {
+    false
 }
 
 /// `YYYY-MM-DDThhmmss` — the date honours `TRELLIS_TODAY`, the time is the
 /// wall clock, so log names sort chronologically and stay legible.
-fn timestamp(today: Date) -> String {
+pub(super) fn timestamp(today: Date) -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -277,6 +329,7 @@ mod tests {
                 "ritual:focus",
                 "focus",
                 &argv(&["sh", "-c", "echo hi; echo bad >&2"]),
+                None,
             )
             .unwrap();
         let done = spawner.wait_all();
@@ -301,6 +354,7 @@ mod tests {
                 "plan:plans/x.md",
                 "plans/x.md",
                 &argv(&["sh", "-c", "exit 3"]),
+                None,
             )
             .unwrap();
         assert!(spawner.is_busy("plan:plans/x.md"));
@@ -319,6 +373,7 @@ mod tests {
                 "ritual:focus",
                 "focus",
                 &argv(&["definitely-not-a-command-42"]),
+                None,
             )
             .unwrap_err();
         assert!(err.to_string().contains("cannot run"), "{err}");
@@ -334,9 +389,31 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         spawner
-            .spawn("ritual:x", "x", &argv(&["tools/echoer"]))
+            .spawn("ritual:x", "x", &argv(&["tools/echoer"]), None)
             .unwrap();
         assert_eq!(spawner.wait_all()[0].exit, Some(0));
+    }
+
+    #[test]
+    fn a_cancelled_session_is_reaped_as_killed_by_signal() {
+        let (_dir, mut spawner) = fixture();
+        spawner
+            .spawn(
+                "ritual:slow",
+                "slow",
+                &argv(&["sh", "-c", "sleep 60"]),
+                None,
+            )
+            .unwrap();
+        assert_eq!(spawner.cancel_all(), 1);
+        // The child stays tracked through the ordinary reap, which is what
+        // keeps cancellation from being a second way for a session to end.
+        let done = spawner.wait_all();
+        assert_eq!(done.len(), 1);
+        assert_eq!(
+            done[0].exit, None,
+            "killed by signal, which report_exit renders as such"
+        );
     }
 
     #[test]

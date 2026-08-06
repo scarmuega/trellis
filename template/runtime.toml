@@ -35,8 +35,17 @@ catchup = "once"
 # argv arrays, never shell strings: a placeholder fills exactly one argument,
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
-# {ritual} {complexity}. A second harness (pi, Codex, OpenCode) is these two
-# lines rewritten — Claude Code is the reference adapter, not a hardcode.
+# {ritual} {complexity} {mcp}. A second harness (pi, Codex, OpenCode) is these
+# two lines rewritten — Claude Code is the reference adapter, not a hardcode.
+#
+# {mcp} is the session's back-channel: the daemon serves MCP on its own socket,
+# and a session handed the endpoint can ask a question and wait for an answer
+# rather than blocking its plan for a cadence, and report progress you can watch
+# without opening a log (decision 0041). Answer with `trellis inbox`, or on the
+# board. Every harness speaks MCP natively, so this costs no adapter — and a
+# harness that does not can drop the two arguments and lose nothing else. Under
+# --no-http there is no socket to call back on, so {mcp} renders empty and the
+# daemon says so once at startup.
 #
 # No --plugin-dir below: the daemon runs where the plugin is installed in the
 # harness, which is the premise of operating locally. Against a checkout that
@@ -54,12 +63,14 @@ act_cmd = [
   "--model", "{model}",
   "--effort", "{effort}",
   "--max-budget-usd", "{budget}",
+  "--mcp-config", "{mcp}",
 ]
 ritual_cmd = [
   "claude", "-p", "{prompt}",
   "--permission-mode", "acceptEdits",
   "--allowedTools", "Read", "Grep", "Glob", "Write", "Edit", "Bash(gh *)", "Bash(git *)",
   "--max-budget-usd", "5",
+  "--mcp-config", "{mcp}",
 ]
 
 [prompts]

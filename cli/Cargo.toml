@@ -28,6 +28,12 @@ tempfile = "3"
 basic-toml = "0.1"
 tiny_http = "0.12"
 
+# One signal handler, so `trellis serve` can stop the sessions it started
+# instead of orphaning them. Already in the tree under `tempfile`; naming it
+# here adds no crates to the build.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 assert_cmd = "2"
 

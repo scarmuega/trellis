@@ -51,6 +51,43 @@
   .badge.held { color: var(--hold); border-color: color-mix(in srgb, var(--hold) 45%, transparent); }
   .badge.complexity { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
   .empty { color: var(--muted); font-size: .8rem; font-style: italic; padding: .2rem .15rem; }
+  .badge.asking { color: var(--warn); border-color: var(--warn); font-weight: 650; }
+  /* The sessions strip. Every in-flight session appears here, including the
+     ritual and dispatch ones that have no plan card — which is why answering
+     lives on this surface and not on the cards. */
+  .sessions { padding: 0 1.25rem 1rem; }
+  .sessions > h2 {
+    font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 .5rem .15rem; font-weight: 650;
+  }
+  .session {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: .6rem .7rem; margin-bottom: .5rem;
+  }
+  .session.waiting { border-color: var(--warn); }
+  .session .label { font-weight: 600; overflow-wrap: anywhere; }
+  .progress {
+    margin: .45rem 0 0; padding: 0; list-style: none;
+    color: var(--muted); font-size: .8rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .progress li { overflow-wrap: anywhere; }
+  .progress li .at { opacity: .6; margin-right: .5rem; }
+  .ask { margin-top: .55rem; border-top: 1px solid var(--line); padding-top: .55rem; }
+  .ask .q { color: var(--warn); font-weight: 600; overflow-wrap: anywhere; }
+  .ask .ctx { color: var(--muted); font-size: .8rem; margin-top: .1rem; }
+  .ask .choices { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+  .ask button {
+    font: inherit; font-size: .8rem; padding: .25rem .6rem; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  .ask button:hover { border-color: var(--accent); color: var(--accent); }
+  .ask form { display: flex; gap: .35rem; margin-top: .5rem; }
+  .ask input {
+    flex: 1; font: inherit; font-size: .8rem; padding: .25rem .5rem;
+    border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink);
+  }
   footer {
     padding: .7rem 1.25rem; border-top: 1px solid var(--line);
     color: var(--muted); font-size: .78rem;
@@ -66,6 +103,7 @@
   <span class="meta" id="clock"></span>
 </header>
 <main id="board"></main>
+<section class="sessions" id="sessions"></section>
 <footer>
   <span id="daemon"></span>
   <span id="notes"></span>
@@ -105,7 +143,96 @@ function card(plan) {
   if (plan.open_escalations > 0) {
     add(plan.open_escalations + (plan.open_escalations === 1 ? " escalation" : " escalations"), "escalation");
   }
+  if (asking.has("plan:" + plan.plan)) add("waiting on you", "asking");
   if (badges.children.length) el.append(badges);
+  return el;
+}
+
+// Task keys with a question outstanding, so a plan card can say so. Set by
+// refresh() before the columns are built.
+let asking = new Set();
+
+async function answer(ticket, choice) {
+  if (!choice) return;
+  await fetch("/api/sessions/" + encodeURIComponent(ticket) + "/answer", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer: choice }),
+  });
+  refresh();
+}
+
+// One in-flight session: what it has reported, and what it is waiting on.
+function session(s) {
+  const el = document.createElement("article");
+  el.className = "session" + (s.pending ? " waiting" : "");
+
+  const label = document.createElement("div");
+  label.className = "label";
+  label.textContent = s.label;
+  el.append(label);
+
+  if (s.progress && s.progress.length) {
+    const list = document.createElement("ul");
+    list.className = "progress";
+    // Newest last, and only the tail: this is a window on a running session,
+    // not its log. The log is still the log.
+    s.progress.slice(-6).forEach((n) => {
+      const li = document.createElement("li");
+      const at = document.createElement("span");
+      at.className = "at";
+      at.textContent = (n.at || "").split("T")[1] || "";
+      li.append(at, document.createTextNode(n.note));
+      list.append(li);
+    });
+    el.append(list);
+  }
+
+  if (s.pending) {
+    const ask = document.createElement("div");
+    ask.className = "ask";
+
+    const q = document.createElement("div");
+    q.className = "q";
+    q.textContent = s.pending.question;
+    ask.append(q);
+
+    if (s.pending.context) {
+      const ctx = document.createElement("div");
+      ctx.className = "ctx";
+      ctx.textContent = s.pending.context;
+      ask.append(ctx);
+    }
+
+    if (s.pending.options && s.pending.options.length) {
+      const choices = document.createElement("div");
+      choices.className = "choices";
+      s.pending.options.forEach((option) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = option;
+        b.addEventListener("click", () => answer(s.pending.ticket, option));
+        choices.append(b);
+      });
+      ask.append(choices);
+    }
+
+    // Free text as well as the options: a question with three buttons still
+    // sometimes has a fourth answer.
+    const form = document.createElement("form");
+    const input = document.createElement("input");
+    input.placeholder = "or answer in your own words";
+    const send = document.createElement("button");
+    send.type = "submit";
+    send.textContent = "answer";
+    form.append(input, send);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      answer(s.pending.ticket, input.value.trim());
+    });
+    ask.append(form);
+    el.append(ask);
+  }
   return el;
 }
 
@@ -136,6 +263,8 @@ async function refresh() {
       fetch("/api/status").then((r) => r.json()),
     ]);
 
+    asking = new Set((status.pending || []).map((p) => p.key));
+
     const main = $("board");
     main.replaceChildren();
     board.order.forEach((name) => main.append(column(name, board.columns[name] || [])));
@@ -143,14 +272,27 @@ async function refresh() {
       main.append(column("no status", board.unplaced));
     }
 
+    // Sessions get their own strip rather than living on the cards: a ritual
+    // or the dispatch scan has no plan, and a question from one still has to
+    // be answerable.
+    const strip = $("sessions");
+    strip.replaceChildren();
+    const live = status.sessions || [];
+    if (live.length) {
+      const h = document.createElement("h2");
+      h.textContent = "sessions " + live.length;
+      strip.append(h);
+      live.forEach((s) => strip.append(session(s)));
+    }
+
     $("root").innerHTML = "";
     const root = document.createElement("code");
     root.textContent = status.root || "";
     $("root").append(root);
 
-    const flight = (status.in_flight || []).map((f) => f.label);
     const parts = [];
-    parts.push(flight.length ? flight.length + " session(s) in flight: " + flight.join(", ") : "no sessions in flight");
+    parts.push(live.length ? live.length + " session(s) in flight" : "no sessions in flight");
+    if (asking.size) parts.push(asking.size + " waiting on you");
     if (status.last_pass) parts.push("last pass " + status.last_pass);
     if (status.dry_run) parts.push("dry run");
     $("daemon").textContent = parts.join(" · ");

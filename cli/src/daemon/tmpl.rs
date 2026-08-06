@@ -22,6 +22,10 @@ pub const PLACEHOLDERS: &[&str] = &[
     "owner",
     "ritual",
     "complexity",
+    // The session's own back-channel, as a `--mcp-config` value (decision
+    // 0041). Naming it is what opts a binding into the channel; a template
+    // that omits it runs exactly as it did before.
+    "mcp",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

@@ -13,7 +13,9 @@
 //! tests can hold it to the prose.
 
 pub mod channels;
+pub mod client;
 pub mod config;
+pub mod mcp;
 pub mod sched;
 pub mod server;
 pub mod spawn;
@@ -85,6 +87,11 @@ pub struct Shared {
     /// The map the dispatcher uses, so `/api/dispatch` reports the session
     /// this daemon would actually start.
     pub sessions: SessionMap,
+    /// The sessions' back-channel. Read live by the server rather than through
+    /// `status`, because a question raised between ticks must be answerable
+    /// before the next one — a tick interval of latency is a board's budget,
+    /// not an interaction's (decision 0041).
+    pub inbox: mcp::Inbox,
 }
 
 /// Everything a tick needs that does not change between ticks.
@@ -92,6 +99,9 @@ struct Runtime {
     root: PathBuf,
     cfg: RuntimeConfig,
     plugin_dir: Option<String>,
+    /// The port the back-channel is reachable on, once bound. `None` when the
+    /// daemon is not serving, which is also when `{mcp}` is refused.
+    port: Option<u16>,
     dry_run: bool,
     channels: channels::Channels,
     shared: Arc<Shared>,
@@ -124,7 +134,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         .as_ref()
         .map(|p| p.display().to_string())
         .or_else(|| std::env::var("CLAUDE_PLUGIN_ROOT").ok());
-    if plugin_dir.is_none() && names_plugin_dir(&cfg) {
+    if plugin_dir.is_none() && names(&cfg, "{plugin_dir}") {
         anyhow::bail!(
             "the harness templates name {{plugin_dir}} but no plugin checkout is known — \
              pass --plugin-root, set CLAUDE_PLUGIN_ROOT, or drop it from {}",
@@ -132,7 +142,12 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         );
     }
 
+    // `--once` still does not serve. It is a cron-style pass with no operator
+    // watching, so the back-channel would have nobody to answer it — and
+    // binding the configured port would collide with the daemon a cron entry
+    // most likely runs beside.
     let serve_http = !opts.no_http && !opts.once;
+    let channel_off = !serve_http && names(&cfg, "{mcp}");
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
             pid: std::process::id(),
@@ -143,6 +158,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         }),
         root: root.clone(),
         sessions,
+        inbox: mcp::Inbox::default(),
     });
 
     let _pidfile = if opts.once {
@@ -151,10 +167,11 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         Some(Pidfile::claim(&root)?)
     };
 
-    let rt = Runtime {
+    let mut rt = Runtime {
         root: root.clone(),
         cfg,
         plugin_dir,
+        port: None,
         dry_run: opts.dry_run,
         // No adapter ships in this slice; a configured one is refused at
         // load. The seam is wired so adding a transport is a registration,
@@ -163,13 +180,19 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         shared: Arc::clone(&shared),
     };
 
+    let mut _addrfile = None;
     if serve_http {
         let port = server::start(Arc::clone(&shared), &rt.cfg.server)?;
+        rt.port = Some(port);
         shared.status.lock().unwrap().port = Some(port);
         // The handshake line: a caller that asked for port 0 learns which
         // port it got, and anything scripting the daemon knows the socket is
         // accepting.
         println!("listening on {}:{port}", rt.cfg.server.bind);
+        // And the same fact on disk, because `trellis inbox` has to find this
+        // daemon from a second terminal and `port = 0` is not discoverable
+        // from the config it was configured with.
+        _addrfile = Some(Addrfile::write(&root, &rt.cfg.server.bind, port)?);
     }
 
     let mut state = State::load(&root);
@@ -178,7 +201,20 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         spawner = spawner.once_per_task();
     }
 
+    if !opts.once {
+        signals::install();
+    }
+
     note(&format!("serving {}", root.display()));
+    if channel_off {
+        // Not fatal: a session that cannot ask behaves exactly as it did
+        // before the channel existed. Said out loud so the loss is not silent.
+        note(&format!(
+            "{} leaves no socket for a session to call back on — sessions run, \
+             but cannot ask questions or report progress",
+            if opts.once { "--once" } else { "--no-http" }
+        ));
+    }
     if rt.dry_run {
         note("dry run — nothing will be spawned and no state is written");
     }
@@ -195,6 +231,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
             for done in spawner.wait_all() {
                 report_exit(&done);
                 state.finished(&done.key, done.exit);
+                retire(&rt, &done);
             }
             // A single pass starts at most `max_concurrent` sessions, so a
             // due set larger than the cap would otherwise wait for a next
@@ -209,8 +246,50 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
             }
             return Ok(ExitCode::SUCCESS);
         }
-        std::thread::sleep(std::time::Duration::from_secs(rt.cfg.scheduler.tick_secs));
+        if sleep_until_tick_or_signal(rt.cfg.scheduler.tick_secs) {
+            return shutdown(&rt, &mut state, &mut spawner);
+        }
     }
+}
+
+/// Sleep out the tick interval, waking early if a stop was asked for. Returns
+/// whether it was. Polled in slices rather than one long sleep: a `SIGTERM`
+/// that waits a full minute to be noticed reads as a hung daemon.
+fn sleep_until_tick_or_signal(tick_secs: u64) -> bool {
+    let slice = std::time::Duration::from_millis(250);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(tick_secs);
+    while std::time::Instant::now() < deadline {
+        if signals::stopping() {
+            return true;
+        }
+        std::thread::sleep(slice);
+    }
+    signals::stopping()
+}
+
+/// Stop the sessions this daemon started, then leave.
+///
+/// The alternative is to exit and orphan them, which is what happened before:
+/// children are process-group leaders precisely so a stray Ctrl-C could not
+/// kill a session mid-artifact, and the same isolation makes an intentional
+/// stop something the daemon has to do on purpose.
+fn shutdown(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Result<ExitCode> {
+    let signalled = spawner.cancel_all();
+    if signalled > 0 {
+        note(&format!(
+            "stopping — asked {signalled} session(s) to stop, waiting for them"
+        ));
+    }
+    for done in spawner.wait_all() {
+        report_exit(&done);
+        state.finished(&done.key, done.exit);
+        retire(rt, &done);
+    }
+    if !rt.dry_run {
+        state.save(&rt.root)?;
+    }
+    note("stopped");
+    Ok(ExitCode::SUCCESS)
 }
 
 /// What one pass did, so `--once` knows whether the due set is drained.
@@ -235,6 +314,7 @@ fn tick(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Resul
     for done in spawner.reap() {
         report_exit(&done);
         state.finished(&done.key, done.exit);
+        retire(rt, &done);
     }
 
     let tree = Tree::load(Root {
@@ -405,19 +485,42 @@ fn fire(
     if let Some(dir) = &rt.plugin_dir {
         vars = vars.set("plugin_dir", dir.clone());
     }
+
+    // The channel is opened before the argv is rendered, because `{mcp}`
+    // carries its handle. Anything that fails from here on closes it again:
+    // a channel outliving the session it belongs to would be a question
+    // nobody is left to answer.
+    let mut token = None;
+    match rt.port {
+        Some(port) => {
+            let handle = rt.shared.inbox.register(key, label);
+            vars = vars.set("mcp", mcp::config_json(&rt.cfg.server.bind, port, &handle));
+            token = Some(handle);
+        }
+        // No listener, so no channel — but the template still has to render.
+        None => vars = vars.set("mcp", mcp::disabled_json()),
+    }
+    let close = || {
+        if let Some(token) = &token {
+            rt.shared.inbox.retire(token);
+        }
+    };
+
     let argv = match render(prompt_template, argv_template, &vars) {
         Ok(argv) => argv,
         Err(e) => {
             note(&format!("{label}: {e:#}"));
+            close();
             return Outcome::Failed;
         }
     };
 
     if rt.dry_run {
         note(&format!("would run {label}: {}", spawn::shell_quote(&argv)));
+        close();
         return Outcome::Started;
     }
-    match spawner.spawn(key, label, &argv) {
+    match spawner.spawn(key, label, &argv, token.clone()) {
         Ok(log) => {
             note(&format!("started {label} → logs/{log}"));
             state.fired(key, today, Some(log));
@@ -425,6 +528,7 @@ fn fire(
         }
         Err(e) => {
             note(&format!("{label}: {e:#}"));
+            close();
             Outcome::Failed
         }
     }
@@ -448,6 +552,15 @@ fn render(
     )
 }
 
+/// Close a finished session's back-channel. A question outstanding when its
+/// session exits goes with it: there is nobody left to receive the answer, and
+/// leaving it listed would invite an operator to answer into a void.
+fn retire(rt: &Runtime, done: &spawn::Finished) {
+    if let Some(token) = &done.token {
+        rt.shared.inbox.retire(token);
+    }
+}
+
 fn report_exit(done: &spawn::Finished) {
     match done.exit {
         Some(0) => note(&format!("finished {}", done.label)),
@@ -462,12 +575,15 @@ pub fn note(message: &str) {
     println!("[trellis] {message}");
 }
 
-fn names_plugin_dir(cfg: &RuntimeConfig) -> bool {
-    let uses = |t: &[String]| t.iter().any(|e| e.contains("{plugin_dir}"));
+/// Whether any template names a placeholder — asked of the ones the daemon
+/// must be able to *supply* before the first tick, so a template that names
+/// something unavailable is refused at startup rather than at the first spawn.
+fn names(cfg: &RuntimeConfig, placeholder: &str) -> bool {
+    let uses = |t: &[String]| t.iter().any(|e| e.contains(placeholder));
     uses(&cfg.harness.act_cmd)
         || uses(&cfg.harness.ritual_cmd)
-        || cfg.prompts.act.contains("{plugin_dir}")
-        || cfg.prompts.ritual.contains("{plugin_dir}")
+        || cfg.prompts.act.contains(placeholder)
+        || cfg.prompts.ritual.contains(placeholder)
 }
 
 fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
@@ -511,6 +627,33 @@ impl Drop for Pidfile {
     }
 }
 
+/// Where this daemon is listening, for the commands that talk to it.
+pub const ADDRFILE: &str = "serve.addr";
+
+struct Addrfile(PathBuf);
+
+impl Addrfile {
+    fn write(root: &Path, bind: &str, port: u16) -> anyhow::Result<Addrfile> {
+        let dir = RuntimeConfig::runtime_dir(root);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(ADDRFILE);
+        // A wildcard bind is dialled back on loopback, the same substitution
+        // the sessions' own endpoint makes.
+        let host = match bind {
+            "0.0.0.0" | "::" | "[::]" | "" => "127.0.0.1",
+            other => other,
+        };
+        std::fs::write(&path, format!("{host}:{port}\n"))?;
+        Ok(Addrfile(path))
+    }
+}
+
+impl Drop for Addrfile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 #[cfg(unix)]
 fn alive(pid: &str) -> bool {
     pid.parse::<u32>().is_ok()
@@ -526,6 +669,45 @@ fn alive(pid: &str) -> bool {
 #[cfg(not(unix))]
 fn alive(_pid: &str) -> bool {
     false
+}
+
+/// Stopping on request rather than dying where we stand.
+///
+/// `SIGTERM` only, deliberately. Children are process-group leaders so that a
+/// Ctrl-C to the daemon does not kill a session mid-artifact (`spawn`), and
+/// that stays true: `SIGINT` keeps its default, and stopping the sessions too
+/// is the deliberate act `kill` or a service manager performs.
+#[cfg(unix)]
+mod signals {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static STOPPING: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn on_term(_sig: libc::c_int) {
+        // Setting a flag is the only async-signal-safe thing done here. The
+        // work it implies happens on the main loop's own time.
+        STOPPING.store(true, Ordering::SeqCst);
+    }
+
+    pub fn install() {
+        let handler = on_term as extern "C" fn(libc::c_int);
+        // SAFETY: installs a handler that only stores to an atomic.
+        unsafe {
+            libc::signal(libc::SIGTERM, handler as libc::sighandler_t);
+        }
+    }
+
+    pub fn stopping() -> bool {
+        STOPPING.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(not(unix))]
+mod signals {
+    pub fn install() {}
+    pub fn stopping() -> bool {
+        false
+    }
 }
 
 /// A fresh view of the tree, its derived graph, and git — what every HTTP

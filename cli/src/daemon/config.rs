@@ -98,6 +98,11 @@ pub struct Harness {
     /// running against a working tree, say — adds `--plugin-dir
     /// {plugin_dir}` here and supplies it with `--plugin-root` or
     /// `CLAUDE_PLUGIN_ROOT`.
+    ///
+    /// They do name `{mcp}`: the session's back-channel, so it can ask a
+    /// question rather than block its plan (decision 0041). A harness that
+    /// does not speak MCP drops that pair of arguments and everything else
+    /// works — the channel is opt-in per binding, not a requirement of one.
     pub act_cmd: Vec<String>,
     /// argv for one ritual session.
     pub ritual_cmd: Vec<String>,
@@ -119,6 +124,8 @@ impl Default for Harness {
                 "{effort}",
                 "--max-budget-usd",
                 "{budget}",
+                "--mcp-config",
+                "{mcp}",
             ]),
             ritual_cmd: argv(&[
                 "claude",
@@ -136,6 +143,8 @@ impl Default for Harness {
                 "Bash(git *)",
                 "--max-budget-usd",
                 "5",
+                "--mcp-config",
+                "{mcp}",
             ]),
         }
     }

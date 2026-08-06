@@ -181,6 +181,74 @@ impl Fixture {
         rel.to_string()
     }
 
+    /// A stand-in for `claude` that uses the back-channel: it reports
+    /// progress, asks a question, and waits for the answer, writing whatever
+    /// it is told to `.trellis/runtime/answer`.
+    ///
+    /// It reads the endpoint out of its own `--mcp-config` argument, which is
+    /// what a real harness does too — the daemon hands the session its
+    /// channel the same way either way. The whole exchange is `curl` against
+    /// `/mcp/{token}`, which is the check that matters: the reference adapter
+    /// is configuration, so a hermetic one still is.
+    pub fn asking_harness(&self) -> String {
+        let rel = ".trellis/bin/asking";
+        let path = self.root().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r##"#!/bin/sh
+dir=.trellis/runtime
+mkdir -p "$dir/argv"
+for a in "$@"; do echo "$a"; done > "$dir/argv/$(date +%s)-$$"
+
+# The endpoint, out of the --mcp-config value this session was handed.
+url=
+prev=
+for a in "$@"; do
+  if [ "$prev" = "--mcp-config" ]; then
+    url=$(printf '%s' "$a" | sed -n 's|.*"url" *: *"\([^"]*\)".*|\1|p')
+  fi
+  prev=$a
+done
+[ -n "$url" ] || { echo "no mcp endpoint in argv" >&2; exit 9; }
+
+rpc() { curl -sS -m 10 -H 'Content-Type: application/json' -d "$1" "$url"; }
+
+rpc '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"trellis_progress","arguments":{"note":"claimed and reading"}}}' >/dev/null
+
+asked=$(rpc '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"trellis_ask","arguments":{"question":"does the table move?","options":["moves with billing","stays in core"],"context":"plans/x.md"}}}')
+ticket=$(printf '%s' "$asked" | sed -n 's|.*ticket \([0-9a-f]*\) .*|\1|p')
+[ -n "$ticket" ] || { echo "no ticket in: $asked" >&2; exit 9; }
+
+# Poll the bounded wait, the way an agent that is willing to wait does.
+i=0
+while [ "$i" -lt 30 ]; do
+  got=$(rpc "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"trellis_await\",\"arguments\":{\"ticket\":\"$ticket\"}}}")
+  answer=$(printf '%s' "$got" | sed -n 's|.*answered: \([^"]*\)".*|\1|p')
+  if [ -n "$answer" ]; then
+    printf '%s' "$answer" > "$dir/answer"
+    exit 0
+  fi
+  i=$((i + 1))
+done
+echo "never answered" >&2
+exit 9
+"##,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        rel.to_string()
+    }
+
+    /// What the asking harness was told, once it has been told.
+    pub fn answer_received(&self) -> Option<String> {
+        std::fs::read_to_string(self.root().join(".trellis/runtime/answer")).ok()
+    }
+
     /// Every invocation the fake harness recorded, as argv vectors. Ordered
     /// by the second each session started, so passes are in order and
     /// sessions within one pass are not — which is all the daemon promises.
