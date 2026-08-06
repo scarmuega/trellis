@@ -72,6 +72,18 @@ artifact already carries an open record saying the same thing.
   publishing context goes to its owner for revalidation; the context map is
   the consumer registry.
   You flag; the owner collects.
+- **Archive sweep** — file terminal artifacts into `archive/`, the tier that
+  mirrors the live hierarchy. `trellis archive --sweep` does the whole
+  mechanical share and `--dry-run` reports it first; without the CLI, select
+  artifacts whose terminal status (`retired` for a plan, `discarded` for a
+  strategy, `archived` otherwise) has held longer than the retention horizon in
+  `conventions.md`, and `git mv` each to `archive/{its live path}` — git's
+  `mv`, never the filesystem's, because every history-derived reading follows
+  the rename. This is a move and never a verdict: you file what an owner
+  already finished, you flip no status to make something eligible, and you
+  rewrite no refs — a ref names the live path on either side of the move.
+  Never file `decisions/`: append-only shared memory is superseded, not
+  retired.
 - **Plan dispatch** — enumerate plans with `status: ready`, skipping any whose
   `awaits:` targets are not all `retired` (held — declared sequencing, never a
   blocker: the plan stays `ready` and clears itself), and, for each, start a

@@ -22,7 +22,18 @@ placement guide and procedures live there.
     metrics/      definitions.md (authored) + actuals/ (generated)
     decisions/    ADRs, append-only
     org/          roles: mandate.md (authority) + holder/ (identity)
+    archive/      the same tree, holding what is finished — terminal only
     also: conventions.md · rituals.md · glossary.md · brand.md · economics.md
+
+## Finding the live work
+
+The live set is a reading over `status:`, not a directory listing: ask
+`trellis plan list`, or read the generated board in `metrics/actuals/`.
+`plans/` keeps every plan until the steward's archive sweep files the cold ones
+into `archive/` — and even then they are still counted, because the board's
+closure and cycle-time readings are computed from their history. Refs always
+name the live path (`plans/{plan}.md`), whichever side of that move a plan is
+on.
 
 ## Before you write
 

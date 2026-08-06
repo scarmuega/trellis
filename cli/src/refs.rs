@@ -102,7 +102,7 @@ pub fn resolve(raw: &str, tree: &Tree) -> Result<(), String> {
                 return Err(format!("{path} escapes the root (rule 1)"));
             }
             if path.ends_with(".md") {
-                let Some(artifact) = tree.get(&path) else {
+                let Some(artifact) = tree.get_addressed(&path) else {
                     return Err(format!("{path} does not exist"));
                 };
                 if let Some(anchor) = anchor {
@@ -117,7 +117,7 @@ pub fn resolve(raw: &str, tree: &Tree) -> Result<(), String> {
             } else {
                 // Directory ref (a bounded context, a holder package).
                 let path = path.trim_end_matches('/');
-                if tree.has_dir(path) {
+                if tree.has_dir_addressed(path) {
                     Ok(())
                 } else {
                     Err(format!("{path} is not a directory in this root"))

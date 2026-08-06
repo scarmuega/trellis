@@ -31,6 +31,10 @@ tags: []            # groupings are tags; views over tags are generated
 ### problem/{subdomain}.md
 ```yaml
 provenance: authored
+status: archived                         # optional, and the whole lifecycle: absent
+                                         #   means live. An orphan nobody will re-parent
+                                         #   is declared finished here, which makes it
+                                         #   eligible for archive/ (see Retention).
 induced-by:                              # >=1 edge; no edge to a committed
   - strategy: strategy/{strategy}.md     #   strategy => orphan (lint)
     class: core | supporting | generic   # classification is a property of the edge
@@ -72,8 +76,10 @@ status: draft | ready | active | blocked | retired
     # draft = being authored; ready = released for a taker, the runtime dispatches
     # it as act(owner) (agent-held owner advances it, human-held owner receives a
     # handoff); active = in flight (the taker flips ready→active on pickup,
-    # →blocked on an uncleared blocker); retired = done or abandoned. ready is
-    # optional — a human driving a plan goes straight to active.
+    # →blocked on an uncleared blocker); retired = done or abandoned, and
+    # terminal — which is what later admits the plan to archive/ (see
+    # Retention), never as part of this flip. ready is optional — a human
+    # driving a plan goes straight to active.
 type: <see plan-type registry below>
 complexity: mechanical | standard | deep
     # optional; the reasoning depth the work demands of its taker — never its
@@ -148,6 +154,27 @@ Open set; add types here before using them.
 Register tags here before use so generated views stay coherent.
 
 - (none yet)
+
+## Retention
+
+Finished artifacts are filed into `archive/`, which mirrors this hierarchy:
+an archived artifact lives at `archive/{its live path}`. Admission is
+terminal-only — `retired` for a plan, `discarded` for a strategy, `archived`
+for a kind whose lifecycle has no terminal value of its own — and a unit that
+archives as a subtree (a bounded context, a role) carries the marker on its
+entry artifact. `decisions/` is never filed: it is append-only shared memory,
+superseded rather than retired.
+
+**Refs never name the tier.** `plans/{plan}.md` keeps addressing the plan on
+either side of the move, so an `awaits:` edge or a decision written years ago
+still resolves. A ref carrying the `archive/` prefix is a forwarding address
+and fails the lint.
+
+Filing is a separate act from finishing: the verdict is recorded in place, and
+the move follows once the artifact has been terminal for the horizon below.
+The steward's archive sweep files terminal artifacts that have been
+**archive after 90 days**; `trellis archive --sweep --dry-run` reports what
+that would move.
 
 ## Carried-content registry
 

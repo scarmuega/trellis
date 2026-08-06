@@ -41,6 +41,10 @@ pub struct Artifact {
     pub rel: String,
     pub abs: PathBuf,
     pub kind: Kind,
+    /// Under the terminal tier (`archive/`). Derived from `rel`, never
+    /// declared: the frontmatter's terminal status is the fact, the tier is
+    /// where the fact puts the file.
+    pub archived: bool,
     pub fm: Option<Frontmatter>,
     pub headings: Vec<Heading>,
     pub fences: Vec<FencedBlock>,
@@ -193,7 +197,40 @@ pub struct Tree {
     index: HashMap<String, usize>,
 }
 
+/// The terminal tier's prefix. An archived artifact's path is exactly its
+/// live path with this in front, which is what lets one rule serve every
+/// kind and what keeps the live path canonical for refs.
+pub const ARCHIVE: &str = "archive/";
+
+pub fn is_archived(rel: &str) -> bool {
+    rel.starts_with(ARCHIVE)
+}
+
+/// The live path an archived artifact is addressed by — its own path
+/// otherwise. Refs never name the tier (spec rule 13).
+pub fn live_path(rel: &str) -> &str {
+    rel.strip_prefix(ARCHIVE).unwrap_or(rel)
+}
+
+/// The status value that admits an artifact to the terminal tier, or `None`
+/// for one that rides along inside an archived subtree rather than declaring
+/// its own. Kinds with a lifecycle of their own use its terminal value; the
+/// rest use `archived`, which is the whole of their lifecycle.
+pub fn terminal_status(kind: Kind, rel: &str) -> Option<&'static str> {
+    match kind {
+        Kind::Plan => Some("retired"),
+        Kind::Strategy => Some("discarded"),
+        Kind::Problem | Kind::Mandate => Some("archived"),
+        Kind::ContextDoc if live_path(rel).ends_with("/README.md") => Some("archived"),
+        _ => None,
+    }
+}
+
+/// Kind is read through the tier: `archive/plans/x.md` is a plan, filed
+/// where finished plans go. Classification is otherwise unchanged, so the
+/// mirror needs no per-kind rule.
 pub fn classify(rel: &str) -> Kind {
+    let rel = live_path(rel);
     let parts: Vec<&str> = rel.split('/').collect();
     match parts.as_slice() {
         ["conventions.md"] => Kind::Conventions,
@@ -281,6 +318,7 @@ impl Tree {
                 let (headings, fences) = markdown::scan(&text, skip);
                 artifacts.push(Artifact {
                     kind: classify(&rel),
+                    archived: is_archived(&rel),
                     abs: entry.path().to_path_buf(),
                     rel,
                     fm,
@@ -313,6 +351,22 @@ impl Tree {
 
     pub fn get(&self, rel: &str) -> Option<&Artifact> {
         self.index.get(rel).map(|&i| &self.artifacts[i])
+    }
+
+    /// Resolve by *address* rather than by location: an artifact keeps being
+    /// named by its live path after it moves into the terminal tier, so a
+    /// ref written before the move still resolves (spec rule 13). Tries the
+    /// path as given first, so an explicit `archive/…` still works for a
+    /// human debugging — the lint owns the canonical-form complaint.
+    pub fn get_addressed(&self, rel: &str) -> Option<&Artifact> {
+        self.get(rel)
+            .or_else(|| self.get(&format!("{ARCHIVE}{}", live_path(rel))))
+    }
+
+    /// `has_dir` through the tier, for directory refs (a bounded context, a
+    /// holder package) whose subtree has been archived.
+    pub fn has_dir_addressed(&self, rel: &str) -> bool {
+        self.has_dir(rel) || self.has_dir(&format!("{ARCHIVE}{}", live_path(rel)))
     }
 
     pub fn by_kind(&self, kind: Kind) -> impl Iterator<Item = &Artifact> {

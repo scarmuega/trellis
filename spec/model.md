@@ -1,4 +1,4 @@
-# Trellis — specification (v16)
+# Trellis — specification (v17)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -73,18 +73,22 @@ a domain is operated day to day.
 │       │   └── {skill}/            => ALL procedures live here — business playbooks and
 │       │                              technical runbooks through one mechanism
 │       └── {deployment unit}/
-└── org/
-    └── {role}/                     => a mandate plus whoever or whatever holds it;
-        │                              humans and agents through one schema
-        ├── mandate.md              => ALWAYS local: purpose, scope, authority, escalation
-        └── holder/                 => the identity filling the role:
-            │                          EITHER a local agent package:
-            ├── system.md           =>   system prompt implementing the mandate
-            ├── tools/
-            ├── skills/
-            ├── evals/              =>   mandate compliance as test cases
-            │                          OR a single opaque ref to an external identity:
-            └── ref.md              =>   for imported agents and for humans
+├── org/
+│   └── {role}/                     => a mandate plus whoever or whatever holds it;
+│       │                              humans and agents through one schema
+│       ├── mandate.md              => ALWAYS local: purpose, scope, authority, escalation
+│       └── holder/                 => the identity filling the role:
+│           │                          EITHER a local agent package:
+│           ├── system.md           =>   system prompt implementing the mandate
+│           ├── tools/
+│           ├── skills/
+│           ├── evals/              =>   mandate compliance as test cases
+│           │                          OR a single opaque ref to an external identity:
+│           └── ref.md              =>   for imported agents and for humans
+└── archive/                        => the terminal tier: this same hierarchy, holding what
+    └── {live path}                    is finished. Admission is terminal-only; the live path
+                                       stays the address, so refs resolve across the move
+                                       (rule 13). Never decisions/ — those are append-only
 ```
 
 ## Frontmatter schemas (defined in conventions.md)
@@ -99,6 +103,12 @@ tags: [mktg, growth]                # groupings are tags; views over tags are ge
 ### problem/{subdomain}.md
 ```yaml
 provenance: authored
+status: archived                         # optional, and the whole lifecycle: absent
+                                         #   means live. An orphan its owner will not
+                                         #   re-parent is declared finished here — which
+                                         #   is what "re-parent or archive" (rule 11)
+                                         #   has always meant — and becomes eligible
+                                         #   for the terminal tier (rule 13).
 induced-by:                              # >=1 edge; no edge to a committed
   - strategy: strategy/{strategy}.md     #   strategy => orphan (lint)
     class: core | supporting | generic   # classification is a property of the edge
@@ -119,7 +129,8 @@ status: raw | defined | validated | implemented | established | discarded
     # or superseded — the successor's supersedes: marks the last). Bands carry
     # the coarse vocabulary: committed = validated|implemented|established —
     # only the committed band induces (rule 11); aspirational = raw|defined;
-    # retired = discarded.
+    # retired = discarded, which is terminal and admits the strategy to the
+    # terminal tier (rule 13) once its dependents are re-funded.
 need: market.md#n-{slug}                     # the market need this fulfills
 differentiation: one line — why we win, against which alternative
 funded-by:                                   # what sustains this strategy (rule 12);
@@ -151,6 +162,8 @@ status: draft | ready | active | blocked | retired
     # any awaits: target is unretired. active = in flight; the taker
     # flips ready → active on pickup, → blocked on an uncleared blocker. ready is
     # optional — a human driving a plan interactively goes straight to active.
+    # retired is terminal, and terminal is what admits a plan to the terminal
+    # tier (rule 13) — a later, separate act, never part of the flip.
 type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
 complexity: mechanical | standard | deep
     # optional; the reasoning depth the work demands of its taker — never its
@@ -222,7 +235,13 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
    lifecycle, owner, and provenance distinct from any parent document. Everything else
    is body content; refs can target anchors, so linkability alone never justifies
    promotion. Cross-cutting collections are generated views over tags, never a second
-   authored hierarchy.
+   authored hierarchy. A path may therefore encode only what is fixed for an
+   artifact's life — its kind, its provenance — and never a state it can leave:
+   a status directory would make every transition a move and every ref a
+   forwarding address. The one exception proves the rule, because it is the one
+   transition that never reverses: `archive/` (rule 13) mirrors the live
+   hierarchy rather than inventing an axis to browse by, which is what
+   distinguishes a tier from a grouping.
 8. **A unit that needs its own goals, metrics, and plans is a domain.** Give it a
    root. Anything less creates a shadow domain inside this one.
 9. **The framework is fractal.** A portfolio, holdco, or platform is just another
@@ -256,6 +275,29 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     be re-funded, converted, or reconsidered. Economic lineage is
     strategy-layer knowledge: `economics.md` narrates the skeleton the edges
     draw; the founding map never carries it.
+
+13. **Finished artifacts are filed, not deleted, and filing is not an address.**
+    A root accumulates work that is over, and the live hierarchy is what
+    humans and agents traverse, so `archive/` holds the terminal tier: this
+    same hierarchy, one level down, at `archive/{live path}`. Three things
+    bound it. **Admission is terminal-only** — a kind with a lifecycle of its
+    own uses its terminal value (`retired` for a plan, `discarded` for a
+    strategy), and a kind without one carries `status: archived`, which is the
+    whole of its lifecycle; a unit that archives as a subtree (a bounded
+    context, a role) marks its entry artifact and the rest rides along.
+    Nothing non-terminal is ever filed, so the tier never holds work anyone is
+    waiting on. **The live path stays the address**: refs name
+    `plans/{plan}.md` whichever side of the move it sits on, which is what
+    keeps rule 10's retrieval keys stable and keeps append-only decisions
+    (rule 6) from rotting into dangling refs — a ref that names the tier is a
+    forwarding address and a modeling error. **Filing is a separate act from
+    finishing**: the terminal verdict is recorded in place, and the move
+    follows on a declared retention horizon, so the closure event lands under
+    the live path where the history-derived readings see it. Archived
+    artifacts stay governed — lint, refs, and the census still count them —
+    and leave attention: dispatch, review gates, and the effectiveness walk
+    skip them. `decisions/` is never filed: it is append-only shared memory
+    across agent generations (rule 6), superseded rather than retired.
 
 For the premises these rules answer to, see `spec/rationale.md`. For recurring,
 non-normative practice inside this structure, see `spec/patterns.md`.

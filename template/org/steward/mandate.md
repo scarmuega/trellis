@@ -30,6 +30,11 @@ extract those parts into tooling — that extraction is the CLI's charter.
     the last sweep, escalate downstream artifacts (induced subdomains,
     `context-map.md`, plans, mandates scoped to them) to their owners for
     revalidation; flag orphaned subdomains for re-parenting or archival.
+  - **Archive sweep** — file terminal artifacts that have been terminal longer
+    than the retention horizon (`conventions.md` → "Retention") into
+    `archive/`. This is a move, never a verdict: the steward files what an
+    owner already finished and never flips a status to make something
+    eligible.
   - **Plan dispatch** — route plans the owner has released (`status: ready`) to
     their owners: for each, invoke `act(owner)` to advance it. The scan is
     deterministic and the work runs under each owner's authority, so this grants

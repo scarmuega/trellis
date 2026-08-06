@@ -97,6 +97,17 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PlanCmd,
     },
+    /// File terminal artifacts into archive/ — the terminal tier
+    Archive {
+        /// The artifact to file. Omit with --sweep.
+        artifact: Option<String>,
+        /// Every terminal artifact colder than the declared horizon
+        #[arg(long)]
+        sweep: bool,
+        /// Report what would move; move nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Escalation records (fenced yaml under ## Escalations)
     Escalate {
         #[command(subcommand)]
@@ -197,6 +208,9 @@ enum PlanCmd {
         /// Only held plans (ready with unsatisfied awaits)
         #[arg(long)]
         held: bool,
+        /// Include plans filed in the terminal tier (archive/)
+        #[arg(long)]
+        archived: bool,
     },
     /// draft → ready, gated on the mechanical readiness pass
     Release {
@@ -742,6 +756,12 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
+        Cmd::Archive {
+            artifact,
+            sweep,
+            dry_run,
+        } => archive_cmd(cli.root.as_deref(), artifact.as_deref(), sweep, dry_run),
+
         Cmd::Plan { cmd } => plan_cmd(cli.root.as_deref(), cli.format, cmd),
         Cmd::Escalate { cmd } => escalate_cmd(cli.root.as_deref(), cli.format, cmd),
 
@@ -919,15 +939,112 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     }
 }
 
+/// `trellis archive` — the move that follows a terminal verdict, never the
+/// verdict itself. Retirement stays a frontmatter flip in place so the
+/// closure event lands under the live path where the board's flow reading
+/// sees it; this files the artifact away afterwards.
+fn archive_cmd(
+    root_arg: Option<&Path>,
+    artifact: Option<&str>,
+    sweep: bool,
+    dry_run: bool,
+) -> anyhow::Result<ExitCode> {
+    let (tree, git) = load(root_arg)?;
+    if !git.is_repo() {
+        anyhow::bail!(
+            "not a git repository — archiving is a `git mv` so that history follows the artifact"
+        );
+    }
+    let reg = registries::load(&tree);
+    let today = dates::today();
+
+    // (path, why) for everything that will move.
+    let mut moves: Vec<(String, String)> = Vec::new();
+
+    if let Some(arg) = artifact {
+        let rel = to_rel(&tree.root, arg);
+        let Some(a) = tree.get(&rel) else {
+            anyhow::bail!("{rel} is not an artifact in this root");
+        };
+        if a.archived {
+            println!("{rel}: already filed");
+            return Ok(ExitCode::SUCCESS);
+        }
+        let Some(want) = trellis::tree::terminal_status(a.kind, &a.rel) else {
+            anyhow::bail!(
+                "{rel} has no terminal status of its own — it is archived with the subtree it belongs to"
+            );
+        };
+        match a.status() {
+            Some(s) if s == want => moves.push((rel, format!("status: {want}"))),
+            other => anyhow::bail!(
+                "{rel} declares status: {} — the tier admits terminal artifacts only, which for this kind means status: {want}",
+                other.as_deref().unwrap_or("(none)")
+            ),
+        }
+    } else if sweep {
+        let Some(horizon) = reg.archive_after_days else {
+            anyhow::bail!(
+                "no retention horizon declared — add an \"archive after N days\" statement to conventions.md, or name an artifact explicitly"
+            );
+        };
+        for a in &tree.artifacts {
+            if a.archived {
+                continue;
+            }
+            let Some(want) = trellis::tree::terminal_status(a.kind, &a.rel) else {
+                continue;
+            };
+            if a.status().as_deref() != Some(want) {
+                continue;
+            }
+            // Cold means the terminal status has held for the horizon. An
+            // uncommitted flip has no dwell yet and is never swept.
+            let Some(set) = git.status_set_date(&a.rel, want) else {
+                continue;
+            };
+            let age = dates::days_between(set, today);
+            if age >= horizon {
+                moves.push((a.rel.clone(), format!("{want} for {age}d")));
+            }
+        }
+    } else {
+        anyhow::bail!("name an artifact to file, or pass --sweep");
+    }
+
+    moves.sort();
+    if moves.is_empty() {
+        println!("nothing to file");
+        return Ok(ExitCode::SUCCESS);
+    }
+    for (rel, why) in &moves {
+        let dest = format!("{}{rel}", trellis::tree::ARCHIVE);
+        if dry_run {
+            println!("would file {rel} → {dest} ({why})");
+        } else {
+            git.mv(rel, &dest)?;
+            println!("{rel} → {dest} ({why})");
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Result<ExitCode> {
     let ok = ExitCode::SUCCESS;
     let (tree, git) = load(root_arg)?;
     let derived = graph::derive(&tree);
 
     match cmd {
-        PlanCmd::List { status, held } => {
+        PlanCmd::List {
+            status,
+            held,
+            archived,
+        } => {
             let rows: Vec<facts::PlanRow> = facts::plan_rows(&tree, &git, &derived, dates::today())
                 .into_iter()
+                // The default census is the live one — the whole reason the
+                // tier exists. `--archived` asks for the rest.
+                .filter(|r| archived || !r.archived)
                 .filter(|r| !held || r.held.is_some())
                 .filter(|r| match &status {
                     Some(want) => r.status.as_deref() == Some(want.as_str()),
@@ -1069,10 +1186,13 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
                 PlanStatus::Blocked,
             ];
             plan_ops::flip(&abs, &from, PlanStatus::Retired)?;
+            // `awaits:` edges name the live path, whatever tier the target
+            // sits in.
+            let address = trellis::tree::live_path(&rel).to_string();
             let dependents: Vec<String> = derived
                 .plan_awaits
                 .iter()
-                .filter(|(_, targets)| targets.contains(&rel))
+                .filter(|(_, targets)| targets.contains(&address))
                 .map(|(p, _)| p.clone())
                 .collect();
             println!("{rel}: → retired");

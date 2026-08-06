@@ -109,7 +109,10 @@ pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
         warnings: vec![],
     };
 
-    let mut plans: Vec<_> = tree.by_kind(Kind::Plan).collect();
+    // The terminal tier never carries work. Archived plans are terminal by
+    // admission, so none could be `ready` anyway — skipping them keeps the
+    // scan off a set that only grows, on a path that runs every tick.
+    let mut plans: Vec<_> = tree.by_kind(Kind::Plan).filter(|p| !p.archived).collect();
     plans.sort_by(|a, b| a.rel.cmp(&b.rel));
 
     'plans: for plan in plans {

@@ -149,6 +149,7 @@ static RULES: &[(u8, RuleFn)] = &[
     (22, item22),
     (23, item23),
     (24, item24),
+    (25, item25),
 ];
 
 /// The checklist items this kernel implements, in order.
@@ -183,7 +184,7 @@ pub fn run(ctx: &Ctx, items: Option<&[u8]>, paths: &[String]) -> Report {
         .filter(|f| f.severity == Severity::Violation)
         .count();
     let warnings = sink.findings.len() - violations;
-    let items_considered = items.map(|l| l.len()).unwrap_or(24);
+    let items_considered = items.map(|l| l.len()).unwrap_or(RULES.len());
     Report {
         version: 1,
         root: ctx.tree.root.path.display().to_string(),
@@ -413,8 +414,10 @@ fn item04(ctx: &Ctx, sink: &mut Sink) {
                     "awaits: names the plan itself".into(),
                 );
             } else if !target.starts_with("plans/") {
+                // The tier is never an address: `archive/plans/x.md` fails
+                // here on purpose, and item 25 says why.
                 sink.violation(ctx, 4, &a.rel, fm.line_of("awaits"), format!("awaits: target {target} is outside plans/ — sequencing edges only point at plans in this root"));
-            } else if ctx.tree.get(&target).is_none() {
+            } else if ctx.tree.get_addressed(&target).is_none() {
                 sink.violation(ctx, 4, &a.rel, fm.line_of("awaits"), format!("awaits: target {target} does not resolve — dispatch holds this plan, fail closed"));
             }
         }
@@ -532,9 +535,9 @@ fn item09(ctx: &Ctx, sink: &mut Sink) {
         if commits.is_empty() {
             continue; // uncommitted draft — still part of the session
         }
-        let accepted_at = commits.iter().position(|(sha, _)| {
+        let accepted_at = commits.iter().position(|t| {
             ctx.git
-                .text_at(sha, &a.rel)
+                .text_at(&t.sha, &t.path)
                 .and_then(|t| crate::frontmatter::extract(&t))
                 .and_then(|fm| fm.get_str("status"))
                 .as_deref()
@@ -1031,6 +1034,54 @@ fn item24(ctx: &Ctx, sink: &mut Sink) {
             if !open {
                 sink.violation(ctx, 24, &a.rel, None, "blocked plan carries no open escalation record — blocked asserts a defect a human must clear; state the blocker or flip the status back (a held plan stays ready and owes no record)".into());
             }
+        }
+    }
+}
+
+// 25. The terminal tier is well-formed.
+fn item25(ctx: &Ctx, sink: &mut Sink) {
+    for a in &ctx.tree.artifacts {
+        // The tier is never an address: refs name the live path, whichever
+        // side of the move the target is on (spec rule 13). Frontmatter has
+        // no legitimate use for the prefix, so a plain scan of the block is
+        // both complete and free of false positives.
+        if let Some(fm) = &a.fm {
+            for (i, line) in a.text.lines().take(fm.close_line as usize).enumerate() {
+                if line.contains(crate::tree::ARCHIVE) {
+                    sink.violation(ctx, 25, &a.rel, Some(i as u32 + 1), format!("ref names the terminal tier ({}…) — refs name the live path, which keeps resolving after a move; drop the prefix", crate::tree::ARCHIVE));
+                    break;
+                }
+            }
+        }
+
+        if !a.archived {
+            continue;
+        }
+
+        // The mirror is the whole convention: an archived path is a live
+        // path with the prefix in front. Anything that does not classify
+        // through it is filed where nothing will ever look for it.
+        if a.kind == Kind::Other {
+            sink.violation(ctx, 25, &a.rel, None, format!("{} holds a path that is not a mirror of the live hierarchy — an archived artifact's path is its live path with the prefix in front, so nothing else belongs here", crate::tree::ARCHIVE));
+            continue;
+        }
+
+        // Decisions are shared memory across agent generations (spec rule 6);
+        // append-only means they are never filed away either.
+        if a.kind == Kind::Decision {
+            sink.violation(ctx, 25, &a.rel, None, "decisions are never archived — decisions/ is append-only shared memory (spec rule 6); supersede with a new numbered decision instead".into());
+            continue;
+        }
+
+        // Admission is terminal-only. A unit that archives as a subtree
+        // (a bounded context, a role) carries the marker on its entry
+        // artifact; the rest of the subtree rides along.
+        let Some(want) = crate::tree::terminal_status(a.kind, &a.rel) else {
+            continue;
+        };
+        let got = a.status();
+        if got.as_deref() != Some(want) {
+            sink.violation(ctx, 25, &a.rel, a.fm.as_ref().and_then(|f| f.line_of("status")), format!("archived artifact declares status: {} — the tier admits terminal artifacts only, which for this kind means status: {want}", got.as_deref().unwrap_or("(none)")));
         }
     }
 }

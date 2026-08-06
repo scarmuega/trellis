@@ -44,6 +44,9 @@ solution/         context-map.md + {bounded context}/ (README, glossary,
                   contracts/, skills/, deployment units)
 org/              {role}/ = mandate.md (always local) + holder/ (agent package:
                   system.md, tools/, skills/, evals/ — or ref.md to external)
+archive/          the terminal tier: this same hierarchy at archive/{live path},
+                  holding what is finished. Terminal-only; refs still name the
+                  live path; never decisions/ (append-only)
 ```
 
 ## Placement guide — where does this content go?
@@ -76,13 +79,20 @@ org/              {role}/ = mandate.md (always local) + holder/ (agent package:
 | Standing process, cadence | `rituals.md` |
 | Term of art | `glossary.md` (or BC-local glossary) |
 | Vendor providing a system | entry in `solution/context-map.md` with DDD relation |
+| An artifact that is finished and will not return | leave it where it is and declare its terminal status (`retired` \| `discarded` \| `archived`); the steward's archive sweep files it to `archive/{its live path}` once it is cold — never move it yourself as part of finishing it |
+| "Which plans are live?" / what to pick up next | `trellis plan list` or the generated board in `metrics/actuals/` — a reading over `status:`, never a listing of `plans/` |
 
 Never create: a functions/departments directory, a requirements directory, a
 personas directory, a root-level `skills/` directory (skills live in bounded
 contexts or agent holder packages — decision 0021), a plan folder
-(`plans/{plan}/` — sub-plans are flat siblings, decision 0026), or any
+(`plans/{plan}/` — sub-plans are flat siblings, decision 0026), a directory
+keyed on a status an artifact can leave (`plans/_drafts/`, `plans/blocked/` —
+a path encodes only what is fixed for an artifact's life, spec rule 7), or any
 directory that groups existing kinds — groupings are tags; views over tags are
-generated.
+generated. `archive/` is the one lifecycle tier and the exception that shows
+the rule: it takes only terminal artifacts, at the one transition that never
+reverses, and it mirrors the live hierarchy instead of inventing an axis to
+browse by (spec rule 13, decision 0042).
 
 ## Rules digest
 
@@ -96,7 +106,9 @@ generated.
    interval.
 6. Decisions are append-only; supersede, never edit.
 7. Directories hold kinds; groupings are tags. New directory ⇒ new artifact kind
-   (own frontmatter, lifecycle, owner). Linkability alone never justifies one.
+   (own frontmatter, lifecycle, owner). Linkability alone never justifies one. A
+   path encodes only what is fixed for an artifact's life — kind, provenance —
+   never a state it can leave; `archive/` (rule 13) is the sole exception.
 8. A unit needing its own goals, metrics, and plans is a domain — a new root, not
    a subdirectory.
 9. The framework is fractal: portfolios and holdcos are just domains.
@@ -112,6 +124,12 @@ generated.
     sustains). A committed strategy with no sustaining edge is an economic
     orphan; discarding a strategy orphans its funding dependents (re-fund,
     convert, or reconsider).
+13. Finished artifacts are filed, not deleted: `archive/{live path}` mirrors the
+    hierarchy, admits terminal artifacts only, and is never an address — refs
+    name the live path on either side of the move. Filing is a separate act
+    from finishing, on a declared retention horizon. Archived artifacts stay
+    governed (lint, refs, census) and leave attention (dispatch, review gates,
+    the effectiveness walk). Never `archive/decisions/`.
 
 ## Procedures
 

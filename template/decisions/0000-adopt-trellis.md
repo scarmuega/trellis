@@ -6,6 +6,6 @@ date: {date}
 ---
 # 0000 — Adopt Trellis
 
-This domain adopts the Trellis operating model, specification v16
+This domain adopts the Trellis operating model, specification v17
 (<ref: trellis spec>). Deviations from the spec require a decision in this
 directory. Decisions are append-only: supersede, never edit.

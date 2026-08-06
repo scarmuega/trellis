@@ -21,6 +21,11 @@ pub struct Registries {
     /// Days, when derivable (metric-sweep cadence, or an explicit
     /// "freshness window … N days" statement in `rituals.md`).
     pub freshness_window_days: Option<i64>,
+    /// Days a terminal artifact waits before the sweep files it into the
+    /// tier, from an "archive after … N days" statement in `conventions.md`.
+    /// Absent means the sweep moves nothing on its own: a retention horizon
+    /// nobody declared is not one the kernel invents.
+    pub archive_after_days: Option<i64>,
 }
 
 pub fn cadence_days(cadence: &str) -> Option<i64> {
@@ -56,6 +61,10 @@ pub fn load(tree: &Tree) -> Registries {
     if let Some(conv) = tree.get("conventions.md") {
         reg.plan_types = markdown::registry_items(&conv.text, &conv.headings, "plan-type-registry");
         reg.tags = markdown::registry_items(&conv.text, &conv.headings, "tag-registry");
+        let re = regex::Regex::new(r"archive after[^.\n]*?(\d+)\s*days").unwrap();
+        if let Some(cap) = re.captures(&conv.text) {
+            reg.archive_after_days = cap[1].parse().ok();
+        }
     }
 
     if let Some(rituals) = tree.get("rituals.md") {

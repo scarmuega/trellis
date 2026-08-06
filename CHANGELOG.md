@@ -14,6 +14,50 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **A terminal tier: `archive/` (spec v17; decision 0042):** a root accumulates
+  work that is over, and until now there was nowhere for it to go. `plans/` was
+  the sharp case — the only kind that grows without bound, has a terminal state,
+  and has no ordering pushing dead entries away, since `decisions/NNNN-`
+  self-sorts by age while plan slugs are semantic by mandate. The board and
+  `trellis plan list` answer *what is live?*, and that is a reading: it does not
+  shrink the tree a human scrolls or an agent globs. Worse, most kinds could not
+  state the problem at all — only plans and strategies carried a terminal value,
+  which is why the spec prescribed "re-parent or archive" in five places and
+  defined archive nowhere.
+
+  Rule 7 gains the line its refusals were already drawing: **a path may encode
+  only what is fixed for an artifact's life** — kind, provenance — never a state
+  it can leave, because a status directory makes every transition a move and
+  every ref a forwarding address. Rule 13 then takes the one transition that
+  never reverses. `archive/` mirrors the live hierarchy at `archive/{live
+  path}`; admission is terminal-only (`retired`, `discarded`, or a new
+  `status: archived` for kinds whose lifecycle had no terminal value); **the live
+  path stays the address**, so an `awaits:` edge or an append-only decision keeps
+  resolving across the move; and filing is a separate act from finishing, on a
+  retention horizon declared in `conventions.md` and run by the steward's new
+  archive sweep. Archived artifacts stay governed — lint, refs, census — and
+  leave attention: dispatch, CODEOWNERS, and `plan list` skip them
+  (`--archived` asks for them back). A tier is not a grouping because it invents
+  no axis to browse by: you follow a ref into it, or you never look.
+
+  **The load-bearing change is in `gitio`, and it is why this was checked before
+  it was decided.** `commits` ran `git log` with no `--follow`, so a rename
+  truncated the status timeline at the move: the board would see a one-entry
+  timeline, `closed` would never increment, and closure rate and cycle time would
+  read zero and `—` forever — the flow reading the Execution health pattern
+  specifies as "the history of `plans/`", destroyed by the very artifacts it is
+  computed from. `--follow` also cannot be paired with `--reverse`, which
+  silently truncates the same walk, so the reverse happens in Rust. The tests
+  assert the readings are *identical* before and after a move rather than merely
+  that the file moved, which is the property the design exists to preserve.
+
+  New: `trellis archive <artifact>` and `--sweep [--dry-run]`, lint item 25 (the
+  tier mirrors the hierarchy, admits only terminal artifacts, never holds
+  `decisions/`, and is never named by a ref), and `trellis plan list
+  --archived`. Purge — `git rm` on the same sweep — was the simpler design and
+  was refused: a retired plan's verdict is operational memory an agent should be
+  able to grep, and `git log -S` is not a path anything reaches for unprompted.
+
 - **Sessions talk back (non-normative; decision 0041):** the spawn was one-way
   — argv in, an exit code out — so a session that met an underspecified plan
   could only block it, write an escalation record, and exit, spending a full

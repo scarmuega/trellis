@@ -54,7 +54,9 @@ the existing plans (name, status, type) and ask what to plan.
    the plan executes through — including their `contracts/`, the published
    language the plan must satisfy or would change — the `metrics/definitions.md`
    anchors that will
-   measure it, and prior `plans/` and `decisions/` that overlap. Use terms from
+   measure it, and prior plans and `decisions/` that overlap — `trellis plan
+   list` for the live set, `--archived` to reach finished work whose ground
+   this plan would retread. Use terms from
    `glossary.md`; surface conflicts with active plans.
 
 6. **Draft for transposition**: build the plan in the harness plan file as
@@ -66,7 +68,9 @@ the existing plans (name, status, type) and ask what to plan.
    change), `standard` (local design judgment), or `deep` (novel or
    cross-context judgment) — depth, never size — and `awaits:` (optional) when
    this plan must queue behind other plans finishing, each target an existing
-   `plans/*.md` resolved like every other ref. Then objective, approach,
+   `plans/*.md` resolved like every other ref — always by its live path, never
+   an `archive/`-prefixed one, since the live path keeps resolving after a
+   finished plan is filed into the terminal tier. Then objective, approach,
    measurement, risks and escalation triggers. A deliverable another context,
    party, or system will consume names its contract in the body — an existing
    one the plan satisfies, or one it hatches into the publishing context's

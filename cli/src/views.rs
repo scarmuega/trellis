@@ -277,12 +277,21 @@ pub fn codeowners(tree: &Tree) -> String {
         }
     };
 
+    // Archived artifacts are excluded throughout: a review gate on something
+    // finished asks a human to approve changes to a file nobody should be
+    // changing.
     for a in tree.by_kind(Kind::Problem) {
+        if a.archived {
+            continue;
+        }
         if derived.effective_class(&a.rel) == crate::model::Class::Core {
             push(format!("/{}", a.rel), a.owner(), &mut entries, &mut gaps);
         }
     }
     for a in tree.by_kind(Kind::Plan) {
+        if a.archived {
+            continue;
+        }
         if derived.plan_class(tree, &a.rel) == Some(crate::model::Class::Core) {
             push(format!("/{}", a.rel), a.owner(), &mut entries, &mut gaps);
             for bc in

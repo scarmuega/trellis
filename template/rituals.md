@@ -17,3 +17,4 @@ equals the metric-sweep cadence unless stated otherwise here.
 | derivation sweep | weekly  | org/steward | on founding-map/strategy/contract edits: escalate downstream artifacts and consumer contexts for revalidation; flag orphaned subdomains and economically orphaned strategies |
 | focus            | weekly  | org/focus   | evaluate ready, active, and blocked plans against problem and metrics (plan-effectiveness checklist); report findings to owners to record |
 | plan dispatch    | daily   | org/steward | scan `status: ready` plans, skipping any whose `awaits:` targets are not all retired (held, not blocked); `act(owner)` each to advance it (owners' acts flip ready→active); deterministic scan, work runs under each owner's authority |
+| archive sweep    | monthly | org/steward | file terminal artifacts colder than the retention horizon into `archive/` (`conventions.md` → "Retention"); a move, never a verdict — nothing non-terminal is filed and no status changes |

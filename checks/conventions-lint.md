@@ -132,3 +132,17 @@ treats any directory with a `.git` in it as somebody else's.
     this: `awaits:` holds a plan at `ready`, carries no defect, and owes no
     record — item 4 owns its edges.) No record sits in a `generated` artifact;
     escalations against generated output belong to its source.
+25. The terminal tier (`archive/`) is well-formed. An archived artifact's path
+    is exactly its live path with the prefix in front, so everything under it
+    classifies to a kind through that mirror; a path that does not is filed
+    where nothing will look for it. Admission is terminal-only — `retired` for
+    a plan, `discarded` for a strategy, `archived` for a kind whose lifecycle
+    has no terminal value of its own — and a unit that archives as a subtree
+    (a bounded context, a role) carries the marker on its entry artifact while
+    the rest rides along. `archive/decisions/` never exists: decisions are
+    append-only shared memory across agent generations (spec rule 6), so they
+    are superseded, never filed away. And no ref names the tier — refs name the
+    live path, which keeps resolving on either side of a move (spec rule 13),
+    so a `archive/`-prefixed ref is an address that will rot. Escalate to the
+    artifact's owner: move it back, declare the terminal status, or drop the
+    prefix from the ref.

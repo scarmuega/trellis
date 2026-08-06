@@ -126,9 +126,15 @@ fn accepted_decision_edited_after_acceptance_fires_item_9() {
 #[test]
 fn spec_version_pin_mismatch_fires_item_18() {
     let f = Fixture::healthy();
-    let text = f
-        .read("decisions/0000-adopt-trellis.md")
-        .replace("v16", "v15");
+    // Derived from the embedded version rather than spelled out, so a spec
+    // bump does not quietly turn this into a no-op that asserts nothing.
+    let current = format!("v{}", trellis::spec_version());
+    let original = f.read("decisions/0000-adopt-trellis.md");
+    let text = original.replace(&current, "v1");
+    assert_ne!(
+        text, original,
+        "fixture pin did not change — expected {current} in the skeleton"
+    );
     f.write("decisions/0000-adopt-trellis.md", &text);
     let report = f.lint_json(&["--items", "18"]);
     let messages: Vec<String> = report["findings"]
@@ -138,7 +144,7 @@ fn spec_version_pin_mismatch_fires_item_18() {
         .map(|f| f["message"].as_str().unwrap().to_string())
         .collect();
     assert!(
-        messages.iter().any(|m| m.contains("v15")),
+        messages.iter().any(|m| m.contains("spec v1,")),
         "stale pin must fire item 18: {report:#}"
     );
 }

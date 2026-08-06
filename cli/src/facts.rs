@@ -166,6 +166,9 @@ pub struct PlanRow {
     pub held: Option<String>,
     pub dwell_days: Option<i64>,
     pub open_escalations: usize,
+    /// Filed in the terminal tier. Rows carry it rather than being dropped
+    /// here, so a caller can ask for the whole census when it wants one.
+    pub archived: bool,
 }
 
 /// `trellis plan list`: the whole plan census, sorted by path. Callers apply
@@ -192,6 +195,7 @@ pub fn plan_rows(tree: &Tree, git: &Git, derived: &Derived, today: Date) -> Vec<
                     .filter(|r| r.status.as_deref() == Some("open"))
                     .count(),
                 status,
+                archived: p.archived,
                 plan: p.rel.clone(),
             }
         })

@@ -71,13 +71,16 @@ pub fn derive(tree: &Tree) -> Derived {
         d.induced.insert(a.rel.clone(), edges);
     }
 
+    // Keyed by *address*, not location: an archived plan is still named by
+    // its live path, so an `awaits:` edge written before the move keeps
+    // resolving and its hold still clears (spec rule 13).
     for a in tree.by_kind(Kind::Plan) {
         d.plan_status.insert(
-            a.rel.clone(),
+            crate::tree::live_path(&a.rel).to_string(),
             a.status().and_then(|s| PlanStatus::parse(&s)),
         );
         d.plan_awaits.insert(
-            a.rel.clone(),
+            crate::tree::live_path(&a.rel).to_string(),
             a.fm.as_ref()
                 .and_then(|fm| fm.get_list("awaits"))
                 .unwrap_or_default(),
@@ -193,6 +196,7 @@ impl Derived {
     /// (skipped, still ready). Returns the first holding target and its
     /// status (`None` = target missing).
     pub fn hold(&self, plan: &str) -> Option<(String, Option<PlanStatus>)> {
+        let plan = crate::tree::live_path(plan);
         if self.plan_status.get(plan).copied().flatten() != Some(PlanStatus::Ready) {
             return None;
         }
@@ -265,7 +269,7 @@ impl Derived {
     /// A plan's effective class: strictest across its subdomains' effective
     /// classes; `None` when it declares no resolvable subdomain.
     pub fn plan_class(&self, tree: &Tree, plan: &str) -> Option<Class> {
-        let artifact = tree.get(plan)?;
+        let artifact = tree.get_addressed(plan)?;
         let subs = artifact.fm.as_ref()?.get_list("subdomains")?;
         subs.iter()
             .filter(|s| self.induced.contains_key(s.as_str()))

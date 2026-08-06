@@ -193,7 +193,12 @@ fn scaffold_produces_a_pinned_owned_instance() {
         adopt.contains("date: 2026-08-03"),
         "adopt decision dated today:\n{adopt}"
     );
-    assert!(adopt.contains("specification v16"));
+    // Derived, so a spec bump re-pins the template rather than this test.
+    let pin = format!("specification v{}", trellis::spec_version());
+    assert!(
+        adopt.contains(&pin),
+        "scaffolded instance pins {pin}:\n{adopt}"
+    );
     assert!(
         !dest.join("README.md").exists(),
         "template README is not part of an instance"
