@@ -12,9 +12,12 @@
 //! A rule that belongs to the model belongs in the kernel, where the lockstep
 //! tests can hold it to the prose.
 
+pub mod backend;
 pub mod channels;
 pub mod client;
 pub mod config;
+#[cfg(unix)]
+pub mod herdr;
 pub mod mcp;
 pub mod sched;
 pub mod server;
@@ -29,9 +32,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
+use self::backend::{Backend, Launch};
 use self::config::RuntimeConfig;
 use self::sched::Task;
-use self::spawn::{InFlightView, Spawner};
+use self::spawn::InFlightView;
 use self::state::State;
 use crate::dates::{self, Date};
 use crate::dispatch::{self, SessionMap};
@@ -104,6 +108,9 @@ struct Runtime {
     port: Option<u16>,
     dry_run: bool,
     channels: channels::Channels,
+    /// Tickets already pushed to the channels. In memory only: tickets die
+    /// with the daemon, so there is nothing to remember across restarts.
+    announced_tickets: Mutex<std::collections::HashSet<String>>,
     shared: Arc<Shared>,
 }
 
@@ -167,16 +174,15 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         Some(Pidfile::claim(&root)?)
     };
 
+    let channels = open_channels(&cfg)?;
     let mut rt = Runtime {
         root: root.clone(),
         cfg,
         plugin_dir,
         port: None,
         dry_run: opts.dry_run,
-        // No adapter ships in this slice; a configured one is refused at
-        // load. The seam is wired so adding a transport is a registration,
-        // never a change to the loop.
-        channels: channels::Channels::new(),
+        channels,
+        announced_tickets: Mutex::new(std::collections::HashSet::new()),
         shared: Arc::clone(&shared),
     };
 
@@ -196,10 +202,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     }
 
     let mut state = State::load(&root);
-    let mut spawner = Spawner::new(&root, rt.cfg.scheduler.max_concurrent);
-    if opts.once {
-        spawner = spawner.once_per_task();
-    }
+    let mut backend = Backend::connect(&root, &rt.cfg, opts.once)?;
 
     if !opts.once {
         signals::install();
@@ -220,7 +223,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     }
 
     loop {
-        let outcome = match tick(&rt, &mut state, &mut spawner) {
+        let outcome = match tick(&rt, &mut state, &mut backend) {
             Ok(outcome) => outcome,
             Err(e) => {
                 note(&format!("tick failed: {e:#}"));
@@ -228,7 +231,7 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
             }
         };
         if opts.once {
-            for done in spawner.wait_all() {
+            for done in backend.drain() {
                 report_exit(&done);
                 state.finished(&done.key, done.exit);
                 retire(&rt, &done);
@@ -247,9 +250,37 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
             return Ok(ExitCode::SUCCESS);
         }
         if sleep_until_tick_or_signal(rt.cfg.scheduler.tick_secs) {
-            return shutdown(&rt, &mut state, &mut spawner);
+            return shutdown(&rt, &mut state, &mut backend);
         }
     }
+}
+
+/// The escalation transports this run announces on, built from config. The
+/// only kind that reaches here is "herdr" — `validate` refused the rest —
+/// and one that is configured but unreachable is refused outright, on the
+/// `{plugin_dir}` precedent: configured-and-dead is wrong, not degraded.
+fn open_channels(cfg: &RuntimeConfig) -> anyhow::Result<channels::Channels> {
+    let mut channels = channels::Channels::new();
+    for entry in &cfg.channels {
+        #[cfg(unix)]
+        {
+            let client = herdr::client::Client::new(entry.socket.as_deref());
+            client
+                .handshake()
+                .map_err(|e| anyhow::anyhow!("channels: {e:#} — or drop the [[channels]] entry"))?;
+            note(&format!(
+                "channel herdr: escalations will toast at {}",
+                client.socket().display()
+            ));
+            channels.register(Box::new(herdr::channel::HerdrChannel::new(client)));
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = entry;
+            anyhow::bail!("channel kind \"herdr\" speaks a unix socket — this platform has none");
+        }
+    }
+    Ok(channels)
 }
 
 /// Sleep out the tick interval, waking early if a stop was asked for. Returns
@@ -272,15 +303,17 @@ fn sleep_until_tick_or_signal(tick_secs: u64) -> bool {
 /// The alternative is to exit and orphan them, which is what happened before:
 /// children are process-group leaders precisely so a stray Ctrl-C could not
 /// kill a session mid-artifact, and the same isolation makes an intentional
-/// stop something the daemon has to do on purpose.
-fn shutdown(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Result<ExitCode> {
-    let signalled = spawner.cancel_all();
+/// stop something the daemon has to do on purpose. The herdr backend may be
+/// configured to detach instead — its sessions live in herdr, not under this
+/// process, and the next daemon adopts them.
+fn shutdown(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Result<ExitCode> {
+    let (signalled, done) = backend.stop_all();
     if signalled > 0 {
         note(&format!(
             "stopping — asked {signalled} session(s) to stop, waiting for them"
         ));
     }
-    for done in spawner.wait_all() {
+    for done in done {
         report_exit(&done);
         state.finished(&done.key, done.exit);
         retire(rt, &done);
@@ -310,8 +343,8 @@ enum Outcome {
     AlreadyRan,
 }
 
-fn tick(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Result<Pass> {
-    for done in spawner.reap() {
+fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Result<Pass> {
+    for done in backend.reap() {
         report_exit(&done);
         state.finished(&done.key, done.exit);
         retire(rt, &done);
@@ -345,11 +378,12 @@ fn tick(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Resul
                 outcome.record(fire(
                     rt,
                     state,
-                    spawner,
+                    backend,
                     &due.task.key(),
                     &format!("ritual {name} ({executor})"),
                     &rt.cfg.prompts.ritual,
                     &rt.cfg.harness.ritual_cmd,
+                    &rt.cfg.harness.herdr.ritual_args,
                     vars,
                     today,
                 ));
@@ -382,11 +416,12 @@ fn tick(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Resul
                     let started = fire(
                         rt,
                         state,
-                        spawner,
+                        backend,
                         &state::key_plan(&item.plan),
                         &format!("act {} → {}", item.plan, item.owner),
                         &rt.cfg.prompts.act,
                         &rt.cfg.harness.act_cmd,
+                        &rt.cfg.harness.herdr.act_args,
                         vars,
                         today,
                     );
@@ -421,12 +456,30 @@ fn tick(rt: &Runtime, state: &mut State, spawner: &mut Spawner) -> anyhow::Resul
         for failure in rt.channels.announce(&fresh) {
             note(&failure);
         }
+
+        // Parked questions ride the same transports, one tick late at worst.
+        // The inbox stays the answering contract; this only shortens the
+        // time until somebody looks at it.
+        if !rt.channels.is_empty() {
+            let fresh: Vec<mcp::Pending> = {
+                let mut seen = rt.announced_tickets.lock().unwrap();
+                rt.shared
+                    .inbox
+                    .pending()
+                    .into_iter()
+                    .filter(|p| seen.insert(p.ticket.clone()))
+                    .collect()
+            };
+            for failure in rt.channels.announce_questions(&fresh) {
+                note(&failure);
+            }
+        }
     }
 
     {
         let mut status = rt.shared.status.lock().unwrap();
         status.last_pass = Some(today.to_string());
-        status.in_flight = spawner.in_flight();
+        status.in_flight = backend.in_flight();
         status.runs = state.runs.clone();
         status.warnings = warnings;
         status.held = held;
@@ -456,24 +509,25 @@ impl Pass {
 fn fire(
     rt: &Runtime,
     state: &mut State,
-    spawner: &mut Spawner,
+    backend: &mut Backend,
     key: &str,
     label: &str,
     prompt_template: &str,
     argv_template: &[String],
+    herdr_args_template: &[String],
     vars: tmpl::Vars,
     today: Date,
 ) -> Outcome {
-    if spawner.is_busy(key) {
+    if backend.is_busy(key) {
         note(&format!(
             "{label}: already in flight — not starting a second"
         ));
         return Outcome::Deferred;
     }
-    if spawner.already_ran(key) {
+    if backend.already_ran(key) {
         return Outcome::AlreadyRan;
     }
-    if spawner.capacity() == 0 {
+    if backend.capacity() == 0 {
         note(&format!(
             "{label}: all {} session slots busy — deferred, still due",
             rt.cfg.scheduler.max_concurrent
@@ -506,8 +560,18 @@ fn fire(
         }
     };
 
-    let argv = match render(prompt_template, argv_template, &vars) {
-        Ok(argv) => argv,
+    // Both backends run from the same rendered prompt; they differ in who
+    // carries it. The process backend substitutes it into the argv, so it is
+    // one argument no matter what it contains; the herdr backend keeps it
+    // aside and submits it to the running agent.
+    let launch = match render(
+        backend.is_herdr(),
+        prompt_template,
+        argv_template,
+        herdr_args_template,
+        &vars,
+    ) {
+        Ok(launch) => launch,
         Err(e) => {
             note(&format!("{label}: {e:#}"));
             close();
@@ -516,11 +580,23 @@ fn fire(
     };
 
     if rt.dry_run {
-        note(&format!("would run {label}: {}", spawn::shell_quote(&argv)));
+        if backend.is_herdr() {
+            note(&format!(
+                "would run {label} in herdr: {} {} ⇐ {}",
+                rt.cfg.harness.herdr.kind,
+                spawn::shell_quote(&launch.argv),
+                launch.prompt
+            ));
+        } else {
+            note(&format!(
+                "would run {label}: {}",
+                spawn::shell_quote(&launch.argv)
+            ));
+        }
         close();
         return Outcome::Started;
     }
-    match spawner.spawn(key, label, &argv, token.clone()) {
+    match backend.spawn(key, label, &launch, token.clone()) {
         Ok(log) => {
             note(&format!("started {label} → logs/{log}"));
             state.fired(key, today, Some(log));
@@ -535,21 +611,34 @@ fn fire(
 }
 
 /// Substitute the prompt first, then the command that carries it — so a
-/// prompt is one argument no matter what it contains.
+/// prompt is one argument no matter what it contains. For herdr the argv is
+/// the agent's flags and the prompt rides alongside, unsubstituted into
+/// anything.
 fn render(
+    for_herdr: bool,
     prompt_template: &str,
     argv_template: &[String],
+    herdr_args_template: &[String],
     vars: &tmpl::Vars,
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<Launch> {
     let prompt = tmpl::substitute("prompt", &[prompt_template.to_string()], vars)?
         .into_iter()
         .next()
         .expect("one element in, one out");
-    tmpl::substitute(
-        "command",
-        argv_template,
-        &vars.clone().set("prompt", prompt),
-    )
+    if for_herdr {
+        return Ok(Launch {
+            argv: tmpl::substitute("herdr args", herdr_args_template, vars)?,
+            prompt,
+        });
+    }
+    Ok(Launch {
+        argv: tmpl::substitute(
+            "command",
+            argv_template,
+            &vars.clone().set("prompt", prompt),
+        )?,
+        prompt: String::new(),
+    })
 }
 
 /// Close a finished session's back-channel. A question outstanding when its
@@ -577,13 +666,18 @@ pub fn note(message: &str) {
 
 /// Whether any template names a placeholder — asked of the ones the daemon
 /// must be able to *supply* before the first tick, so a template that names
-/// something unavailable is refused at startup rather than at the first spawn.
+/// something unavailable is refused at startup rather than at the first
+/// spawn. Only the active backend's templates count: a `{plugin_dir}` in
+/// argv the herdr backend will never render should not refuse its startup.
 fn names(cfg: &RuntimeConfig, placeholder: &str) -> bool {
     let uses = |t: &[String]| t.iter().any(|e| e.contains(placeholder));
-    uses(&cfg.harness.act_cmd)
-        || uses(&cfg.harness.ritual_cmd)
-        || cfg.prompts.act.contains(placeholder)
-        || cfg.prompts.ritual.contains(placeholder)
+    let harness = match cfg.harness.backend {
+        config::BackendKind::Process => uses(&cfg.harness.act_cmd) || uses(&cfg.harness.ritual_cmd),
+        config::BackendKind::Herdr => {
+            uses(&cfg.harness.herdr.act_args) || uses(&cfg.harness.herdr.ritual_args)
+        }
+    };
+    harness || cfg.prompts.act.contains(placeholder) || cfg.prompts.ritual.contains(placeholder)
 }
 
 fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {

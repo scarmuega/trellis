@@ -13,6 +13,7 @@
 //! silently dropped. What is here is the seam a webhook, a desktop
 //! notification, or a chat adapter attaches to without touching the loop.
 
+use super::mcp::Pending;
 use super::state::State;
 use crate::escalate::{self, ListedRecord};
 use crate::tree::Tree;
@@ -23,6 +24,13 @@ pub trait Channel: Send {
     /// Announce one record. Errors are reported and never fatal: a channel
     /// that is down must not stop the domain's clock.
     fn escalation_opened(&self, record: &ListedRecord) -> anyhow::Result<()>;
+    /// A session parked a question and is waiting (decision 0041's ask
+    /// channel). Default no-op: the record push is the seam's charter, this
+    /// is the low-latency extra a transport may also carry. `trellis inbox`
+    /// stays the answering contract either way.
+    fn question_parked(&self, _pending: &Pending) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -52,6 +60,23 @@ impl Channels {
                         "channel {} could not announce {}: {e}",
                         channel.name(),
                         record.artifact
+                    ));
+                }
+            }
+        }
+        failures
+    }
+
+    /// Push each freshly parked question to every adapter, same contract.
+    pub fn announce_questions(&self, fresh: &[Pending]) -> Vec<String> {
+        let mut failures = Vec::new();
+        for pending in fresh {
+            for channel in &self.0 {
+                if let Err(e) = channel.question_parked(pending) {
+                    failures.push(format!(
+                        "channel {} could not announce {}: {e}",
+                        channel.name(),
+                        pending.label
                     ));
                 }
             }

@@ -32,6 +32,14 @@ catchup = "once"
 # dispatch_cadence = "daily"
 
 [harness]
+# Who carries a running session (decision 0043). "process" — the daemon
+# spawns headless one-shot children itself: exit codes, budget caps, logs.
+# "herdr" — sessions run as interactive agents in herdr panes: attachable,
+# visible in the sidebar, alive across a daemon restart, and *budget-uncapped*
+# (--max-budget-usd only works with --print). Requires a running herdr
+# server; refused at startup if unreachable. See [harness.herdr] below.
+backend = "process"
+
 # argv arrays, never shell strings: a placeholder fills exactly one argument,
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
@@ -73,6 +81,30 @@ ritual_cmd = [
   "--mcp-config", "{mcp}",
 ]
 
+# The herdr backend's own knobs; ignored under backend = "process". Agent
+# *flags*, not a full command: herdr owns the executable (kind), and the
+# prompt is submitted to the running TUI — so no {prompt} here, and no
+# {budget}, which is refused rather than silently unenforced.
+[harness.herdr]
+kind = "claude"
+# socket = "~/.config/herdr/herdr.sock"   # herdr's default; HERDR_SOCKET_PATH wins
+act_args = [
+  "--permission-mode", "auto",
+  "--model", "{model}",
+  "--effort", "{effort}",
+  "--mcp-config", "{mcp}",
+]
+ritual_args = [
+  "--permission-mode", "acceptEdits",
+  "--mcp-config", "{mcp}",
+]
+# What a finished session's workspace does: "on-failure" keeps only the
+# blocked and lost ones on screen for attach; "always" | "never".
+retain = "on-failure"
+# What daemon shutdown does to running sessions: "detach" leaves them in
+# herdr and the next daemon adopts them; "stop" closes their workspaces.
+on_shutdown = "detach"
+
 [prompts]
 act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority; flip its status ready→active as you claim it, blocked if you hit an uncleared blocker; leave a trail."
 ritual = "/trellis:ritual {ritual}"
@@ -88,9 +120,15 @@ mechanical = "opus:high:5"
 standard = "opus:xhigh:10"
 deep = "fable:xhigh:25"
 
-# Push transports for newly opened escalation records. The seam exists; no
-# adapter ships (decision 0038), and a configured one is refused at startup
-# rather than silently dropped — escalation records are read from the board,
+# Push transports for newly opened escalation records — and for questions
+# sessions park on the ask channel, one tick late at worst. One adapter ships
+# (decision 0043): "herdr" turns a record that newly reads `open` into a
+# toast in the operator's herdr session, sessions' blocked states included.
+# The record in the tree stays the system of record; a herdr that is down
+# mid-run is a logged failure, never a stopped clock — but one that is
+# configured and unreachable at startup is refused. Any other kind is still
+# refused outright; records are always readable from the board,
 # /api/escalations, or the root itself.
 # [[channels]]
-# kind = "webhook"
+# kind = "herdr"
+# socket = "~/.config/herdr/herdr.sock"   # optional; herdr's default otherwise

@@ -135,11 +135,11 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | service | binding |
 |---|---|
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`) |
-| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template `trellis serve` spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041) |
+| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template `trellis serve` spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
 | schedule | `trellis serve` — an in-process timer over `rituals.md` rows, read at every pass, spawning one headless `/trellis:ritual <name>` per due row |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. An instance that needs one binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
-| escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs |
+| escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
 | ledger | git history; the acting role is recorded in the session marker and named in commits. Per-session logs under `.trellis/runtime/logs/` are the daemon's trail — gitignored, single-machine, never the ledger |
 
 **Plan dispatch.** The daemon runs the deterministic scan on its own cadence
@@ -202,7 +202,10 @@ runs exactly as before: the channel is opt-in per binding, and its absence
 degrades rather than refuses. It shortens the loop
 rather than closing it — a question nobody answers still ends in the session
 deciding for itself, and blocking with an escalation record remains the right
-move for anything an answer cannot clear.
+move for anything an answer cannot clear. A configured `[[channels]]` adapter
+also pushes each freshly parked question — a toast naming the `trellis inbox
+answer` command, one tick late at worst — so the loop's human half hears
+about it without watching the board (decision 0043).
 
 **Acting-role attribution.** `/trellis:act` records the acting role in
 `.trellis/acting-role` at the root (ephemeral, gitignored) and removes it on
@@ -237,13 +240,26 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   deliberately (decision 0041).
 - There is no event-driven plane at all (the `ingress` row above). A domain
   whose work arrives as outside events has to bring them in by hand.
-- An escalation record notifies nobody: it satisfies the `escalation` service's
-  audit-trail half and not its "channel they already watch" half (decision 0036).
-  Recipients read the root, a generated view over open records, the daemon's
-  board and API, or the report of the session that raised it.
-  A binding that needs a push adds one *over* the records — the channel-adapter
-  seam in `trellis serve` (decision 0038) is where it attaches, and the record
-  stays the system of record.
+- An escalation record notifies nobody *unless a channel is configured*: it
+  satisfies the `escalation` service's audit-trail half on its own (decision
+  0036), and recipients read the root, a generated view over open records, the
+  daemon's board and API, or the report of the session that raised it. A push
+  rides *over* the records through the channel-adapter seam in `trellis serve`
+  (decision 0038); the adapter that ships is `[[channels]] kind = "herdr"`
+  (decision 0043), and the record stays the system of record either way.
+- Under `backend = "herdr"` the per-session budget is unenforced —
+  `--max-budget-usd` works only with `--print` — so the complexity map's budget
+  leg is refused in those templates rather than silently ignored, and the bound
+  on a runaway session is the operator's attention. Completion is a settled
+  state, not an exit code: a session that settles having done nothing reads as
+  finished cleanly, and the plan's own status remains the truth that matters.
+- Herdr's `blocked` state is heuristic screen-matching unless herdr's own
+  claude integration hook is installed (`herdr integration install claude`),
+  and it is session-level only: it toasts and holds the slot, and never writes
+  a plan-level escalation record — only the session, under its mandate, does.
+- The herdr socket protocol is pinned (19, pre-1.0). Drift refuses at startup
+  by the ping gate, naming both numbers; there is no compatibility range until
+  the pin measurably costs one (decision 0043).
 - An advisory role's finding is durable only once its owner transcribes it, so a
   headless ritual whose findings nobody transcribes leaves them in a session
   log. Accepted with the ownership boundary it buys; a per-role escalation inbox

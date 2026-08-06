@@ -25,18 +25,19 @@ pub struct RuntimeConfig {
     pub harness: Harness,
     pub prompts: Prompts,
     pub sessions: Sessions,
-    /// Reserved for push transports. The adapter seam exists; no adapter
-    /// does (decision 0038), so a populated table is refused rather than
-    /// quietly ignored.
-    pub channels: Vec<ReservedChannel>,
+    /// Push transports for newly opened escalation records. The seam is
+    /// 0038's; the one adapter that ships is `kind = "herdr"` (decision
+    /// 0043). Any other kind is still refused rather than quietly ignored.
+    pub channels: Vec<ChannelCfg>,
 }
 
-/// A `[[channels]]` entry, parsed only far enough to name itself in the
-/// refusal message.
+/// One `[[channels]]` entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReservedChannel {
+pub struct ChannelCfg {
     pub kind: String,
+    /// The herdr socket to notify, when not herdr's own default.
+    pub socket: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,9 +87,90 @@ impl Default for Scheduler {
     }
 }
 
+/// Who carries a running session (decision 0043).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackendKind {
+    /// The daemon spawns headless one-shot children itself — the default,
+    /// and the only backend with exit codes and budget caps.
+    Process,
+    /// Sessions run as interactive agents in herdr panes: attachable,
+    /// visible, restart-durable — and budget-uncapped, which is the trade
+    /// 0043 records.
+    Herdr,
+}
+
+/// What a finished herdr session's workspace does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Retain {
+    /// Keep the scene of a failure for attach; close the clean ones.
+    OnFailure,
+    Always,
+    Never,
+}
+
+/// What daemon shutdown does to herdr sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnShutdown {
+    /// Leave them running; the next daemon adopts them.
+    Detach,
+    /// Close their workspaces, matching the process backend's stop.
+    Stop,
+}
+
+/// The herdr half of the harness: agent flags, not a full command — herdr
+/// owns the executable (`kind`), and the prompt is submitted to the running
+/// TUI rather than carried in argv.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HerdrHarness {
+    /// A herdr-supported agent kind (its canonical executable).
+    pub kind: String,
+    /// The herdr socket, when not herdr's own default.
+    pub socket: Option<String>,
+    pub act_args: Vec<String>,
+    pub ritual_args: Vec<String>,
+    pub retain: Retain,
+    pub on_shutdown: OnShutdown,
+}
+
+impl Default for HerdrHarness {
+    fn default() -> Self {
+        let argv = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect();
+        HerdrHarness {
+            kind: "claude".into(),
+            socket: None,
+            act_args: argv(&[
+                "--permission-mode",
+                "auto",
+                "--model",
+                "{model}",
+                "--effort",
+                "{effort}",
+                "--mcp-config",
+                "{mcp}",
+            ]),
+            ritual_args: argv(&[
+                "--permission-mode",
+                "acceptEdits",
+                "--mcp-config",
+                "{mcp}",
+            ]),
+            retain: Retain::OnFailure,
+            on_shutdown: OnShutdown::Detach,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Harness {
+    /// Who carries sessions: "process" (default) or "herdr" (decision 0043).
+    pub backend: BackendKind,
+    /// The herdr backend's own knobs; ignored under "process".
+    pub herdr: HerdrHarness,
     /// argv for one `act` session. Claude Code is the reference adapter;
     /// another harness is this array, rewritten.
     ///
@@ -112,6 +194,8 @@ impl Default for Harness {
     fn default() -> Self {
         let argv = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect();
         Harness {
+            backend: BackendKind::Process,
+            herdr: HerdrHarness::default(),
             act_cmd: argv(&[
                 "claude",
                 "-p",
@@ -220,15 +304,55 @@ impl RuntimeConfig {
         if self.scheduler.max_concurrent == 0 {
             anyhow::bail!("scheduler.max_concurrent must be at least 1 — 0 spawns nothing");
         }
-        if let Some(c) = &self.channels.first() {
+        if self.harness.backend == BackendKind::Herdr {
+            self.validate_herdr()?;
+        }
+        if let Some(c) = self.channels.iter().find(|c| c.kind != "herdr") {
             anyhow::bail!(
-                "channels are configured ('{}') but no push adapter ships in this binding — \
-                 the seam exists, the transports do not (decision 0038); escalation records \
-                 are read from the API, the board, or the root",
+                "channel kind '{}' has no adapter in this binding — \"herdr\" is the one \
+                 that ships (decision 0043); escalation records are always readable from \
+                 the API, the board, or the root",
                 c.kind
             );
         }
         self.session_map()?;
+        Ok(())
+    }
+
+    /// What the herdr backend refuses before the first tick. The themes: the
+    /// prompt is not an argument there, and a budget would be a lie.
+    fn validate_herdr(&self) -> anyhow::Result<()> {
+        if self.harness.herdr.kind.is_empty() {
+            anyhow::bail!("harness.herdr.kind is empty — there is no agent to start");
+        }
+        for (name, args) in [
+            ("harness.herdr.act_args", &self.harness.herdr.act_args),
+            ("harness.herdr.ritual_args", &self.harness.herdr.ritual_args),
+        ] {
+            tmpl::check(name, args)?;
+            for arg in args {
+                if arg == "-p" || arg == "--print" {
+                    anyhow::bail!(
+                        "{name} names {arg}, the headless mode — the herdr backend drives \
+                         an interactive agent; headless sessions are backend = \"process\""
+                    );
+                }
+                if arg.contains("{prompt}") {
+                    anyhow::bail!(
+                        "{name} names {{prompt}} — under herdr the prompt is submitted to \
+                         the running agent, never carried as an argument; drop it"
+                    );
+                }
+                if arg.contains("{budget}") || arg == "--max-budget-usd" {
+                    anyhow::bail!(
+                        "{name} names a budget, and --max-budget-usd only works with \
+                         --print — an interactive session cannot enforce one, so naming it \
+                         would be silently unenforced; the herdr backend runs uncapped \
+                         (decision 0043)"
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
@@ -310,8 +434,75 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_channel_is_refused_while_no_adapter_ships() {
+    fn a_channel_kind_with_no_adapter_is_refused_by_name() {
         let err = parse("[[channels]]\nkind = \"webhook\"\n").unwrap_err();
-        assert!(err.to_string().contains("no push adapter"), "{err}");
+        assert!(err.to_string().contains("webhook"), "{err}");
+        assert!(err.to_string().contains("herdr"), "{err}");
+    }
+
+    #[test]
+    fn the_herdr_channel_kind_parses() {
+        let cfg = parse("[[channels]]\nkind = \"herdr\"\n").unwrap();
+        assert_eq!(cfg.channels.len(), 1);
+        assert_eq!(cfg.channels[0].kind, "herdr");
+        assert!(cfg.channels[0].socket.is_none());
+    }
+
+    #[test]
+    fn the_default_backend_is_process_and_herdr_has_defaults() {
+        let cfg = parse("").unwrap();
+        assert_eq!(cfg.harness.backend, BackendKind::Process);
+        assert_eq!(cfg.harness.herdr.kind, "claude");
+        assert_eq!(cfg.harness.herdr.retain, Retain::OnFailure);
+        assert_eq!(cfg.harness.herdr.on_shutdown, OnShutdown::Detach);
+        assert!(!cfg.harness.herdr.act_args.is_empty());
+    }
+
+    #[test]
+    fn the_herdr_backend_parses_with_its_knobs() {
+        let cfg = parse(
+            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nretain = \"always\"\non_shutdown = \"stop\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.harness.backend, BackendKind::Herdr);
+        assert_eq!(cfg.harness.herdr.retain, Retain::Always);
+        assert_eq!(cfg.harness.herdr.on_shutdown, OnShutdown::Stop);
+    }
+
+    #[test]
+    fn a_budget_under_the_herdr_backend_is_refused_as_unenforceable() {
+        let err = parse(
+            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"--max-budget-usd\", \"{budget}\"]\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("--print"), "{err}");
+        assert!(err.to_string().contains("0043"), "{err}");
+    }
+
+    #[test]
+    fn print_mode_under_the_herdr_backend_is_refused() {
+        let err = parse(
+            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"-p\"]\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("interactive"), "{err}");
+    }
+
+    #[test]
+    fn a_prompt_placeholder_under_the_herdr_backend_is_refused() {
+        let err = parse(
+            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nritual_args = [\"{prompt}\"]\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("submitted"), "{err}");
+    }
+
+    #[test]
+    fn herdr_arg_templates_still_catch_misspelled_placeholders() {
+        let err = parse(
+            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"{modle}\"]\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a placeholder"), "{err}");
     }
 }

@@ -314,6 +314,175 @@ exit 9
     }
 }
 
+/// A hermetic herdr server: a `UnixListener` speaking the NDJSON protocol,
+/// one request per connection like the real one, recording every request and
+/// answering `agent.get`/`agent.wait` from a scripted status sequence. The
+/// herdr socket is config the same way the harness is, so a fake server is a
+/// test helper the same way `fake_harness` is.
+#[cfg(unix)]
+pub struct FakeHerdr {
+    pub socket: PathBuf,
+    requests: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+#[cfg(unix)]
+impl FakeHerdr {
+    /// `statuses` feeds `agent.get`/`agent.wait`, front to back, sticking on
+    /// the last; `agents` is what `agent.list` reports (adoption seeds).
+    pub fn start(socket: PathBuf, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeHerdr {
+        use serde_json::json;
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = std::sync::Arc::clone(&requests);
+        let mut statuses: std::collections::VecDeque<String> =
+            statuses.iter().map(|s| s.to_string()).collect();
+
+        std::thread::spawn(move || {
+            let mut counter = 0u64;
+            let mut seq = 10u64;
+            loop {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut line = String::new();
+                if BufReader::new(&stream).read_line(&mut line).is_err() {
+                    continue;
+                }
+                let Ok(request) = serde_json::from_str::<serde_json::Value>(&line) else {
+                    continue;
+                };
+                record.lock().unwrap().push(request.clone());
+                let id = request["id"].as_str().unwrap_or("").to_string();
+                let method = request["method"].as_str().unwrap_or("");
+                let params = &request["params"];
+
+                let agent_at = |pane: &str, status: &str, seq: u64| {
+                    json!({
+                        "pane_id": pane, "workspace_id": "w-fake", "tab_id": "t1",
+                        "terminal_id": "term1", "focused": false, "revision": 1,
+                        "agent_status": status, "state_change_seq": seq,
+                        "interactive_ready": true,
+                    })
+                };
+                let mut next_status = || {
+                    if statuses.len() > 1 {
+                        statuses.pop_front().unwrap()
+                    } else {
+                        statuses.front().cloned().unwrap_or_else(|| "idle".into())
+                    }
+                };
+
+                let result = match method {
+                    "ping" => json!({"type": "pong", "version": "fake", "protocol": 19}),
+                    "notification.show" | "workspace.close" | "pane.report_metadata" => {
+                        json!({"type": "ok"})
+                    }
+                    "workspace.create" => {
+                        counter += 1;
+                        json!({
+                            "type": "workspace_created",
+                            "workspace": {"workspace_id": format!("w{counter}")},
+                            "tab": {},
+                            "root_pane": {"pane_id": format!("p{counter}")},
+                        })
+                    }
+                    "agent.start" => {
+                        // The real server's name rule, enforced here so the
+                        // hermetic tests catch what the live one refuses.
+                        let name = params["name"].as_str().unwrap_or("");
+                        let legal = name.len() <= 32
+                            && name.starts_with(|c: char| c.is_ascii_lowercase())
+                            && name.chars().all(|c| {
+                                c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c)
+                            });
+                        if !legal {
+                            let mut writer = &stream;
+                            let _ = writeln!(
+                                writer,
+                                r#"{{"id":"{id}","error":{{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)"}}}}"#
+                            );
+                            continue;
+                        }
+                        json!({
+                            "type": "agent_started", "argv": [],
+                            "agent": agent_at(params["pane_id"].as_str().unwrap_or("p?"), "idle", 1),
+                        })
+                    }
+                    "agent.prompt" => json!({
+                        "type": "agent_prompted",
+                        "agent": agent_at(params["target"].as_str().unwrap_or("p?"), "working", 2),
+                    }),
+                    "agent.get" | "agent.wait" => {
+                        seq += 1;
+                        let status = next_status();
+                        json!({
+                            "type": "agent_info",
+                            "agent": agent_at(params["target"].as_str().unwrap_or("p?"), &status, seq),
+                        })
+                    }
+                    "agent.list" => json!({"type": "agent_list", "agents": agents}),
+                    "agent.read" => json!({
+                        "type": "pane_read",
+                        "read": {"text": "fake scrollback tail"},
+                    }),
+                    other => {
+                        let mut writer = &stream;
+                        let _ = writeln!(
+                            writer,
+                            r#"{{"id":"{id}","error":{{"code":"invalid_request","message":"fake herdr does not speak {other}"}}}}"#
+                        );
+                        continue;
+                    }
+                };
+                let mut writer = &stream;
+                let _ = writeln!(writer, "{}", json!({"id": id, "result": result}));
+            }
+        });
+        FakeHerdr { socket, requests }
+    }
+
+    /// Method names, in arrival order.
+    pub fn calls(&self) -> Vec<String> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// The params of every request for one method.
+    pub fn params_for(&self, method: &str) -> Vec<serde_json::Value> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r["method"] == method)
+            .map(|r| r["params"].clone())
+            .collect()
+    }
+}
+
+/// An `agent.list` entry as herdr would report a still-running trellis
+/// session — what adoption reads.
+#[cfg(unix)]
+pub fn herdr_agent(key: &str, root: &Path, label: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "pane_id": "p-adopted", "workspace_id": "w-adopted", "tab_id": "t1",
+        "terminal_id": "term1", "focused": false, "revision": 1,
+        "agent_status": status, "state_change_seq": 5, "interactive_ready": true,
+        "tokens": {
+            "trellis_key": key,
+            "trellis_root": root.display().to_string(),
+            "trellis_label": label,
+        },
+    })
+}
+
 pub fn finding_items(report: &serde_json::Value) -> Vec<u8> {
     report["findings"]
         .as_array()

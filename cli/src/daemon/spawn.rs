@@ -279,7 +279,7 @@ pub(super) fn timestamp(today: Date) -> String {
 }
 
 /// Filesystem-safe form of a task key (`plan:plans/x.md` → `plan-plans-x.md`).
-fn slug(key: &str) -> String {
+pub(super) fn slug(key: &str) -> String {
     let s: String = key
         .chars()
         .map(|c| match c {
