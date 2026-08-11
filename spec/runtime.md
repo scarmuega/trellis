@@ -75,6 +75,21 @@ from a merged PR or a session's report. Both reads are declared fields, so the
 scan stays deterministic; a target that does not resolve holds the plan and
 warns — the lint owns the repair.
 
+Two more gates run before a session is spent, both deterministic, both holds
+(v19; decision 0045). The scan runs the **mechanical share of the readiness
+gate** — the same checks the taker's pickup gate would bounce the plan on:
+declared refs resolve, the automation class is computable, the owner is real,
+no deferral tokens in the body — and holds a `ready` plan that fails it,
+naming the failed items. Like an `awaits:` hold it writes nothing and clears
+itself the moment the plan is fixed; the judgment items stay the taker's, and
+the block-flip-plus-escalation ceremony stays a mandated session's — the
+precheck only stops the scan from spawning a session whose entire work product
+would be discovering the failure. And a role whose `holder/ref.md` declares
+`kind: human` (schema in `spec/model.md`) gets a **handoff instead of a
+session**: one declared-field read, the same routing act's holder branch
+performs, done before a harness is paid for it. Undeclared holders route
+exactly as before.
+
 This adds no plane and no contract service: plan dispatch is `schedule` + `act`
 composed — the action-sibling of the `focus` ritual (focus *evaluates* plans and
 escalates; dispatch *advances* them). Change mechanics still bind: a change to a
@@ -153,7 +168,15 @@ session's model, effort, and budget: the tier's meaning is the spec's, the
 effort levels, model names, and prices are this binding's — retuned in
 `runtime.toml`, never in a plan. It reads `awaits:` with the same
 frontmatter-only extraction and holds any `ready` plan whose targets are not all
-`retired` — one `status:` lookup per target, still no judgment. A concurrency
+`retired` — one `status:` lookup per target, still no judgment. It runs the
+mechanical readiness precheck and the human-holder handoff described above
+with the same frontmatter-only reads, and it carries the session's computed
+facts into the prompt (`{escalate_to}`, the pre-verified gate) so the session
+starts from them rather than re-deriving them. The daemon also owns the
+`.trellis/acting-role` marker for the sessions it spawns — stamped at spawn,
+one line per live session, removed at retirement — so attribution survives a
+session that dies and costs no session a turn (decision 0045; interactive
+invocations still write their own). A concurrency
 cap bounds how many sessions run at once, never how much work a cadence may
 start: a scan that could not start everything it found is not recorded as run,
 so the overflow starts as slots free rather than waiting a full cadence.

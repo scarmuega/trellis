@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 
 use common::{Fixture, ANCHOR};
 
-const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+// The subdomain keeps ready fixtures past the scan's mechanical readiness
+// precheck (decision 0045).
+const FM: &str =
+    "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
 /// A live daemon that actually spawns, unlike `serve_api.rs`'s — the whole
 /// subject here is what a running session does.

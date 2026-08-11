@@ -1,4 +1,4 @@
-# Trellis — specification (v17)
+# Trellis — specification (v19)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -60,7 +60,9 @@ a domain is operated day to day.
 │   └── {plan}.md                   => frontmatter: status + type; campaigns and initiatives
 │                                      are plans like any other
 ├── decisions/
-│   └── NNNN-{slug}.md              => ADRs, append-only
+│   └── NNNN-{slug}.md              => ADRs, append-only: the why-trail. Standing
+│                                      guidance hatches into the governing artifact;
+│                                      a successor's supersedes: names what it replaces
 ├── solution/                       => solution space — business and technical alike
 │   ├── context-map.md              => internal BCs + external contexts, DDD relations annotated
 │   │                                  (customer-supplier | conformist | acl | published-language)
@@ -195,6 +197,20 @@ metrics: [metrics/definitions.md#metric]
 decisions: [decisions/0004-*]
 ```
 
+### decisions/NNNN-{slug}.md
+```yaml
+provenance: authored
+status: accepted                    # the freeze line (rule 6): accepted and
+                                    #   committed = frozen; an uncommitted draft
+                                    #   is still yours to revise
+date: YYYY-MM-DD
+supersedes: [decisions/NNNN-{slug}.md]
+    # optional; the successor names every decision it fully replaces, so the
+    # target leaves the live set (live = superseded by no accepted decision)
+    # while its file never changes. Full replacement of operative force only:
+    # partial influence stays prose in the successor's Consequences.
+```
+
 ### mandate.md (humans and agents — never imported)
 ```yaml
 purpose: one line
@@ -206,6 +222,13 @@ authority:
 escalate-to: org role ref
 holder: holder/ | <opaque external ref>   # identity is portable; authority is not
 ```
+
+`holder/ref.md` may declare `kind: agent | human` in its frontmatter — the
+machine-readable form of a split that was prose-only before v19. A runtime
+routing work to a role may read it: `human` means never spawn a session for
+this role's work, hand it off. Absent means undeclared, and every consumer
+treats undeclared exactly as the pre-v19 behavior (route, and let the acting
+session apply the never-impersonate rule).
 
 ## Rules
 
@@ -229,7 +252,13 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
    held as state-refs; agents never reason from numbers older than the interval.
 6. **Decisions are append-only.** Supersede, never edit — once committed, a decision
    is shared memory across agent generations (an uncommitted draft is still yours to
-   revise).
+   revise). The successor carries the edge: its `supersedes:` names every decision it
+   fully replaces, so liveness is computable — a decision is live iff no accepted
+   decision supersedes it — and the superseded file never changes; partial influence
+   is prose, never an edge. And a decision is memory, not a manual: the standing
+   guidance it establishes lands, in the same change, in the artifact that governs
+   the behavior — conventions, a mandate, a context's README or contracts, a ritual
+   row — citing the decision, so operating never requires reading the trail.
 7. **Directories hold kinds; groupings are tags.** A branch earns a directory only by
    introducing a new artifact kind — something needing its own frontmatter: its own
    lifecycle, owner, and provenance distinct from any parent document. Everything else
@@ -297,7 +326,9 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
     artifacts stay governed — lint, refs, and the census still count them —
     and leave attention: dispatch, review gates, and the effectiveness walk
     skip them. `decisions/` is never filed: it is append-only shared memory
-    across agent generations (rule 6), superseded rather than retired.
+    across agent generations (rule 6), superseded rather than retired — the
+    successor's `supersedes:` carries the edge, so the live set shrinks while
+    the record never does.
 
 For the premises these rules answer to, see `spec/rationale.md`. For recurring,
 non-normative practice inside this structure, see `spec/patterns.md`.

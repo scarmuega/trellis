@@ -144,3 +144,30 @@ fn fails_open_on_panic() {
     );
     assert!(out.stdout.is_empty());
 }
+
+#[test]
+fn the_successor_carries_the_edge_the_frozen_target_stays_frozen() {
+    let f = Fixture::healthy();
+    // Writing a NEW decision that supersedes a committed accepted one is the
+    // sanctioned move — it touches no frozen file.
+    let (out, ok) = gate(
+        &f,
+        write_payload(
+            &f,
+            "decisions/0001-re-adopt.md",
+            "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-08-03\nsupersedes: [decisions/0000-adopt-trellis.md]\n---\n# 0001 — Re-adopt\n",
+        ),
+    );
+    assert!(ok);
+    assert!(
+        out.is_empty(),
+        "the successor is a new file and stays editable, got: {out}"
+    );
+
+    // While the superseded target remains as frozen as ever.
+    let (out, _) = gate(&f, edit_payload(&f, "decisions/0000-adopt-trellis.md"));
+    assert!(
+        out.contains("\"permissionDecision\":\"deny\""),
+        "supersession never unfreezes the target, got: {out}"
+    );
+}

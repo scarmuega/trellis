@@ -166,6 +166,12 @@ impl Fixture {
              dir=.trellis/runtime/argv\n\
              mkdir -p \"$dir\"\n\
              for a in \"$@\"; do echo \"$a\"; done > \"$dir/$(date +%s)-$$\"\n\
+             # Snapshot the runtime-stamped acting-role marker (decision\n\
+             # 0045): it exists only while sessions run, so the assertion\n\
+             # has to be taken from inside one.\n\
+             if [ -f .trellis/acting-role ]; then\n\
+             \x20 cp .trellis/acting-role \"$dir/../marker-seen-$$\"\n\
+             fi\n\
              if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
              \x20 sed 's/^status: ready$/status: active/' \"$1\" > \"$1.claimed\" \\\n\
              \x20   && mv \"$1.claimed\" \"$1\"\n\
@@ -330,6 +336,18 @@ impl FakeHerdr {
     /// `statuses` feeds `agent.get`/`agent.wait`, front to back, sticking on
     /// the last; `agents` is what `agent.list` reports (adoption seeds).
     pub fn start(socket: PathBuf, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeHerdr {
+        Self::start_dropping(socket, statuses, agents, 0)
+    }
+
+    /// Like `start`, but the first `drops` prompts are accepted and then
+    /// swallowed — never echoed into `agent.read` — the way a live Claude
+    /// drops injected input while still starting up.
+    pub fn start_dropping(
+        socket: PathBuf,
+        statuses: &[&str],
+        agents: Vec<serde_json::Value>,
+        drops: usize,
+    ) -> FakeHerdr {
         use serde_json::json;
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
@@ -344,6 +362,10 @@ impl FakeHerdr {
         std::thread::spawn(move || {
             let mut counter = 0u64;
             let mut seq = 10u64;
+            let mut prompts_seen = 0usize;
+            // What agent.read hands back: the echo of every prompt that
+            // landed, the way a real pane's transcript carries them.
+            let mut scrollback = String::new();
             loop {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
@@ -412,10 +434,17 @@ impl FakeHerdr {
                             "agent": agent_at(params["pane_id"].as_str().unwrap_or("p?"), "idle", 1),
                         })
                     }
-                    "agent.prompt" => json!({
-                        "type": "agent_prompted",
-                        "agent": agent_at(params["target"].as_str().unwrap_or("p?"), "working", 2),
-                    }),
+                    "agent.prompt" => {
+                        prompts_seen += 1;
+                        if prompts_seen > drops {
+                            scrollback.push_str(params["text"].as_str().unwrap_or(""));
+                            scrollback.push('\n');
+                        }
+                        json!({
+                            "type": "agent_prompted",
+                            "agent": agent_at(params["target"].as_str().unwrap_or("p?"), "working", 2),
+                        })
+                    }
                     "agent.get" | "agent.wait" => {
                         seq += 1;
                         let status = next_status();
@@ -427,7 +456,7 @@ impl FakeHerdr {
                     "agent.list" => json!({"type": "agent_list", "agents": agents}),
                     "agent.read" => json!({
                         "type": "pane_read",
-                        "read": {"text": "fake scrollback tail"},
+                        "read": {"text": format!("{scrollback}fake scrollback tail")},
                     }),
                     other => {
                         let mut writer = &stream;

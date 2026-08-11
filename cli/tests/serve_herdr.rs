@@ -9,7 +9,10 @@ mod common;
 
 use common::{herdr_agent, FakeHerdr, Fixture, ANCHOR};
 
-const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+// The subdomain keeps ready fixtures past the scan's mechanical readiness
+// precheck (decision 0045).
+const FM: &str =
+    "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
 fn fake(f: &Fixture, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeHerdr {
     FakeHerdr::start(f.root().join(".trellis/herdr.sock"), statuses, agents)
@@ -129,7 +132,7 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
         .map(|a| a.as_str().unwrap())
         .collect();
     assert!(args.contains(&"--model") && args.contains(&"opus"), "{args:?}");
-    assert!(args.contains(&"--effort") && args.contains(&"xhigh"), "{args:?}");
+    assert!(args.contains(&"--effort") && args.contains(&"high"), "{args:?}");
     assert!(
         !args.contains(&"--max-budget-usd"),
         "no budget flag: interactive claude cannot enforce one ({args:?})"
@@ -154,6 +157,70 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     let text = f.read(&format!(".trellis/runtime/logs/{log}"));
     assert!(text.contains("# act plans/ship-it.md → org/founder"), "{text}");
     assert!(text.contains("fake scrollback tail"), "{text}");
+}
+
+/// Observed live: herdr accepts `agent.prompt` while Claude Code is still
+/// starting up and the injected text vanishes — the pane settles `idle` over
+/// an empty input. The pool must not read that as a finished turn; it puts
+/// the prompt back in.
+#[test]
+fn a_prompt_dropped_at_startup_is_resubmitted() {
+    let f = Fixture::healthy();
+    let herdr = FakeHerdr::start_dropping(
+        f.root().join(".trellis/herdr.sock"),
+        &["idle"],
+        Vec::new(),
+        1,
+    );
+    herdr_backend_fixture(&f, &herdr.socket);
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.serve_once(ANCHOR, &[]);
+    assert!(out.contains("prompt was dropped at startup — resubmitted (1/2)"), "{out}");
+
+    let prompts = herdr.params_for("agent.prompt");
+    assert_eq!(prompts.len(), 2, "the drop, then the resubmission: {prompts:?}");
+    assert_eq!(prompts[0]["text"], prompts[1]["text"], "the same prompt goes back in");
+    assert_eq!(
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"], 0,
+        "the resubmitted turn is the run"
+    );
+}
+
+#[test]
+fn a_session_that_never_takes_its_prompt_is_written_off_not_declared_done() {
+    let f = Fixture::healthy();
+    let herdr = FakeHerdr::start_dropping(
+        f.root().join(".trellis/herdr.sock"),
+        &["idle"],
+        Vec::new(),
+        usize::MAX,
+    );
+    herdr_backend_fixture(&f, &herdr.socket);
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.serve_once(ANCHOR, &[]);
+    assert!(out.contains("prompt was never taken up — writing the session off"), "{out}");
+
+    assert_eq!(
+        herdr.params_for("agent.prompt").len(),
+        3,
+        "the drop, then the whole resubmission budget"
+    );
+    assert_ne!(
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"], 0,
+        "never bookkept as a success"
+    );
+    assert!(
+        !herdr.calls().iter().any(|c| c == "workspace.close"),
+        "retain = on-failure keeps the scene for attach"
+    );
 }
 
 #[test]

@@ -17,6 +17,11 @@ pub struct Ritual {
 pub struct Registries {
     pub plan_types: Vec<String>,
     pub tags: Vec<String>,
+    /// Decisions the registry carries a disposition for — prose-era
+    /// supersessions and inert classifications the frozen files cannot
+    /// declare (conventions.md → "Decision registry"). Entries are the
+    /// decision paths; the disposition prose stays in the registry line.
+    pub decision_registry: Vec<String>,
     pub rituals: Vec<Ritual>,
     /// Days, when derivable (metric-sweep cadence, or an explicit
     /// "freshness window … N days" statement in `rituals.md`).
@@ -61,6 +66,8 @@ pub fn load(tree: &Tree) -> Registries {
     if let Some(conv) = tree.get("conventions.md") {
         reg.plan_types = markdown::registry_items(&conv.text, &conv.headings, "plan-type-registry");
         reg.tags = markdown::registry_items(&conv.text, &conv.headings, "tag-registry");
+        reg.decision_registry =
+            markdown::registry_items(&conv.text, &conv.headings, "decision-registry");
         let re = regex::Regex::new(r"archive after[^.\n]*?(\d+)\s*days").unwrap();
         if let Some(cap) = re.captures(&conv.text) {
             reg.archive_after_days = cap[1].parse().ok();

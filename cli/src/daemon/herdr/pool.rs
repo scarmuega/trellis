@@ -33,8 +33,26 @@ const START: Duration = Duration::from_secs(60);
 const WAIT: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Ticks a submitted prompt may sit with no observed state change before the
-/// session is written off — the TUI never took it.
+/// prompt is resubmitted — the TUI never took it.
 const SUBMIT_PATIENCE: u32 = 3;
+
+/// Times a dropped prompt is submitted again before the session is written
+/// off. Observed live: herdr accepts `agent.prompt` while Claude Code is
+/// still starting up, and the injected text vanishes — the pane settles
+/// `idle` over an empty input, indistinguishable by status alone from a turn
+/// that ran to completion between ticks.
+const RESUBMITS: u32 = 2;
+
+/// What `drain` waits before putting a dropped prompt back in. The tick loop
+/// gets this spacing for free; a drain sees the startup idle within seconds
+/// of spawning, and resubmitting into the same startup window that dropped
+/// the first prompt would burn the whole budget on one dead zone.
+const RESUBMIT_BEAT: Duration = Duration::from_secs(10);
+
+/// Lines of scrollback read to verify a prompt was taken up. Deeper than the
+/// retirement snapshot: the echo sits at the top of a turn's transcript, and
+/// a turn that scrolled it past this window would read as never-started.
+const VERIFY_TAIL: u32 = 10_000;
 
 /// Consecutive ticks the herdr server may be unreachable before every session
 /// it was carrying is written off. The server dying kills its panes, so this
@@ -80,6 +98,12 @@ struct Session {
     seq_at_prompt: u64,
     /// Ticks spent in `Submitted` with nothing observed.
     submitted_ticks: u32,
+    /// What went in, kept for two jobs: proving it landed (its echo in the
+    /// scrollback) and submitting it again when it did not. Empty for an
+    /// adopted session, whose prompt predates this daemon.
+    prompt: String,
+    /// Resubmissions spent against `RESUBMITS`.
+    resubmits: u32,
 }
 
 impl Session {
@@ -187,6 +211,8 @@ impl HerdrPool {
                     // past its prompt, so any settle is a finish.
                     seq_at_prompt: 0,
                     submitted_ticks: 0,
+                    prompt: String::new(),
+                    resubmits: 0,
                 },
             );
         }
@@ -263,17 +289,48 @@ impl HerdrPool {
                     ("trellis_log", &log),
                 ],
             )?;
-            self.client
-                .agent_start(&agent_name(key), &self.cfg.kind, &pane_id, args, START)?;
+            // Observed live: a freshly created pane can refuse `agent.start`
+            // with `agent_pane_busy` while its shell is still coming up —
+            // the same startup seam `agent_not_ready` is on the prompt side.
+            // Same medicine: retry over the backoff window before failing.
+            let running = {
+                let mut attempt = 0;
+                loop {
+                    match self.client.agent_start(
+                        &agent_name(key),
+                        &self.cfg.kind,
+                        &pane_id,
+                        args,
+                        START,
+                    ) {
+                        Err(e)
+                            if attempt < PROMPT_RETRIES
+                                && e.to_string().contains("agent_pane_busy") =>
+                        {
+                            attempt += 1;
+                            std::thread::sleep(PROMPT_BACKOFF);
+                        }
+                        other => break other?,
+                    }
+                }
+            };
             let mut attempt = 0;
             loop {
                 match self.client.agent_prompt(&pane_id, prompt) {
-                    Err(e)
-                        if attempt < PROMPT_RETRIES
-                            && e.to_string().contains("agent_not_ready") =>
-                    {
-                        attempt += 1;
-                        std::thread::sleep(PROMPT_BACKOFF);
+                    Err(e) if e.to_string().contains("agent_not_ready") => {
+                        if attempt < PROMPT_RETRIES {
+                            attempt += 1;
+                            std::thread::sleep(PROMPT_BACKOFF);
+                            continue;
+                        }
+                        // Still not promptable — a concurrent cold start can
+                        // outlast the retries. The agent runs; hand the
+                        // session over with the prompt unplaced and let the
+                        // resubmission machinery put it in.
+                        note(&format!(
+                            "{label}: agent not promptable yet — the prompt will be resubmitted"
+                        ));
+                        break Ok(running);
                     }
                     other => break other,
                 }
@@ -304,6 +361,8 @@ impl HerdrPool {
                 phase: Phase::Submitted,
                 seq_at_prompt: agent.state_change_seq,
                 submitted_ticks: 0,
+                prompt: prompt.to_string(),
+                resubmits: 0,
             },
         );
         Ok(log)
@@ -368,37 +427,63 @@ impl HerdrPool {
         for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
             let target = self.in_flight[&key].pane_id.clone();
             let mut rounds = 0;
-            let settled = loop {
-                match self.client.agent_wait(&target, &["idle", "done", "blocked"], WAIT) {
-                    // Blocked must survive the debounce to be believed —
-                    // the moment after submission can read blocked and
-                    // settle into the turn a beat later.
-                    Ok(agent) if agent.agent_status == "blocked" && rounds < 100 => {
-                        rounds += 1;
-                        std::thread::sleep(BLOCKED_DEBOUNCE);
-                        match self.client.agent_get(&target) {
-                            Ok(again) if again.agent_status == "blocked" => break Ok(again),
-                            Ok(_) => continue,
-                            Err(e) => break Err(e),
+            'session: loop {
+                let settled = loop {
+                    match self.client.agent_wait(&target, &["idle", "done", "blocked"], WAIT) {
+                        // Blocked must survive the debounce to be believed —
+                        // the moment after submission can read blocked and
+                        // settle into the turn a beat later.
+                        Ok(agent) if agent.agent_status == "blocked" && rounds < 100 => {
+                            rounds += 1;
+                            std::thread::sleep(BLOCKED_DEBOUNCE);
+                            match self.client.agent_get(&target) {
+                                Ok(again) if again.agent_status == "blocked" => break Ok(again),
+                                Ok(_) => continue,
+                                Err(e) => break Err(e),
+                            }
+                        }
+                        other => break other,
+                    }
+                };
+                match settled {
+                    Ok(agent) if agent.agent_status == "blocked" => {
+                        let session = self.in_flight.remove(&key).expect("still tracked");
+                        note(&format!(
+                            "{} is blocked in herdr — left running; attach to unblock it",
+                            session.label
+                        ));
+                        let _ = self.client.notification_show(
+                            &format!("session blocked: {}", session.label),
+                            Some("left running — attach in herdr to unblock it"),
+                        );
+                    }
+                    Ok(_) => {
+                        // A freshly spawned agent reads settled before it has
+                        // taken any prompt at all — the wait returns on the
+                        // startup idle, not a finished turn. Same seam the
+                        // tick path verifies: no echo, no finish.
+                        let session = self.in_flight.get_mut(&key).expect("still tracked");
+                        if session.phase == Phase::Submitted
+                            && !prompt_landed(session, &self.client)
+                        {
+                            // Let the startup window that dropped the first
+                            // prompt pass before spending another one.
+                            std::thread::sleep(RESUBMIT_BEAT);
+                            match resubmit(session, &self.client) {
+                                None => continue 'session,
+                                Some(exit) => done.push(self.finish(&key, exit)),
+                            }
+                        } else if settle_survives(session, &self.client) {
+                            done.push(self.finish(&key, Some(0)));
+                        } else {
+                            // Not settled after all — a dialog or a next
+                            // turn showed up in the debounce; wait it out.
+                            continue 'session;
                         }
                     }
-                    other => break other,
+                    Err(_) => done.push(self.finish(&key, None)),
                 }
-            };
-            match settled {
-                Ok(agent) if agent.agent_status == "blocked" => {
-                    let session = self.in_flight.remove(&key).expect("still tracked");
-                    note(&format!(
-                        "{} is blocked in herdr — left running; attach to unblock it",
-                        session.label
-                    ));
-                    let _ = self.client.notification_show(
-                        &format!("session blocked: {}", session.label),
-                        Some("left running — attach in herdr to unblock it"),
-                    );
-                }
-                Ok(_) => done.push(self.finish(&key, Some(0))),
-                Err(_) => done.push(self.finish(&key, None)),
+                break 'session;
             }
         }
         done.sort_by(|a, b| a.key.cmp(&b.key));
@@ -494,33 +579,131 @@ fn observe(session: &mut Session, agent: &AgentInfo, client: &Client) -> Option<
             None
         }
         "idle" | "done" => match session.phase {
-            // A turn was seen, and it ended.
-            Phase::Working | Phase::Blocked | Phase::BlockedPending => Some(Some(0)),
-            // Never seen working — but the sequence moved past the prompt,
-            // so the turn ran between ticks.
-            Phase::Submitted if agent.state_change_seq > session.seq_at_prompt => Some(Some(0)),
-            Phase::Submitted => submit_patience(session),
+            // A turn was seen, and it ended — if the settle is real.
+            // Observed live: a permission dialog rendered mid-turn can read
+            // `idle` for a beat before the classifier calls it `blocked`,
+            // and retiring on that beat closes the workspace over a waiting
+            // dialog. A settle counts only after it survives the debounce.
+            Phase::Working | Phase::Blocked | Phase::BlockedPending => {
+                if settle_survives(session, client) {
+                    Some(Some(0))
+                } else {
+                    None
+                }
+            }
+            // Never seen working, and the sequence moved past the prompt.
+            // That is not proof of a turn: startup state flaps move the
+            // sequence too, and an agent that dropped the injection while
+            // still starting up settles exactly like one that finished
+            // between ticks. Only the prompt's echo in the pane tells them
+            // apart — and the settle still has to survive the debounce.
+            Phase::Submitted if agent.state_change_seq > session.seq_at_prompt => {
+                if !prompt_landed(session, client) {
+                    resubmit(session, client)
+                } else if settle_survives(session, client) {
+                    Some(Some(0))
+                } else {
+                    None
+                }
+            }
+            Phase::Submitted => submit_patience(session, client),
         },
         // `unknown`, or a state this pin has never heard of: not an
         // observation. A session mid-turn survives a detection gap; one that
         // never started does not get to hide in it.
         _ => match session.phase {
-            Phase::Submitted => submit_patience(session),
+            Phase::Submitted => submit_patience(session, client),
             _ => None,
         },
     }
 }
 
-fn submit_patience(session: &mut Session) -> Option<Option<i32>> {
+fn submit_patience(session: &mut Session, client: &Client) -> Option<Option<i32>> {
     session.submitted_ticks += 1;
     if session.submitted_ticks >= SUBMIT_PATIENCE {
+        return resubmit(session, client);
+    }
+    None
+}
+
+/// A settle believed once is a settle believed too early: re-read after the
+/// debounce and require it to still be settled. A dialog or a next turn
+/// showing up in the gap means the session is not done — the observation is
+/// discarded and the next tick classifies it properly (a dialog reads
+/// `blocked` by then, a turn `working`). On a read error, err toward not
+/// retiring: the session survives to the next tick.
+fn settle_survives(session: &Session, client: &Client) -> bool {
+    std::thread::sleep(BLOCKED_DEBOUNCE);
+    match client.agent_get(session.target()) {
+        Ok(again) => matches!(again.agent_status.as_str(), "idle" | "done"),
+        Err(_) => false,
+    }
+}
+
+/// Whether the pane carries the prompt's echo — the observable difference
+/// between a turn that ran and an injection the agent dropped. Matched on a
+/// prefix: the pane wraps long lines. An adopted session has no prompt to
+/// verify; its settle stays a finish.
+fn prompt_landed(session: &Session, client: &Client) -> bool {
+    if session.prompt.is_empty() {
+        return true;
+    }
+    match client.agent_read(&session.pane_id, VERIFY_TAIL) {
+        Ok(tail) => tail.contains(prompt_needle(&session.prompt)),
+        Err(_) => false,
+    }
+}
+
+/// Enough of the prompt to be unmistakable in scrollback, short enough to
+/// survive line wrapping at any plausible pane width.
+fn prompt_needle(prompt: &str) -> &str {
+    match prompt.char_indices().nth(24) {
+        Some((i, _)) => &prompt[..i],
+        None => prompt,
+    }
+}
+
+/// Put a dropped prompt back in, up to `RESUBMITS` times; past the budget the
+/// session is written off. On success the watermarks reset, so the next
+/// settle is judged against the new submission.
+fn resubmit(session: &mut Session, client: &Client) -> Option<Option<i32>> {
+    if session.resubmits >= RESUBMITS {
         note(&format!(
             "{}: prompt was never taken up — writing the session off",
             session.label
         ));
         return Some(None);
     }
-    None
+    session.resubmits += 1;
+    match client.agent_prompt(&session.pane_id, &session.prompt) {
+        Ok(agent) => {
+            note(&format!(
+                "{}: prompt was dropped at startup — resubmitted ({}/{RESUBMITS})",
+                session.label, session.resubmits
+            ));
+            session.seq_at_prompt = agent.state_change_seq;
+            session.submitted_ticks = 0;
+            None
+        }
+        // Not fatal, and not placed either: the agent is still starting up.
+        // The attempt still spends budget, so a pane that never becomes
+        // promptable runs out the same clock as one that keeps dropping.
+        Err(e) if e.to_string().contains("agent_not_ready") => {
+            note(&format!(
+                "{}: agent not promptable yet — will retry ({}/{RESUBMITS})",
+                session.label, session.resubmits
+            ));
+            session.submitted_ticks = 0;
+            None
+        }
+        Err(e) => {
+            note(&format!(
+                "{}: prompt was dropped and resubmission failed ({e:#}) — writing the session off",
+                session.label
+            ));
+            Some(None)
+        }
+    }
 }
 
 /// A herdr-legal agent name for a task key: lowercase letters, digits, `-`

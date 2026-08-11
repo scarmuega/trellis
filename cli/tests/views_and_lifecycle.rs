@@ -61,6 +61,148 @@ fn written_board_satisfies_item_2_until_hand_edited() {
     f.bin().args(["view", "board", "--check"]).assert().code(1);
 }
 
+/// A plan whose `awaits:` names `targets`. The graph reads frontmatter alone,
+/// so the body can be a heading.
+fn sequenced_plan(f: &Fixture, name: &str, status: &str, targets: &[&str]) {
+    let awaits = if targets.is_empty() {
+        String::new()
+    } else {
+        format!("awaits: [{}]\n", targets.join(", "))
+    };
+    f.write(
+        &format!("plans/{name}.md"),
+        &format!(
+            "---\nprovenance: authored\nowner: org/founder\nstatus: {status}\ntype: initiative\n{awaits}---\n# {name}\n"
+        ),
+    );
+}
+
+#[test]
+fn plan_graph_draws_every_live_plan_sequenced_or_not() {
+    let f = Fixture::healthy();
+    // The healthy fixture sequences nothing, but its two plans are still the
+    // board: nodes under no ordering constraint, not an empty figure.
+    let out = f.bin().args(["view", "plan-graph"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("```mermaid\nflowchart LR\n"), "{text}");
+    assert!(
+        text.contains(r#"p0["expand-retail-doors<br/>active"]"#),
+        "an unsequenced plan is still drawn:\n{text}"
+    );
+    assert!(text.contains("- drawn: 2 nodes, 0 edges"), "{text}");
+
+    sequenced_plan(&f, "foundation", "retired", &[]);
+    sequenced_plan(&f, "pilot", "active", &["plans/foundation.md"]);
+    sequenced_plan(&f, "rollout", "ready", &["plans/pilot.md"]);
+
+    let a = f.bin().args(["view", "plan-graph"]).output().unwrap();
+    let b = f.bin().args(["view", "plan-graph"]).output().unwrap();
+    assert!(a.status.success());
+    assert_eq!(
+        a.stdout, b.stdout,
+        "same tree + HEAD + day ⇒ byte-identical"
+    );
+
+    let text = String::from_utf8(a.stdout).unwrap();
+    assert!(
+        text.starts_with("---\nprovenance: generated\n"),
+        "views stamp provenance:\n{text}"
+    );
+    assert!(text.contains("generated-by: trellis view plan-graph"));
+
+    // A retired plan is off the board: neither the node nor the edge onto it
+    // survives, the second being the same statement as its hold having cleared.
+    assert!(
+        !text.contains("foundation"),
+        "retired plans stay out of the figure:\n{text}"
+    );
+    assert!(!text.contains("classDef retired"), "{text}");
+    assert!(text.contains("- retired: 1 plan, left out"), "{text}");
+
+    // Ids are positional over the sorted live node set: expand-retail-doors,
+    // pilot, rollout, seasonal-recipe-line. Arrows run target → dependent.
+    assert!(text.contains(r#"p1["pilot<br/>active"]"#), "{text}");
+    assert!(text.contains(r#"p2["rollout<br/>ready"]"#), "{text}");
+    assert!(text.contains("p1 --> p2"), "live hold:\n{text}");
+    assert!(text.contains("- drawn: 4 nodes, 1 edge"), "{text}");
+    assert!(text.contains("- held: 1 ready plan,"), "{text}");
+    assert!(
+        text.contains("- unsequenced: 2 plans,"),
+        "the fixture's own two plans are drawn, on no edge:\n{text}"
+    );
+}
+
+#[test]
+fn plan_graph_shows_cycles_and_unresolved_targets() {
+    let f = Fixture::healthy();
+    sequenced_plan(&f, "loop-a", "ready", &["plans/loop-b.md"]);
+    sequenced_plan(&f, "loop-b", "ready", &["plans/loop-a.md"]);
+    sequenced_plan(&f, "rollout", "ready", &["plans/ghost.md"]);
+
+    let out = f.bin().args(["view", "plan-graph"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+
+    // A target naming no plan is a hole in the picture, not a dropped edge —
+    // lint item 4 owns the complaint, the graph shows what it complains about.
+    assert!(text.contains(r#"p1["ghost<br/>missing"]"#), "{text}");
+    assert!(text.contains("classDef missing"), "{text}");
+    assert!(
+        text.contains("p1 --> p4"),
+        "ghost still holds rollout:\n{text}"
+    );
+    assert!(text.contains("- unresolved: 1 `awaits:` target,"), "{text}");
+
+    // Cycle members keep their status class and gain `cycle`, whose classDef
+    // is emitted last so its stroke wins.
+    assert!(text.contains("class p2,p3 cycle"), "{text}");
+    assert!(
+        text.find("classDef ready").unwrap() < text.find("classDef cycle").unwrap(),
+        "cycle styling must come last to win:\n{text}"
+    );
+    assert!(text.contains("- cycles: 1 cycle"), "{text}");
+
+    // The same tree is an item 22 violation — the view renders what lint
+    // reports rather than diverging from it.
+    let report = f.lint_json(&["--items", "22"]);
+    assert!(finding_items(&report).contains(&22), "{report:#}");
+}
+
+#[test]
+fn written_plan_graph_satisfies_item_2_until_hand_edited() {
+    let f = Fixture::healthy();
+    sequenced_plan(&f, "foundation", "retired", &[]);
+    sequenced_plan(&f, "pilot", "active", &["plans/foundation.md"]);
+    f.bin()
+        .args(["view", "plan-graph", "--write"])
+        .assert()
+        .success();
+    f.commit_at("2026-08-03", "steward: refresh plan graph");
+
+    let report = f.lint_json(&["--items", "2"]);
+    assert_eq!(
+        report["summary"]["violations"], 0,
+        "fresh graph diffs clean: {report:#}"
+    );
+    let checked = &report["judgment"][0]["checked_mechanically"];
+    assert_eq!(checked[0], "metrics/actuals/plan-graph.md");
+    f.bin()
+        .args(["view", "plan-graph", "--check"])
+        .assert()
+        .success();
+
+    let graph = f.read("metrics/actuals/plan-graph.md");
+    f.write(
+        "metrics/actuals/plan-graph.md",
+        &format!("{graph}\nAn edge somebody drew by hand.\n"),
+    );
+    let report = f.lint_json(&["--items", "2"]);
+    assert!(finding_items(&report).contains(&2), "{report:#}");
+    f.bin()
+        .args(["view", "plan-graph", "--check"])
+        .assert()
+        .code(1);
+}
+
 #[test]
 fn escalations_view_lists_open_records() {
     let f = Fixture::healthy();
@@ -302,4 +444,74 @@ fn tree_narrows_by_kind_and_by_path() {
         under_org.iter().map(String::as_str).collect::<Vec<_>>(),
         "--flat prints exactly the paths"
     );
+}
+
+#[test]
+fn decision_register_reads_the_supersession_edges() {
+    let f = Fixture::healthy();
+    f.write(
+        "decisions/0001-first-call.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-01\n---\n# 0001 — First call\n",
+    );
+    f.write(
+        "decisions/0002-second-thoughts.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-20\nsupersedes: [decisions/0001-first-call.md]\n---\n# 0002 — Second thoughts\n\n## Consequences\n\nStanding guidance: none.\n",
+    );
+    f.write(
+        "decisions/0003-still-drafting.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: proposed\ndate: 2026-08-01\n---\n# 0003 — Still drafting\n",
+    );
+
+    let a = f.bin().args(["view", "decisions"]).output().unwrap();
+    let b = f.bin().args(["view", "decisions"]).output().unwrap();
+    assert!(a.status.success());
+    assert_eq!(a.stdout, b.stdout, "same tree + day ⇒ byte-identical");
+    let text = String::from_utf8(a.stdout).unwrap();
+    assert!(text.starts_with("---\nprovenance: generated\n"));
+    assert!(text.contains("generated-by: trellis view decisions"));
+    assert!(
+        text.contains("| decisions/0001-first-call.md | decisions/0002-second-thoughts.md |"),
+        "superseded table names the successor:\n{text}"
+    );
+    assert!(
+        text.contains("| decisions/0002-second-thoughts.md | inert (standing guidance: none) |"),
+        "live table says how each decision is reached:\n{text}"
+    );
+    assert!(
+        !text.contains("| decisions/0003-still-drafting.md |"),
+        "a draft is in neither table:\n{text}"
+    );
+    assert!(text.contains("- not yet accepted: 1"), "{text}");
+    // The skeleton's 0000 stays live, cited from conventions.md.
+    assert!(
+        text.contains("| decisions/0000-adopt-trellis.md | cited by conventions.md |"),
+        "{text}"
+    );
+}
+
+#[test]
+fn written_decision_register_satisfies_item_2() {
+    let f = Fixture::healthy();
+    f.bin()
+        .args(["view", "decisions", "--write"])
+        .assert()
+        .success();
+    assert!(f
+        .read("metrics/actuals/decision-register.md")
+        .contains("# Decision register"));
+    f.commit_at("2026-08-03", "steward: refresh decision register");
+
+    let report = f.lint_json(&["--items", "2"]);
+    assert_eq!(
+        report["summary"]["violations"], 0,
+        "fresh register diffs clean: {report:#}"
+    );
+
+    let register = f.read("metrics/actuals/decision-register.md");
+    f.write(
+        "metrics/actuals/decision-register.md",
+        &format!("{register}\nA hopeful hand-written line.\n"),
+    );
+    let report = f.lint_json(&["--items", "2"]);
+    assert!(finding_items(&report).contains(&2), "{report:#}");
 }

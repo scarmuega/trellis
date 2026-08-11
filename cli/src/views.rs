@@ -4,7 +4,7 @@
 //! renders byte-identical output, which is what makes lint item 2 mechanical
 //! for these files (`generated-by:` stamp + regenerate + diff).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::dates::{self, Date};
 use crate::gitio::Git;
@@ -13,15 +13,25 @@ use crate::model::{escalation_records, PlanStatus};
 use crate::registries;
 use crate::tree::{Kind, Tree};
 
-pub const NAMES: &[&str] = &["board", "codeowners", "tags", "orgchart", "escalations"];
+pub const NAMES: &[&str] = &[
+    "board",
+    "plan-graph",
+    "codeowners",
+    "tags",
+    "orgchart",
+    "escalations",
+    "decisions",
+];
 
 pub fn render_named(name: &str, tree: &Tree, git: &Git, today: Date) -> Option<String> {
     match name {
         "board" => Some(board(tree, git, today)),
+        "plan-graph" => Some(plan_graph(tree, today)),
         "codeowners" => Some(codeowners(tree)),
         "tags" => Some(tags(tree)),
         "orgchart" => Some(orgchart(tree)),
         "escalations" => Some(escalations(tree)),
+        "decisions" => Some(decisions(tree)),
         _ => None,
     }
 }
@@ -30,7 +40,9 @@ pub fn render_named(name: &str, tree: &Tree, git: &Git, today: Date) -> Option<S
 pub fn default_path(name: &str) -> Option<&'static str> {
     match name {
         "board" => Some("metrics/actuals/plan-board.md"),
+        "plan-graph" => Some("metrics/actuals/plan-graph.md"),
         "codeowners" => Some(".github/CODEOWNERS"),
+        "decisions" => Some("metrics/actuals/decision-register.md"),
         _ => None,
     }
 }
@@ -182,8 +194,31 @@ pub fn board(tree: &Tree, git: &Git, today: Date) -> String {
         if let Some((target, _)) = derived.hold(&p.rel) {
             flags.push(format!("held — awaits {target}"));
         }
+        // The dispatch precheck's hold, on the same card (decision 0045): a
+        // ready plan failing mechanical readiness never dispatches, and a
+        // queue it cannot leave should say why rather than read as stalled.
+        let readiness_held = status == "ready"
+            && crate::readiness::check(tree, &derived, &p.rel)
+                .map(|r| {
+                    if r.mechanical_pass {
+                        None
+                    } else {
+                        Some(
+                            r.items
+                                .iter()
+                                .filter(|i| i.status == crate::readiness::ItemStatus::Fail)
+                                .map(|i| i.item.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        )
+                    }
+                })
+                .ok()
+                .flatten()
+                .inspect(|items| flags.push(format!("held — readiness item(s) {items}")))
+                .is_some();
         match status.as_str() {
-            "ready" if days > dispatch_cadence && derived.hold(&p.rel).is_none() => {
+            "ready" if days > dispatch_cadence && derived.hold(&p.rel).is_none() && !readiness_held => {
                 flags.push("stalled queue".into());
             }
             "blocked" if days > window => flags.push("stalled blocker".into()),
@@ -252,6 +287,195 @@ fn github_handle(tree: &Tree, role_ref: &str) -> Option<String> {
                 format!("@{h}")
             }
         })
+}
+
+/// The class a node carries, in the order the legend and the `classDef` lines
+/// emit them. There is no `retired` entry: a retired plan is off the board, so
+/// the graph never draws one. `unknown` is a plan whose `status:` is absent or
+/// unparseable; `missing` is an `awaits:` target that resolves to no plan at
+/// all (lint item 4 owns that complaint — the picture shows the hole rather
+/// than dropping the edge). `cycle` is additive: a member of an `awaits:` cycle
+/// keeps its status class and gains this one, so item 22's deadlock is visible,
+/// not just reported.
+const NODE_CLASSES: [(&str, &str); 7] = [
+    ("draft", "stroke:#9e9e9e,stroke-dasharray:3 3"),
+    ("ready", "stroke:#1e88e5,stroke-width:2px"),
+    ("active", "stroke:#43a047,stroke-width:3px"),
+    ("blocked", "stroke:#fb8c00,stroke-width:3px"),
+    ("unknown", "stroke:#9e9e9e,stroke-width:1px"),
+    (
+        "missing",
+        "stroke:#e53935,stroke-width:2px,stroke-dasharray:4 3",
+    ),
+    ("cycle", "stroke:#e53935,stroke-width:4px"),
+];
+
+/// `3 edges` / `1 edge` — the counts under the figure read as prose, and a
+/// root with exactly one of something is the common case, not the exotic one.
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+/// `plans/2026/0012-seasonal-line.md` → `2026/0012-seasonal-line`. The `plans/`
+/// prefix is on every node, so it carries no information inside the graph.
+fn node_label(rel: &str) -> String {
+    rel.strip_prefix("plans/")
+        .unwrap_or(rel)
+        .strip_suffix(".md")
+        .unwrap_or(rel)
+        .replace('"', "#quot;")
+}
+
+/// Plan graph: the `awaits:` DAG as a Mermaid flowchart, so the shape is
+/// legible at all. The text surfaces this graph one edge at a time — `plan
+/// list --held`, `readiness`, the board's dwell flag — which never shows a
+/// chain's length or that one unretired plan is holding five others.
+///
+/// Arrows point target → dependent: forward in time, what clears when, which
+/// is how the CLI already talks about holds ("dependents that may now clear").
+///
+/// Every live plan is a node, sequenced or not — the graph is the standing
+/// picture of the board, and a plan free of ordering constraints is a fact
+/// worth seeing, not an omission. Retired plans are the one exclusion: they
+/// hold nothing and wait on nothing, so drawing them would bury the live
+/// picture under the whole history. An edge onto a retired target drops with
+/// it, which is the same statement its hold having cleared.
+///
+/// Styling is stroke-only — no `fill`, no `color` — so the figure reads under
+/// both the light and the dark renderer theme, and status is encoded in stroke
+/// width and dash pattern as well as hue.
+pub fn plan_graph(tree: &Tree, today: Date) -> String {
+    let derived = graph::derive(tree);
+
+    let retired = |p: &str| derived.plan_status.get(p) == Some(&Some(PlanStatus::Retired));
+    let mut plans: Vec<&str> = derived.plan_awaits.keys().map(|s| s.as_str()).collect();
+    plans.sort();
+
+    // Every live plan is a node before any edge is read.
+    let mut nodes: BTreeSet<String> = plans
+        .iter()
+        .filter(|p| !retired(p))
+        .map(|p| p.to_string())
+        .collect();
+
+    // `(target, dependent)` — the arrow's direction, the reverse of the
+    // declaration's. Keys are already live paths (graph.rs), so an edge
+    // written before its target was archived still lands on one node. A target
+    // that resolves to nothing is drawn anyway (lint item 4 owns the
+    // complaint); one that has retired is not, and its edge goes with it.
+    let mut edges: Vec<(String, String)> = Vec::new();
+    for plan in plans.iter().filter(|p| !retired(p)) {
+        for target in &derived.plan_awaits[*plan] {
+            let target = crate::tree::live_path(target.trim()).to_string();
+            if retired(&target) {
+                continue;
+            }
+            nodes.insert(target.clone());
+            edges.push((target, plan.to_string()));
+        }
+    }
+    edges.sort();
+    edges.dedup();
+
+    let mut out = fm_header("plan-graph", today);
+    out.push_str("# Plan graph\n\n");
+    out.push_str("The `awaits:` DAG over `plans/`. An arrow runs from a plan to the plans its\nretirement releases; a plan with no arrows is under no ordering constraint.\nRetired plans are left out — they hold nothing and wait on nothing. Red is a\ncycle (lint item 22) or an `awaits:` target that resolves to nothing (item 4).\n\n");
+
+    let unsequenced = nodes
+        .iter()
+        .filter(|n| !edges.iter().any(|(t, d)| t == *n || d == *n))
+        .count();
+
+    if nodes.is_empty() {
+        out.push_str("(no live plans)\n");
+    } else {
+        let ids: BTreeMap<&str, String> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), format!("p{i}")))
+            .collect();
+        let status_class = |node: &str| -> &'static str {
+            match derived.plan_status.get(node) {
+                None => "missing",
+                Some(None) => "unknown",
+                Some(Some(s)) => s.as_str(),
+            }
+        };
+        let mut members: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for node in &nodes {
+            members
+                .entry(status_class(node))
+                .or_default()
+                .push(ids[node.as_str()].as_str());
+        }
+        for cycle in derived.awaits_cycles() {
+            for member in cycle {
+                if let Some(id) = ids.get(member.as_str()) {
+                    members.entry("cycle").or_default().push(id.as_str());
+                }
+            }
+        }
+
+        out.push_str("```mermaid\nflowchart LR\n");
+        for node in &nodes {
+            out.push_str(&format!(
+                "  {}[\"{}<br/>{}\"]\n",
+                ids[node.as_str()],
+                node_label(node),
+                status_class(node)
+            ));
+        }
+        for (target, dependent) in &edges {
+            out.push_str(&format!(
+                "  {} --> {}\n",
+                ids[target.as_str()],
+                ids[dependent.as_str()]
+            ));
+        }
+        for (class, style) in NODE_CLASSES {
+            let Some(ids) = members.get(class) else {
+                continue;
+            };
+            let mut ids = ids.clone();
+            ids.sort();
+            ids.dedup();
+            out.push_str(&format!("  classDef {class} {style}\n"));
+            out.push_str(&format!("  class {} {class}\n", ids.join(",")));
+        }
+        out.push_str("```\n");
+    }
+
+    let held = plans.iter().filter(|p| derived.hold(p).is_some()).count();
+    let cycles = derived.awaits_cycles().len();
+    let unresolved = nodes
+        .iter()
+        .filter(|n| !derived.plan_status.contains_key(n.as_str()))
+        .count();
+    out.push_str(&format!(
+        "\n- drawn: {}, {}\n- held: {}, waiting on a target that has not retired\n- unsequenced: {}, under no ordering constraint\n- retired: {}, left out of the figure\n",
+        count(nodes.len(), "node"),
+        count(edges.len(), "edge"),
+        count(held, "ready plan"),
+        count(unsequenced, "plan"),
+        count(plans.iter().filter(|p| retired(p)).count(), "plan"),
+    ));
+    if unresolved > 0 {
+        out.push_str(&format!(
+            "- unresolved: {}, naming no plan in this root (lint item 4)\n",
+            count(unresolved, "`awaits:` target")
+        ));
+    }
+    if cycles > 0 {
+        out.push_str(&format!(
+            "- cycles: {} — a deadlock by construction (lint item 22)\n",
+            count(cycles, "cycle")
+        ));
+    }
+    out
 }
 
 /// CODEOWNERS over `owner:` frontmatter — entries only for core-class paths
@@ -381,19 +605,16 @@ pub fn orgchart(tree: &Tree) -> String {
         let purpose = fm
             .and_then(|f| f.get_str("purpose"))
             .unwrap_or_else(|| "—".into());
-        let holder = if let Some(r) = tree
-            .get(&format!("org/{role}/holder/ref.md"))
-            .and_then(|a| a.fm.as_ref())
-            .and_then(|f| f.get_str("ref"))
-        {
-            format!("ref: {r}")
-        } else if tree.get(&format!("org/{role}/holder/system.md")).is_some() {
-            "agent package".to_string()
-        } else {
-            fm.and_then(|f| f.get_str("holder"))
+        let resolved = crate::org::holder(tree, &role);
+        let holder = match (&resolved.kind, &resolved.reference) {
+            (crate::org::HolderKind::Ref, Some(r)) => format!("ref: {r}"),
+            (crate::org::HolderKind::Ref, None) => "ref: (unset)".to_string(),
+            (crate::org::HolderKind::Package, _) => "agent package".to_string(),
+            (crate::org::HolderKind::None, _) => fm
+                .and_then(|f| f.get_str("holder"))
                 .filter(|h| h != "holder/")
                 .map(|h| format!("external: {h}"))
-                .unwrap_or_else(|| "(none)".into())
+                .unwrap_or_else(|| "(none)".into()),
         };
         let escalate = fm
             .and_then(|f| f.get_str("escalate-to"))
@@ -401,6 +622,76 @@ pub fn orgchart(tree: &Tree) -> String {
         out.push_str(&format!(
             "- **org/{role}** — {purpose}\n  - holder: {holder}\n  - escalates to: {escalate}\n"
         ));
+    }
+    out
+}
+
+/// Decision register: the live set over `decisions/`, read from the
+/// successors' `supersedes:` edges (spec rule 6 — a decision is live iff no
+/// accepted decision supersedes it), plus how each live decision is reached
+/// from the operative record (Decision hatching pattern, lint item 26).
+pub fn decisions(tree: &Tree) -> String {
+    let derived = graph::derive(tree);
+    let reg = registries::load(tree);
+    let reach = graph::decision_reach(tree, &derived, &reg.decision_registry);
+    let today = crate::dates::today();
+
+    let mut out = fm_header("decisions", today);
+    out.push_str("# Decision register\n\n");
+    out.push_str("The live decision set — a reading, never a filing: a superseded decision\nstays in `decisions/` as record while its successor carries the guidance.\nA live decision unreachable from the operative record is the derivation\nsweep's orphaned-operative-content queue (lint item 26).\n\n");
+
+    let live: Vec<_> = reach.iter().filter(|r| r.superseded_by.is_none()).collect();
+    let superseded: Vec<_> = reach.iter().filter(|r| r.superseded_by.is_some()).collect();
+
+    out.push_str("## Live\n\n");
+    if live.is_empty() {
+        out.push_str("(no accepted decisions)\n");
+    } else {
+        out.push_str("| decision | reachable via |\n|----------|---------------|\n");
+        for r in &live {
+            let via = if !r.cited_by.is_empty() {
+                match r.cited_by.as_slice() {
+                    [only] => format!("cited by {only}"),
+                    [first, rest @ ..] => format!("cited by {first} (+{} more)", rest.len()),
+                    [] => unreachable!(),
+                }
+            } else if r.inert {
+                "inert (standing guidance: none)".into()
+            } else if r.registered {
+                "decision registry".into()
+            } else {
+                "unreachable".into()
+            };
+            out.push_str(&format!("| {} | {via} |\n", r.rel));
+        }
+    }
+
+    out.push_str("\n## Superseded\n\n");
+    if superseded.is_empty() {
+        out.push_str("(none)\n");
+    } else {
+        out.push_str("| decision | superseded by |\n|----------|---------------|\n");
+        for r in &superseded {
+            out.push_str(&format!(
+                "| {} | {} |\n",
+                r.rel,
+                r.superseded_by.as_deref().unwrap_or("—")
+            ));
+        }
+    }
+
+    let unreachable = live.iter().filter(|r| r.unreachable()).count();
+    let drafts = tree
+        .by_kind(Kind::Decision)
+        .filter(|a| a.status().as_deref() != Some("accepted"))
+        .count();
+    out.push_str(&format!(
+        "\n- live: {} of {} accepted\n- unreachable: {unreachable}\n",
+        live.len(),
+        reach.len()
+    ));
+    if drafts > 0 {
+        out.push_str(&format!("- not yet accepted: {drafts}\n"));
     }
     out
 }

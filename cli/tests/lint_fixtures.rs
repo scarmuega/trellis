@@ -371,3 +371,170 @@ fn owner_escalation_shape_travels_in_findings() {
     assert_eq!(finding["path"], "problem/bare.md");
     assert!(finding["message"].as_str().unwrap().contains("provenance"));
 }
+
+fn item26_judgment(report: &serde_json::Value) -> Option<Vec<String>> {
+    report["judgment"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["item"] == 26)
+        .map(|j| {
+            j["checked_mechanically"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap().to_string())
+                .collect()
+        })
+}
+
+#[test]
+fn healthy_root_has_no_unreachable_decisions() {
+    // The skeleton's 0000 is cited from conventions.md's runtime binding —
+    // a fresh root starts with its whole trail reachable, zero day-one noise.
+    let f = Fixture::healthy();
+    let report = f.lint_json(&["--items", "26"]);
+    assert_eq!(report["summary"]["violations"], 0, "{report:#}");
+    assert_eq!(item26_judgment(&report), None, "{report:#}");
+}
+
+#[test]
+fn supersession_is_the_successors_edge_and_liveness_derives_from_it() {
+    let f = Fixture::healthy();
+    f.write(
+        "decisions/0001-choose-the-oven-vendor.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-01\n---\n# 0001 — Choose the oven vendor\n",
+    );
+    f.write(
+        "decisions/0002-replace-the-oven-vendor.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-20\nsupersedes: [decisions/0001-choose-the-oven-vendor.md]\n---\n# 0002 — Replace the oven vendor\n\n## Consequences\n\nStanding guidance: none.\n",
+    );
+    let report = f.lint_json(&["--items", "26"]);
+    assert_eq!(report["summary"]["violations"], 0, "{report:#}");
+    // 0001 left the live set (superseded — exempt from reachability); 0002
+    // declares itself inert. Nothing is unreachable.
+    assert_eq!(item26_judgment(&report), None, "{report:#}");
+}
+
+#[test]
+fn a_draft_successor_supersedes_nothing_yet() {
+    let f = Fixture::healthy();
+    f.write(
+        "decisions/0001-standing-call.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-01\n---\n# 0001 — Standing call\n",
+    );
+    f.write(
+        "decisions/0002-drafted-replacement.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: proposed\ndate: 2026-08-01\nsupersedes: [decisions/0001-standing-call.md]\n---\n# 0002 — Drafted replacement\n",
+    );
+    let report = f.lint_json(&["--items", "26"]);
+    assert_eq!(report["summary"]["violations"], 0, "{report:#}");
+    // The target stays live — and unreachable, since nothing cites it.
+    assert_eq!(
+        item26_judgment(&report),
+        Some(vec!["decisions/0001-standing-call.md".to_string()]),
+        "{report:#}"
+    );
+}
+
+#[test]
+fn ill_formed_supersession_fires_item_26() {
+    let f = Fixture::healthy();
+    f.write(
+        "decisions/0001-self-loop.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-01\nsupersedes: [decisions/0001-self-loop.md]\n---\n# 0001 — Self loop\n",
+    );
+    f.write(
+        "decisions/0002-points-outside.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-02\nsupersedes: [plans/seasonal-recipe-line.md]\n---\n# 0002 — Points outside\n",
+    );
+    f.write(
+        "decisions/0003-names-a-ghost.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-03\nsupersedes: [decisions/9999-never-recorded.md]\n---\n# 0003 — Names a ghost\n",
+    );
+    f.write(
+        "decisions/0004-ambiguous-glob.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-04\nsupersedes: [decisions/000*]\n---\n# 0004 — Ambiguous glob\n",
+    );
+    f.write(
+        "decisions/0005-cycle-a.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-05\nsupersedes: [decisions/0006-cycle-b.md]\n---\n# 0005 — Cycle a\n",
+    );
+    f.write(
+        "decisions/0006-cycle-b.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-06\nsupersedes: [decisions/0005-cycle-a.md]\n---\n# 0006 — Cycle b\n",
+    );
+    // A dangling body ref fires too — decisions never move, so a miss is a
+    // typo or a deletion.
+    f.write(
+        "problem/cites-a-ghost.md",
+        "---\nprovenance: authored\nowner: org/founder\n---\n# Cites a ghost\n\nPer decisions/8888-vanished-call.md this was settled.\n",
+    );
+
+    let report = f.lint_json(&["--items", "26"]);
+    let messages: Vec<String> = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["message"].as_str().unwrap().to_string())
+        .collect();
+    for expected in [
+        "supersedes: names the decision itself",
+        "is not a decision",
+        "supersedes: decisions/9999-never-recorded.md does not resolve",
+        "decisions — an edge replaces exactly one",
+        "supersedes: cycle",
+        "ref decisions/8888-vanished-call.md does not resolve",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(expected)),
+            "expected a finding containing {expected:?}; got {messages:#?}"
+        );
+    }
+}
+
+#[test]
+fn reachability_counts_citations_inertness_and_the_registry() {
+    let f = Fixture::healthy();
+    // Cited through a plan's decisions: glob.
+    f.write(
+        "decisions/0001-pick-the-oven.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-01\n---\n# 0001 — Pick the oven\n",
+    );
+    f.write(
+        "plans/oven-migration.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\ndecisions: [decisions/0001-*]\n---\n# Oven migration\n",
+    );
+    // Cited by a prose mention in a live authored artifact.
+    f.write(
+        "decisions/0002-name-the-brand.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-02\n---\n# 0002 — Name the brand\n",
+    );
+    f.write(
+        "problem/naming.md",
+        "---\nprovenance: authored\nowner: org/founder\n---\n# Naming\n\nThe brand vocabulary is fixed (decision 0002).\n",
+    );
+    // Listed in the decision registry.
+    f.write(
+        "decisions/0003-legacy-call.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-03\n---\n# 0003 — Legacy call\n",
+    );
+    let conv = f.read("conventions.md");
+    f.write(
+        "conventions.md",
+        &format!("{conv}\n## Decision registry\n\n- decisions/0003-legacy-call.md — inert: scaffolding era\n"),
+    );
+    // Reachable from nothing.
+    f.write(
+        "decisions/0004-orphaned-call.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-04\n---\n# 0004 — Orphaned call\n",
+    );
+
+    let report = f.lint_json(&["--items", "26"]);
+    assert_eq!(report["summary"]["violations"], 0, "{report:#}");
+    assert_eq!(
+        item26_judgment(&report),
+        Some(vec!["decisions/0004-orphaned-call.md".to_string()]),
+        "only the orphan is the judgment queue: {report:#}"
+    );
+}

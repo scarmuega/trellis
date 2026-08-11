@@ -27,6 +27,45 @@ executable: a contract (tx3, IDL) is a requirement made machine-checkable; an ev
 a requirement on an agent made testable. The methodology's pressure is to hatch prose
 into `contracts/` and `evals/`, not to accumulate it.
 
+### Decision hatching
+A decision is memory, not a manual (spec rule 6): the trail explains why, and
+the trail only grows — append-only, never archived (spec rule 13) — so nothing
+an operator needs day to day may require crossing it. What keeps the pile from
+becoming required reading is where the guidance lives. Standing guidance a
+decision establishes hatches, in the same change that accepts it, into the
+artifact that governs the behavior: a convention deviation or schema choice
+into `conventions.md`; a bounded context's commitment — a runtime, a vendor, an
+architecture — into that context's README or, once machine-checkable, its
+`contracts/` (see Requirements: prose is the larval form); a change of
+authority into the mandate it changes; a standing process into a `rituals.md`
+row; a term of art into `glossary.md`. The governing artifact cites the
+decision — `(decision NNNN)` — which inverts the lookup: operation reads the
+guidance where reading already happens and finds a footnote, instead of
+excavating the trail for the current rule. A decision that establishes nothing
+standing — the record of a one-shot act — says so in its own Consequences:
+`Standing guidance: none.`
+
+Supersession is structural, never an edit: the successor's `supersedes:` names
+every decision it fully replaces (spec schema), so the live set is computable
+while the superseded file never changes; partial influence stays prose. The
+lint computes the rest (checklist item 26): an accepted, unsuperseded decision
+unreachable from the operative record — cited by no live authored artifact,
+not declared inert, absent from the decision registry in `conventions.md` — is
+the finding, and the derivation sweep escalates it to its owner as orphaned
+operative content: hatch it, supersede it, or declare it inert. A domain
+arriving with a pile compacts once: the owner walks it newest to oldest,
+hatches what still operates, records prose-era supersessions and inert
+classifications in the registry — judgment made once, not re-derived every
+sweep — and one decision records the codification.
+
+The shape deliberately not chosen is consolidation inside the pile: a
+restatement decision that supersedes a set and restates its guidance freezes on
+acceptance like any other, so its first correction forces another wholesale
+copy — append-only digests re-accumulate — and it plants operative guidance in
+the one kind nobody should have to read. The editable, owned guidance artifact
+gets the same consolidation with git history as its trail. `supersedes:`
+remains what it is everywhere else: the mark of a choice genuinely replaced.
+
 ### Cross-cutting procedures
 Skills have exactly two homes. `solution/{bc}/skills/` holds business
 procedures — domain knowledge written in the bounded context's language,

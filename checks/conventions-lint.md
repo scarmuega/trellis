@@ -146,3 +146,18 @@ treats any directory with a `.git` in it as somebody else's.
     so a `archive/`-prefixed ref is an address that will rot. Escalate to the
     artifact's owner: move it back, declare the terminal status, or drop the
     prefix from the ref.
+26. Decisions hatch: the why-trail is never the only home of standing guidance
+    (spec rule 6; Decision hatching pattern). Every `supersedes:` entry on a
+    decision resolves to a `decisions/NNNN-*.md` in this root — never itself,
+    never a non-decision path, a glob matching exactly one — and the
+    supersession graph is acyclic (a cycle erases liveness for every member).
+    Liveness derives from the edges: a decision is live iff no `accepted`
+    decision supersedes it — a draft successor supersedes nothing yet. Every
+    accepted, live decision is reachable from the operative record: cited by
+    at least one live authored artifact outside `decisions/` (a path ref, a
+    `decision NNNN` mention, or a plan's `decisions:` list), declared inert in
+    its own Consequences (`Standing guidance: none`), or listed in
+    `conventions.md`'s decision registry. The kernel computes the unreachable
+    set; whether each member carries guidance that never landed — escalate to
+    its owner to hatch it into the governing artifact — or is merely a record
+    whose effect was discharged is a judgment call.

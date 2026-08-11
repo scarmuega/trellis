@@ -7,7 +7,10 @@
 
 use serde::Serialize;
 
+use crate::graph::Derived;
 use crate::model::{Complexity, PlanStatus};
+use crate::org;
+use crate::readiness;
 use crate::tree::{Kind, Tree};
 
 #[derive(Debug, Clone, Serialize)]
@@ -15,18 +18,87 @@ pub struct DispatchItem {
     pub plan: String,
     pub owner: String,
     pub owner_short: String,
+    /// The owner mandate's `escalate-to:`, or the owner itself when the
+    /// mandate is silent — a declared field the session would otherwise
+    /// spend a read deriving (decision 0045).
+    pub escalate_to: String,
     pub complexity: String,
     pub model: String,
     pub effort: String,
     pub budget_usd: f64,
 }
 
+/// Where a role's escalations go: its mandate's `escalate-to:`, falling back
+/// to the role itself (an escalation to yourself is a report that stands).
+pub fn escalate_to(tree: &Tree, role: &str) -> String {
+    let short = role.strip_prefix("org/").unwrap_or(role);
+    tree.get(&format!("org/{short}/mandate.md"))
+        .and_then(|m| m.fm.as_ref())
+        .and_then(|f| f.get_str("escalate-to"))
+        .unwrap_or_else(|| role.to_string())
+}
+
+/// Why a `ready` plan is skipped this pass. Both reasons hold, never block:
+/// the plan stays `ready`, nothing is written, and the hold clears itself —
+/// retiring the target, or fixing what the mechanical items name.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "reason", rename_all = "lowercase")]
+pub enum HoldReason {
+    /// Declared sequencing: an `awaits:` target is not `retired`.
+    Awaits {
+        awaits: String,
+        /// The holding target's status; `None` when the target does not
+        /// resolve.
+        target_status: Option<String>,
+    },
+    /// The mechanical share of the readiness gate failed — dispatching would
+    /// spawn a session whose whole work product is discovering this.
+    Readiness {
+        failed_items: Vec<u8>,
+        detail: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HeldItem {
     pub plan: String,
-    pub awaits: String,
-    /// The holding target's status; `None` when the target does not resolve.
-    pub target_status: Option<String>,
+    #[serde(flatten)]
+    pub reason: HoldReason,
+}
+
+impl HeldItem {
+    /// The hold as one log-line clause, reason-shaped.
+    pub fn describe(&self) -> String {
+        match &self.reason {
+            HoldReason::Awaits {
+                awaits,
+                target_status,
+            } => format!(
+                "awaits {awaits} (status: {})",
+                target_status.as_deref().unwrap_or("unresolved")
+            ),
+            HoldReason::Readiness {
+                failed_items,
+                detail,
+            } => format!(
+                "fails mechanical readiness item(s) {} — {detail}",
+                failed_items
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+}
+
+/// A `ready` plan whose owner's holder is a declared human: no session to
+/// spawn — the work is a handoff, and the scan's job ends at saying so.
+#[derive(Debug, Clone, Serialize)]
+pub struct HandoffItem {
+    pub plan: String,
+    pub owner: String,
+    pub holder_ref: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,6 +106,7 @@ pub struct ScanReport {
     pub version: u32,
     pub dispatch: Vec<DispatchItem>,
     pub held: Vec<HeldItem>,
+    pub handoffs: Vec<HandoffItem>,
     pub warnings: Vec<String>,
 }
 
@@ -59,8 +132,8 @@ impl Default for SessionMap {
             budget_usd: budget,
         };
         SessionMap {
-            mechanical: s("opus", "high", 5.0),
-            standard: s("opus", "xhigh", 10.0),
+            mechanical: s("opus", "medium", 5.0),
+            standard: s("opus", "high", 10.0),
             deep: s("fable", "xhigh", 25.0),
         }
     }
@@ -101,11 +174,12 @@ impl SessionMap {
     }
 }
 
-pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
+pub fn scan(tree: &Tree, derived: &Derived, map: &SessionMap) -> ScanReport {
     let mut report = ScanReport {
-        version: 1,
+        version: 2,
         dispatch: vec![],
         held: vec![],
+        handoffs: vec![],
         warnings: vec![],
     };
 
@@ -138,8 +212,10 @@ pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
                     ));
                     report.held.push(HeldItem {
                         plan: plan.rel.clone(),
-                        awaits: target,
-                        target_status: None,
+                        reason: HoldReason::Awaits {
+                            awaits: target,
+                            target_status: None,
+                        },
                     });
                     continue 'plans;
                 }
@@ -148,8 +224,10 @@ pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
                     if status.as_deref() != Some(PlanStatus::Retired.as_str()) {
                         report.held.push(HeldItem {
                             plan: plan.rel.clone(),
-                            awaits: target,
-                            target_status: status,
+                            reason: HoldReason::Awaits {
+                                awaits: target,
+                                target_status: status,
+                            },
                         });
                         continue 'plans;
                     }
@@ -164,6 +242,56 @@ pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
             ));
             continue;
         };
+        let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
+
+        // The mechanical share of the readiness gate, before a session is
+        // spent discovering it (decision 0045). Declared-field reads and the
+        // deterministic checks readiness.rs already tiers as mechanical —
+        // the judgment items stay the session's. A failure holds; blocking
+        // and the escalation record are a mandated session's acts, never the
+        // scan's (spec runtime.md, "Plan dispatch" and its limitations).
+        match readiness::check(tree, derived, &plan.rel) {
+            Ok(r) if !r.mechanical_pass => {
+                let failed: Vec<&readiness::ReadinessItem> = r
+                    .items
+                    .iter()
+                    .filter(|i| i.status == readiness::ItemStatus::Fail)
+                    .collect();
+                report.held.push(HeldItem {
+                    plan: plan.rel.clone(),
+                    reason: HoldReason::Readiness {
+                        failed_items: failed.iter().map(|i| i.item).collect(),
+                        detail: failed
+                            .iter()
+                            .map(|i| format!("{}: {}", i.title, i.detail))
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    },
+                });
+                continue;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                report.warnings.push(format!(
+                    "{}: readiness precheck errored ({e:#}) — dispatching anyway",
+                    plan.rel
+                ));
+            }
+        }
+
+        // A declared-human holder gets a handoff, not a session: the scan
+        // reads one declared field (`kind:` on holder/ref.md) and stops. An
+        // undeclared holder keeps the pre-0045 behavior — spawn, and let the
+        // session apply act's never-impersonate rule.
+        let holder = org::holder(tree, &owner_short);
+        if holder.is_declared_human() {
+            report.handoffs.push(HandoffItem {
+                plan: plan.rel.clone(),
+                owner,
+                holder_ref: holder.reference,
+            });
+            continue;
+        }
 
         let raw = fm.get_str("complexity");
         let complexity = match raw.as_deref() {
@@ -182,7 +310,8 @@ pub fn scan(tree: &Tree, map: &SessionMap) -> ScanReport {
         let session = map.session(complexity);
         report.dispatch.push(DispatchItem {
             plan: plan.rel.clone(),
-            owner_short: owner.strip_prefix("org/").unwrap_or(&owner).to_string(),
+            escalate_to: escalate_to(tree, &owner),
+            owner_short,
             owner,
             complexity: complexity.as_str().to_string(),
             model: session.model.clone(),

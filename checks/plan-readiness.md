@@ -13,6 +13,14 @@ an agent working without a human present — the dispatch case (spec companion
 `runtime.md`, "Plan dispatch"). A plan that passes 1–8 and fails 9–11 is
 releasable to a human holder and not to an agent one; say which when you report.
 
+**The mechanical share is tooling** (decision 0045): `trellis readiness <plan>`
+computes items 3 and 4 in full, the checkable parts of 5 and 10, and the
+deferral scan of 7 — and the dispatch scan runs the same check before spawning,
+holding any `ready` plan that fails it. A dispatched taker therefore evaluates
+only the judgment items (1, 2, 6, 8, 9, 11 and the stated remainders of 5 and
+10); an interactive taker walks the full list, with the CLI doing the
+mechanical half.
+
 ## Any taker
 
 1. **Objective, not a task list.** One statement of the outcome, in the domain's

@@ -71,6 +71,13 @@ artifact already carries an open record saying the same thing.
   under whoever conforms to it — every context `context-map.md` relates to the
   publishing context goes to its owner for revalidation; the context map is
   the consumer registry.
+  For decisions accepted since the last sweep, confirm the standing guidance
+  landed in its governing artifact (`trellis lint --items 26` computes the
+  unreachable set; `trellis view decisions` renders the register): report
+  each unreachable decision to its owner as orphaned operative content — the
+  owner hatches it, supersedes it, or declares it inert (Decision hatching
+  pattern). A pre-existing pile gets one report naming the compaction
+  procedure, never one escalation per decision.
   You flag; the owner collects.
 - **Archive sweep** — file terminal artifacts into `archive/`, the tier that
   mirrors the live hierarchy. `trellis archive --sweep` does the whole
@@ -99,10 +106,11 @@ artifact already carries an open record saying the same thing.
 - Never edit `authored` artifacts — escalation records included. Report to the
   owner; never fix silently.
 - Write only `provenance: generated` artifacts (tag indexes, orgchart view, plan
-  boards). Anything you write carries `provenance: generated`. Prefer the
-  kernel's generators where the binary is available — `trellis view board
-  --write`, `trellis view codeowners --write`, `trellis view
-  tags|orgchart|escalations --out <path>` — they stamp `generated-by:`, which
-  is what makes lint item 2 mechanical for those views.
+  boards, the decision register). Anything you write carries
+  `provenance: generated`. Prefer the kernel's generators where the binary is
+  available — `trellis view board --write`, `trellis view plan-graph --write`,
+  `trellis view codeowners --write`, `trellis view decisions --write`,
+  `trellis view tags|orgchart|escalations --out <path>` — they stamp
+  `generated-by:`, which is what makes lint item 2 mechanical for those views.
 - Never resolve external refs; never read or write secrets.
 - If a task would require writing an authored artifact, stop and escalate instead.

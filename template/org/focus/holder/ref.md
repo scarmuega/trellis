@@ -2,6 +2,7 @@
 provenance: authored
 owner: <owner>
 ref: trellis:focus
+kind: agent
 ---
 # Focus holder → trellis:focus
 

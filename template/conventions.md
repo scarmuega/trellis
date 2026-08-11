@@ -100,6 +100,19 @@ metrics: [metrics/definitions.md#{metric}]
 decisions: [decisions/NNNN-*]
 ```
 
+### decisions/NNNN-{slug}.md
+```yaml
+provenance: authored
+status: accepted    # the freeze line: accepted and committed = frozen
+                    #   (append-only); an uncommitted draft is still yours to revise
+date: YYYY-MM-DD
+supersedes: [decisions/NNNN-{slug}.md]
+    # optional; the successor names every decision it fully replaces — the
+    # target leaves the live set while its file never changes. Full replacement
+    # of operative force only: partial influence stays prose in the successor's
+    # Consequences.
+```
+
 ### org/{role}/mandate.md
 ```yaml
 purpose: one line
@@ -111,6 +124,10 @@ authority:
 escalate-to: org/{role}
 holder: holder/ | <opaque external ref>
 ```
+
+`holder/ref.md` may declare `kind: agent | human` (spec v19): `human` makes
+dispatch hand the role's plans off instead of spawning a session for them;
+absent keeps the pre-v19 routing. Declare it on any role that owns plans.
 
 ## Escalation records
 
@@ -140,6 +157,27 @@ free-text input, a ritual deviation — stays in the acting session's report,
 addressed to its owner. A `generated` artifact is never annotated: the escalation
 goes to its generator's source.
 
+## Decisions
+
+A decision is memory, not a manual. Standing guidance an accepted decision
+establishes lands, in the same change, in the artifact that governs the
+behavior — a section of this file for a convention deviation or schema choice,
+a mandate for authority, a context's README or `contracts/` for an
+architectural commitment, a `rituals.md` row for a standing process,
+`glossary.md` for a term — citing it (`decision NNNN`), so operating never
+requires reading the trail. A decision that establishes nothing standing — the
+record of a one-shot act — says so in its own Consequences:
+`Standing guidance: none.`
+
+Superseding is structural, never an edit: the successor's `supersedes:` names
+every decision it fully replaces (schema above), and a decision is live iff no
+accepted decision supersedes it — `trellis view decisions` renders the live
+set as the decision register. The lint flags accepted, unsuperseded decisions
+reachable from nothing — no citation in a live authored artifact, no inert
+declaration, no entry in the decision registry below — and the derivation
+sweep escalates each to its owner as orphaned operative content: hatch it,
+supersede it, or declare it inert.
+
 ## Plan-type registry
 
 Open set; add types here before using them.
@@ -155,6 +193,16 @@ Register tags here before use so generated views stay coherent.
 
 - (none yet)
 
+## Decision registry
+
+Dispositions the frozen files cannot carry — prose-era supersessions and inert
+classifications, recorded here once by the owner instead of re-derived every
+sweep (`decisions/{old}.md — superseded by decisions/{new}.md`, or
+`decisions/{x}.md — inert: {why}`). Listed decisions are excluded from the
+lint's unreachable set.
+
+- (none yet)
+
 ## Retention
 
 Finished artifacts are filed into `archive/`, which mirrors this hierarchy:
@@ -163,7 +211,8 @@ terminal-only — `retired` for a plan, `discarded` for a strategy, `archived`
 for a kind whose lifecycle has no terminal value of its own — and a unit that
 archives as a subtree (a bounded context, a role) carries the marker on its
 entry artifact. `decisions/` is never filed: it is append-only shared memory,
-superseded rather than retired.
+superseded rather than retired — the successor's `supersedes:` carries the
+edge, so the live set shrinks while the record never does.
 
 **Refs never name the tier.** `plans/{plan}.md` keeps addressing the plan on
 either side of the move, so an `awaits:` edge or a decision written years ago

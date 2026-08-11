@@ -43,8 +43,9 @@ backend = "process"
 # argv arrays, never shell strings: a placeholder fills exactly one argument,
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
-# {ritual} {complexity} {mcp}. A second harness (pi, Codex, OpenCode) is these
-# two lines rewritten — Claude Code is the reference adapter, not a hardcode.
+# {ritual} {complexity} {mcp} {escalate_to}. A second harness (pi, Codex,
+# OpenCode) is these two lines rewritten — Claude Code is the reference
+# adapter, not a hardcode.
 #
 # {mcp} is the session's back-channel: the daemon serves MCP on its own socket,
 # and a session handed the endpoint can ask a question and wait for an answer
@@ -106,7 +107,7 @@ retain = "on-failure"
 on_shutdown = "detach"
 
 [prompts]
-act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority; flip its status ready→active as you claim it, blocked if you hit an uncleared blocker; leave a trail."
+act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority. Dispatched: the runtime has pre-verified the mechanical readiness items and this plan's holds, and the acting-role marker is already stamped — evaluate only the judgment items. Claim with `trellis plan claim {plan}`; on an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail."
 ritual = "/trellis:ritual {ritual}"
 
 # Complexity → session resources. The spec defines the tiers (reasoning depth,
@@ -116,8 +117,8 @@ ritual = "/trellis:ritual {ritual}"
 # warning (conventions-lint item 4). `trellis serve --map` overrides a tier for
 # one run without editing this file.
 [sessions]
-mechanical = "opus:high:5"
-standard = "opus:xhigh:10"
+mechanical = "opus:medium:5"
+standard = "opus:high:10"
 deep = "fable:xhigh:25"
 
 # Push transports for newly opened escalation records — and for questions

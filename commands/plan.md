@@ -56,7 +56,8 @@ the existing plans (name, status, type) and ask what to plan.
    anchors that will
    measure it, and prior plans and `decisions/` that overlap — `trellis plan
    list` for the live set, `--archived` to reach finished work whose ground
-   this plan would retread. Use terms from
+   this plan would retread, and `trellis view decisions` for the live decision
+   set (a superseded decision's guidance lives in its successor). Use terms from
    `glossary.md`; surface conflicts with active plans.
 
 6. **Draft for transposition**: build the plan in the harness plan file as

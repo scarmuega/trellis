@@ -50,6 +50,11 @@ fn read_head(path: &Path) -> String {
 /// is not yet in HEAD and stays editable. Outside a git repo the "committed"
 /// notion is meaningless — fall back to always-frozen rather than silently
 /// dropping the guarantee.
+///
+/// Supersession needs no carve-out here, and that is load-bearing: the
+/// successor carries the `supersedes:` edge (spec rule 6), so declaring a
+/// decision superseded only ever writes a file that is not yet frozen — the
+/// frozen target is never touched.
 fn committed_decision_is_accepted(root: &Path, rel: &str) -> bool {
     let git = |args: &[&str]| -> Option<String> {
         let out = Command::new("git")

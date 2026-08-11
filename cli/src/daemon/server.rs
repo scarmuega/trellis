@@ -257,7 +257,8 @@ fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> st
             // The same scan the tick runs, under the same session map,
             // reported without spawning anything: what the daemon would do,
             // not what it has done.
-            let report = crate::dispatch::scan(&tree, &shared.sessions);
+            let derived = crate::graph::derive(&tree);
+            let report = crate::dispatch::scan(&tree, &derived, &shared.sessions);
             json(request, &serde_json::to_value(report).unwrap())
         }
 
@@ -269,16 +270,11 @@ fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> st
                 .map(|role| {
                     let mandate = tree.get(&format!("org/{role}/mandate.md"));
                     let fm = mandate.and_then(|m| m.fm.as_ref());
-                    let holder_ref = tree
-                        .get(&format!("org/{role}/holder/ref.md"))
-                        .and_then(|a| a.fm.as_ref())
-                        .and_then(|f| f.get_str("ref"));
-                    let holder_kind = if holder_ref.is_some() {
-                        "ref"
-                    } else if tree.get(&format!("org/{role}/holder/system.md")).is_some() {
-                        "package"
-                    } else {
-                        "none"
+                    let holder = crate::org::holder(&tree, role);
+                    let holder_kind = match holder.kind {
+                        crate::org::HolderKind::Ref => "ref",
+                        crate::org::HolderKind::Package => "package",
+                        crate::org::HolderKind::None => "none",
                     };
                     serde_json::json!({
                         "role": format!("org/{role}"),
@@ -286,7 +282,8 @@ fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> st
                         "purpose": fm.and_then(|f| f.get_str("purpose")),
                         "escalate_to": fm.and_then(|f| f.get_str("escalate-to")),
                         "holder_kind": holder_kind,
-                        "holder_ref": holder_ref,
+                        "holder_ref": holder.reference,
+                        "holder_ref_kind": holder.ref_kind,
                     })
                 })
                 .collect();

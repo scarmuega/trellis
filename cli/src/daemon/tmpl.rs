@@ -26,6 +26,11 @@ pub const PLACEHOLDERS: &[&str] = &[
     // 0041). Naming it is what opts a binding into the channel; a template
     // that omits it runs exactly as it did before.
     "mcp",
+    // Where the acting role's escalations go, read from its mandate at scan
+    // time (decision 0045) — a fact the session would otherwise spend a read
+    // deriving. Falls back to the role itself when the mandate is silent, so
+    // it always renders.
+    "escalate_to",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

@@ -13,7 +13,11 @@ fn scan(f: &Fixture, extra: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).unwrap()
 }
 
-const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+// Every dispatchable fixture declares a resolving subdomain: the scan now
+// runs the mechanical readiness precheck (decision 0045), and a plan with no
+// subdomains: fails item 4 and holds.
+const FM: &str =
+    "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
 #[test]
 fn scan_reproduces_the_awk_semantics() {
@@ -52,7 +56,7 @@ fn scan_reproduces_the_awk_semantics() {
     // Warning + skip: ready but ownerless.
     f.write(
         "plans/nobody.md",
-        "---\nprovenance: authored\nstatus: ready\ntype: initiative\n---\n# Nobody\n",
+        "---\nprovenance: authored\nstatus: ready\ntype: initiative\nsubdomains: [problem/outdoor-retail-channel.md]\n---\n# Nobody\n",
     );
     // Warning + standard: illegal complexity.
     f.write(
@@ -119,6 +123,59 @@ fn scan_reproduces_the_awk_semantics() {
     assert!(warnings
         .iter()
         .any(|w| w.as_str().unwrap().contains("galactic")));
+}
+
+/// The mechanical readiness precheck (decision 0045): a plan the coder's
+/// gate would bounce holds at the scan instead — no session spent
+/// discovering it, nothing written, and the hold names the failed items.
+#[test]
+fn a_mechanically_unready_plan_holds_instead_of_dispatching() {
+    let f = Fixture::healthy();
+    // No subdomains: (item 4) and a deferral token in the body (item 7).
+    f.write(
+        "plans/vague.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: ready\ntype: initiative\n---\n# Vague\n\nTBD: pick one of the approaches.\n",
+    );
+    let report = scan(&f, &[]);
+    assert!(
+        report["dispatch"].as_array().unwrap().is_empty(),
+        "{report:#}"
+    );
+    let h = &report["held"][0];
+    assert_eq!(h["plan"], "plans/vague.md");
+    assert_eq!(h["reason"], "readiness");
+    let items: Vec<u64> = h["failed_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i.as_u64().unwrap())
+        .collect();
+    assert!(items.contains(&4) && items.contains(&7), "{h:#}");
+}
+
+/// A holder ref declaring `kind: human` short-circuits into a handoff: the
+/// scan reads one declared field and spawns nothing. Undeclared kinds keep
+/// dispatching (the other tests' fixtures have no `kind:` and still spawn).
+#[test]
+fn a_declared_human_holder_gets_a_handoff_not_a_session() {
+    let f = Fixture::healthy();
+    f.write(
+        "org/founder/holder/ref.md",
+        "---\nprovenance: authored\nowner: org/founder\nref: santiago\nkind: human\n---\n# Founder holder\n",
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    let report = scan(&f, &[]);
+    assert!(
+        report["dispatch"].as_array().unwrap().is_empty(),
+        "{report:#}"
+    );
+    let h = &report["handoffs"][0];
+    assert_eq!(h["plan"], "plans/ship-it.md");
+    assert_eq!(h["owner"], "org/founder");
+    assert_eq!(h["holder_ref"], "santiago");
 }
 
 #[test]

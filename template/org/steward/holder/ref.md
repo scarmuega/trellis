@@ -2,6 +2,7 @@
 provenance: authored
 owner: <owner>
 ref: trellis:steward
+kind: agent
 ---
 # Steward holder → trellis:steward
 

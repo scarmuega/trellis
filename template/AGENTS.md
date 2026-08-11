@@ -20,7 +20,8 @@ placement guide and procedures live there.
     solution/     bounded contexts: contracts/, skills/, deployment units
     plans/        time-bounded execution — status + type
     metrics/      definitions.md (authored) + actuals/ (generated)
-    decisions/    ADRs, append-only
+    decisions/    ADRs, append-only — the why-trail; guidance lives in the
+                  governing artifact, a successor's supersedes: replaces
     org/          roles: mandate.md (authority) + holder/ (identity)
     archive/      the same tree, holding what is finished — terminal only
     also: conventions.md · rituals.md · glossary.md · brand.md · economics.md
@@ -33,13 +34,17 @@ The live set is a reading over `status:`, not a directory listing: ask
 into `archive/` — and even then they are still counted, because the board's
 closure and cycle-time readings are computed from their history. Refs always
 name the live path (`plans/{plan}.md`), whichever side of that move a plan is
-on.
+on. The live decision set is a reading too: `trellis view decisions`, or the
+decision register in `metrics/actuals/` — a superseded decision stays in
+`decisions/` as record while its successor carries the guidance.
 
 ## Before you write
 
 - Check `owner:` and `provenance:` in the target's frontmatter. Edit only what
   your role owns; never hand-edit `provenance: generated` — fix the generator.
-- Decisions are append-only: supersede, never edit.
+- Decisions are append-only: supersede, never edit — the successor's
+  `supersedes:` names what it replaces, and standing guidance lands in the
+  governing artifact, citing the decision (`conventions.md` → "Decisions").
 - Act under a role — `org/{role}/mandate.md` bounds your authority and spend.
 - No secrets in the repo, ever — reference credentials by name.
 

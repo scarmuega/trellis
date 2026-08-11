@@ -150,6 +150,7 @@ static RULES: &[(u8, RuleFn)] = &[
     (23, item23),
     (24, item24),
     (25, item25),
+    (26, item26),
 ];
 
 /// The checklist items this kernel implements, in order.
@@ -468,6 +469,35 @@ fn item05(ctx: &Ctx, sink: &mut Sink) {
             .unwrap_or(false);
         if !has_package && !has_ref && !external {
             sink.violation(ctx, 5, &a.rel, fm.line_of("holder"), format!("role has no holder — add {holder_dir}/system.md (package), {holder_dir}/ref.md, or an external ref in holder:"));
+        }
+        // A ref holder with no kind: discriminant still works — dispatch
+        // spawns and the session applies the never-impersonate rule — but a
+        // role that owns ready plans is one the runtime routes, and routing
+        // a human-held role without the declaration burns a session on
+        // discovering it (decision 0045). Warn, never fail.
+        if has_ref {
+            let role_ref = role_dir.to_string();
+            let declared = ctx
+                .tree
+                .get(&format!("{holder_dir}/ref.md"))
+                .and_then(|r| r.fm.as_ref())
+                .and_then(|f| f.get_str("kind"))
+                .is_some();
+            let owns_ready = ctx.tree.by_kind(Kind::Plan).any(|p| {
+                p.fm.as_ref().is_some_and(|f| {
+                    f.get_str("owner").as_deref() == Some(&role_ref)
+                        && f.get_str("status").as_deref() == Some("ready")
+                })
+            });
+            if !declared && owns_ready {
+                sink.warning(
+                    ctx,
+                    5,
+                    &format!("{holder_dir}/ref.md"),
+                    None,
+                    format!("holder ref declares no kind: (agent | human) while {role_ref} owns ready plans — dispatch cannot route handoffs without it"),
+                );
+            }
         }
     }
 }
@@ -1083,5 +1113,112 @@ fn item25(ctx: &Ctx, sink: &mut Sink) {
         if got.as_deref() != Some(want) {
             sink.violation(ctx, 25, &a.rel, a.fm.as_ref().and_then(|f| f.line_of("status")), format!("archived artifact declares status: {} — the tier admits terminal artifacts only, which for this kind means status: {want}", got.as_deref().unwrap_or("(none)")));
         }
+    }
+}
+
+// 26. Decisions hatch — mechanical half: supersession edges resolve (never
+// self, never a non-decision, globs match exactly one, no cycles) and
+// path-style decision refs in authored artifacts resolve. The unreachable
+// set — accepted, live, uncited, not inert, unregistered — is the judgment
+// queue, never violations: adoption must not flood a domain with findings
+// over its own history.
+fn item26(ctx: &Ctx, sink: &mut Sink) {
+    let decision_re = regex::Regex::new(r"decisions/\d{4}-[A-Za-z0-9_-]+\.md").unwrap();
+
+    // Supersession edges, raw: shape complaints belong to the successor.
+    for a in ctx.tree.by_kind(Kind::Decision) {
+        let Some(fm) = &a.fm else { continue };
+        let line = fm.line_of("supersedes");
+        for r in fm.get_list("supersedes").unwrap_or_default() {
+            let r = r.trim();
+            if r == a.rel {
+                sink.violation(
+                    ctx,
+                    26,
+                    &a.rel,
+                    line,
+                    "supersedes: names the decision itself".into(),
+                );
+            } else if !r.starts_with("decisions/") {
+                sink.violation(ctx, 26, &a.rel, line, format!("supersedes: target {r} is not a decision — the edge only replaces decisions/NNNN-*.md"));
+            } else if let Some(prefix) = r.split_once('*').map(|(p, _)| p) {
+                let hits = ctx
+                    .tree
+                    .by_kind(Kind::Decision)
+                    .filter(|d| d.rel.starts_with(prefix) && d.rel != a.rel)
+                    .count();
+                if hits == 0 {
+                    sink.violation(
+                        ctx,
+                        26,
+                        &a.rel,
+                        line,
+                        format!("supersedes: nothing matches {r}"),
+                    );
+                } else if hits > 1 {
+                    sink.violation(ctx, 26, &a.rel, line, format!("supersedes: {r} matches {hits} decisions — an edge replaces exactly one; list each"));
+                }
+            } else if ctx.tree.get(r).is_none() {
+                sink.violation(
+                    ctx,
+                    26,
+                    &a.rel,
+                    line,
+                    format!("supersedes: {r} does not resolve"),
+                );
+            }
+        }
+    }
+
+    for cycle in ctx.derived.decision_supersession_cycles() {
+        let named = cycle.join(" → ");
+        for member in &cycle {
+            sink.violation(ctx, 26, member, None, format!("supersedes: cycle — {named} — a cycle erases liveness for every member; the newest restatement carries the edges, the rest drop theirs"));
+        }
+    }
+
+    // Path-style decision refs in authored bodies resolve. Decisions never
+    // move (rule 13), so a miss is a typo or a deletion, never a filing.
+    // Body only: frontmatter refs already have owners — item 4 resolves a
+    // plan's `decisions:`, the supersedes checks above own the edges.
+    for a in &ctx.tree.artifacts {
+        if a.provenance().as_deref() != Some("authored") || a.archived {
+            continue;
+        }
+        let skip = a.fm.as_ref().map(|f| f.close_line).unwrap_or(0) as usize;
+        for (i, text_line) in a.text.lines().enumerate() {
+            if i < skip {
+                continue;
+            }
+            for m in decision_re.find_iter(text_line) {
+                if ctx.tree.get(m.as_str()).is_none() {
+                    sink.violation(
+                        ctx,
+                        26,
+                        &a.rel,
+                        Some(i as u32 + 1),
+                        format!(
+                            "ref {} does not resolve to a decision in this root",
+                            m.as_str()
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    // The unreachable set is computed here and judged by the owner.
+    let reach = crate::graph::decision_reach(ctx.tree, ctx.derived, &ctx.reg.decision_registry);
+    let unreachable: Vec<String> = reach
+        .iter()
+        .filter(|r| r.unreachable())
+        .map(|r| r.rel.clone())
+        .collect();
+    if !unreachable.is_empty() {
+        sink.judgment(
+            26,
+            "accepted decisions reachable from nothing — no citation in a live authored artifact, no inert declaration, no registry entry; whether each carries guidance that never landed (hatch it into the governing artifact) or is a discharged record is its owner's call",
+            unreachable,
+        );
     }
 }

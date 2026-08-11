@@ -28,18 +28,26 @@ executes) and await instruction.
    containing the role ref and the current UTC timestamp, one per line (create
    `.trellis/` if needed; it must be gitignored — never commit it). This marker
    is how the enforcement gate attributes writes. Remove it in step 7 even if
-   the work fails.
+   the work fails. **Under dispatch the runtime owns this marker** (decision
+   0045): a session whose prompt says so finds its line already stamped and
+   removed around its lifetime — leave the file alone in both steps.
 
 4. **Adopt the holder**:
    - `holder/system.md` (local package) — its content is your operating
      instructions for this invocation; load the skills and tools it references.
-   - `holder/ref.md` naming an agent (e.g. a plugin agent like
-     `trellis:steward`) — delegate the work to that agent, passing the input
-     and the mandate path.
+   - `holder/ref.md` naming a plugin agent (e.g. `trellis:steward`,
+     `trellis:coder`) — **adopt it inline**: read the agent's definition and
+     continue as it in this same session, the mandate already bound. Never
+     Task-delegate to it — a subagent re-reads the same mandate, conventions,
+     and plan into a second context, and the measured cost of that double hop
+     is what decision 0045 removed.
    - `holder/ref.md` naming a human or external party — never impersonate.
      Prepare the work as a handoff addressed to that party in your report, and
      stop. Nothing is acting as the role here, so nothing writes on its behalf:
-     the holder authors any escalation record the handoff earns.
+     the holder authors any escalation record the handoff earns. (Dispatch
+     short-circuits a holder declaring `kind: human` before any session
+     spawns; reaching this branch means the invocation is interactive or the
+     declaration is missing — worth adding while you are here.)
 
 5. **Execute within authority**:
    - Touch only artifacts within the mandate's `scope:`.
@@ -63,13 +71,18 @@ executes) and await instruction.
    instance's escalation channel (default binding: an escalation record — a
    fenced `yaml` block under `## Escalations` in the artifact the escalation
    concerns, per `conventions.md`), describing what was attempted, why it
-   exceeds authority, and a proposed resolution. Write the record only into an
-   artifact this role owns; where it does not, or where no single artifact
-   carries the problem, put the same content in your report addressed to the
-   owner, who transcribes it. Never silently attempt or silently drop it.
+   exceeds authority, and a proposed resolution. Write the record with
+   `trellis escalate add <artifact> --by <role> --asks …` — the CLI owns the
+   schema, derives `to:` from your mandate, and refuses targets you must not
+   write — falling back to a hand-written block only where the binary is
+   absent. Write the record only into an artifact this role owns; where it
+   does not, or where no single artifact carries the problem, put the same
+   content in your report addressed to the owner, who transcribes it. Never
+   silently attempt or silently drop it.
 
-7. **Close out**: remove `.trellis/acting-role`. Report: the role acted, the
-   trigger/input, artifacts changed (with commits or PR refs), escalations
+7. **Close out**: remove `.trellis/acting-role` (interactive invocations only
+   — under dispatch the runtime removes its own line). Report: the role acted,
+   the trigger/input, artifacts changed (with commits or PR refs), escalations
    raised — quoting each record and where it landed, or stating it is the report
    itself and whose transcription it awaits — and anything left for humans to
    sample.

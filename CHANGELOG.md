@@ -14,6 +14,116 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **The act ceremony's deterministic share runs in the runtime (spec v19;
+  decision 0045):** a measured dispatched act spent ~10–15% of its tokens and
+  ~25 turns on ceremony no judgment touches — and whole sessions on plans
+  that deterministically shouldn't have spawned one. Four moves, one
+  decision. The dispatch scan now runs the mechanical readiness share
+  (`readiness.rs`, which always had the verdict and never had a caller in
+  the daemon) and **holds** a failing `ready` plan the way it holds
+  `awaits:` — nothing written, failed items named on the log, board, and
+  `/api/dispatch`; the block-flip and the escalation record stay a mandated
+  session's, which is why a hold and not an auto-block. `holder/ref.md`
+  gains an optional `kind: agent | human`: a declared human's plans become
+  reported **handoffs** instead of sessions that read everything and stop at
+  never-impersonate; undeclared routes exactly as before, and lint warns —
+  never fails — when a role owning ready plans leaves it unsaid. The daemon
+  owns `.trellis/acting-role` for the sessions it spawns (one line per live
+  session, stamped at spawn, removed at retirement, reconciled at startup),
+  which also deletes the dotfile permission dialog that blocked unattended
+  acts. And the act prompt now carries computed facts — a new
+  `{escalate_to}` placeholder, "the precheck already ran" — and names the
+  CLI verbs (`trellis plan claim`, `trellis plan block --asks`,
+  `trellis escalate add`) that replace hand-edited frontmatter and
+  hand-written YAML. On the plugin side, act's holder branch adopts plugin
+  agents **inline** instead of Task-delegating, removing the second context
+  that re-read ~40KB of mandate, conventions, and plan. The cost is stated
+  where it lives: the deferral-token scan reads plan bodies, wider than
+  v18's declared-fields-only phrasing, and a readiness hold is quiet by
+  design — it re-enters the scan each tick and toasts nothing.
+
+### Changed
+
+- **Default complexity tiers retuned one notch down:** `mechanical` is
+  `opus:medium` (was `opus:high`), `standard` is `opus:high` (was
+  `opus:xhigh`); `deep` stays `fable:xhigh`. Budgets unchanged. A measured
+  `standard` act spent xhigh-effort reasoning on work its own plan called a
+  one-seam fix; the tier's meaning is the spec's, these prices are the
+  binding's, and instances retune in `runtime.toml` as ever (decision 0032).
+
+### Fixed
+
+- **The herdr backend no longer mistakes a dropped prompt for a finished
+  turn.** Observed live: herdr accepts `agent.prompt` while Claude Code is
+  still starting up, and the injected text vanishes — the pane settles `idle`
+  over an empty input, `state_change_seq` moved by startup flaps alone, and
+  both the tick loop and `--once`'s drain read that as a turn that ran to
+  completion between observations. The session was retired `exit 0`, its
+  workspace closed under `retain = "on-failure"`, and the plan bookkept as
+  advanced when no agent ever saw it. A settle from a submitted-but-never-seen-
+  working session is now believed only when the prompt's echo is in the pane's
+  scrollback; otherwise the prompt is resubmitted (twice, with a beat for the
+  startup window to pass) before the session is written off as lost — written
+  off, not succeeded, so the workspace stays on screen and the run records a
+  failure. The same machinery absorbs a spawn whose prompt is still refused
+  `agent_not_ready` after the ten-second retry window (a concurrent cold start
+  outlasts it): the session is handed over with the prompt unplaced instead of
+  torn down. The cost is honest: a resubmission that raced a slow first
+  injection can run the act twice, which the act prompt already absorbs by
+  being idempotent — the duplicate turn reports "nothing to do" and settles.
+
+### Added
+
+- **`trellis view plan-graph`:** the `awaits:` DAG has been derived since
+  sequencing landed, but every surface showed it one edge at a time — `plan
+  list --held`, `readiness`, the board's dwell flag — so a chain's length, or
+  one unretired plan holding five others, was invisible. The new view renders
+  it as a Mermaid flowchart (canonical at `metrics/actuals/plan-graph.md`),
+  arrows running target → dependent so the figure reads forward in time: what
+  clears when. Red marks what lint already complains about — an `awaits:` cycle
+  (item 22) or a target naming no plan (item 4), drawn as a ghost node rather
+  than a silently dropped edge. Every live plan is a node, sequenced or not: the
+  graph is the standing picture of the board, and a plan under no ordering
+  constraint is a fact worth seeing. Retired plans are the one exclusion — they
+  hold nothing and wait on nothing, so drawing them would bury the live picture
+  under the whole history, and an edge onto a retired target drops with it,
+  which is the same statement as its hold having cleared. Styling is
+  stroke-only — no `fill`, no `color` — so the
+  figure reads under both the light and the dark renderer theme, with status in
+  stroke width and dash pattern as well as hue. Mermaid over DOT because it
+  renders inline wherever the rest of `metrics/actuals/` is read, with no
+  graphviz binary in the loop.
+
+- **Decision hatching (spec v18; decision 0044):** `decisions/` is the one
+  kind with no exit — append-only by rule 6, barred from the tier by rule 13 —
+  and until now supersession was prose-only, so liveness was uncomputable and
+  a domain could accumulate standing guidance that existed nowhere but the
+  trail. The model now says decisions are memory, not manuals, twice over.
+  Standing guidance an accepted decision establishes lands, in the same
+  change, in the artifact that governs the behavior — `conventions.md`, a
+  mandate, a context's README or `contracts/`, a rituals row — citing
+  `(decision NNNN)`, so operating never requires reading the pile; a decision
+  establishing nothing standing declares `Standing guidance: none.`
+  Supersession becomes structural: decisions gain their first schema block
+  (codifying the `status: accepted` the gate already keyed on) with an
+  optional `supersedes:` list on the successor — the frozen target is never
+  touched, a decision is live iff no accepted decision supersedes it, and
+  partial influence stays prose.
+
+  New: lint item 26 (supersession edges resolve — never self, never a
+  non-decision, globs match exactly one, no cycles; dangling decision refs in
+  authored bodies; and the unreachable set — accepted, live, uncited, not
+  inert, unregistered — reported as a judgment queue, never violations, so
+  adoption cannot flood a domain over its own history), `trellis view
+  decisions` (the register: live / superseded-by / reachable-via, canonical at
+  `metrics/actuals/decision-register.md`), a `## Decision registry` in
+  `conventions.md` for prose-era dispositions recorded once, a
+  derivation-sweep clause escalating orphaned operative content, and the
+  skill's one-time "Compact a decision pile" procedure. Consolidation by
+  restatement inside `decisions/` was the rejected shape: a frozen digest
+  re-accumulates on its first correction, and the editable, owned guidance
+  artifact gets the same consolidation with git history as its trail.
+
 - **A terminal tier: `archive/` (spec v17; decision 0042):** a root accumulates
   work that is over, and until now there was nowhere for it to go. `plans/` was
   the sharp case — the only kind that grows without bound, has a terminal state,

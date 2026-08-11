@@ -33,25 +33,30 @@ itself when its targets retire, and flipping it `blocked` would convert a
 self-clearing hold into an escalation a human must clear.
 
 Read the plan named in your input and walk
-`${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` against it. Any item fails and
-you do not start:
+`${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` against it. **Under dispatch
+the runtime has already verified the mechanical share** (the scan holds plans
+that fail it — decision 0045; your prompt says so when it applies): evaluate
+only the judgment items — 1, 2, 6, 8, 9, 11 — plus the stated remainders of 5
+and 10. Invoked interactively, walk the full list; `trellis readiness <plan>`
+computes the mechanical share for you. Any item fails and you do not start:
 
-- Flip the plan `ready → blocked` — directly, without passing through `active`,
-  so the dispatcher stops re-picking it every tick. Flip status only if you are
-  acting as the plan's owner; otherwise change nothing and report.
-- Escalate by writing an escalation record into the plan's own `## Escalations`
-  section (schema in the root's `conventions.md`), `to:` your mandate's
-  `escalate-to:`, naming each failed item and the question it asks of a human.
-  The record is the escalation — there is no ref to file elsewhere. You write it
-  because you are acting as the plan's owner; if you are not, change nothing and
-  put the same content in your report for the owner to transcribe.
+- Run `trellis plan block <plan> --by <role> --asks "<the question>"` — one
+  call that flips `ready → blocked` directly (no pass through `active`, so the
+  dispatcher stops re-picking it) and writes the escalation record into the
+  plan's `## Escalations` section, `to:` your mandate's `escalate-to:`, naming
+  each failed item and the question it asks of a human. Do this only if you
+  are acting as the plan's owner; otherwise change nothing and put the same
+  content in your report for the owner to transcribe. Where the binary is
+  absent, the same two acts by hand (record schema in the root's
+  `conventions.md`).
 - Stop. Do not fill the gap with a plausible guess and do not silently narrow the
   plan to the part that happens to be specified.
 
 ## Claim the work
 
-Passing the gate, flip the plan `ready → active` before you write code — the
-taker's claim is what keeps dispatch idempotent, so land it on the default
+Passing the gate, claim before you write code: `trellis plan claim <plan>`
+flips `ready → active` (refusing any other source state), then commit the flip.
+The taker's claim is what keeps dispatch idempotent, so land it on the default
 branch, never only inside a proposal branch.
 
 ## Implement within the plan and the policy
@@ -87,11 +92,12 @@ publishing, approval), a decision the plan did not make, an external dependency,
 a contract that would have to change, a mis-scoped `complexity:` — work the plan
 marked `mechanical` that turns out to demand design judgment is an
 under-provisioned session, not a license to push through — or a readiness item
-that only surfaced once you were inside the code. Flip the plan
-`active → blocked`, write an escalation record into the plan's `## Escalations`
-section addressed `to:` your `escalate-to:` — what was attempted, what is
-blocked, and the decision you need — deliver whatever code exists as a draft PR,
-and stop. Never work around it and never widen your own authority to clear it.
+that only surfaced once you were inside the code. Run
+`trellis plan block <plan> --by <role> --asks "<the decision you need>"
+--attempted "<what was attempted>" --blocked "<what is blocked>"` — the flip
+`active → blocked` and the escalation record in one call, addressed `to:` your
+`escalate-to:` — deliver whatever code exists as a draft PR, and stop. Never
+work around it and never widen your own authority to clear it.
 
 ## Deliver code as a pull request
 

@@ -7,7 +7,10 @@ mod common;
 
 use common::{Fixture, ANCHOR};
 
-const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+// The subdomain keeps ready fixtures past the scan's mechanical readiness
+// precheck (decision 0045).
+const FM: &str =
+    "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
 /// Records argv and claims the plan named in its first argument.
 fn claiming_fixture() -> Fixture {
@@ -85,7 +88,7 @@ fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
             "founder",
             "standard",
             "opus",
-            "xhigh",
+            "high",
             "10"
         ],
         "an unmarked plan takes the standard session"
@@ -94,6 +97,38 @@ fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
         &invocation_for(&f, "plans/think-hard.md")[2..],
         ["deep", "fable", "xhigh", "25"],
         "the deep tier gets the deep session"
+    );
+}
+
+/// The runtime stamps `.trellis/acting-role` around every session it spawns
+/// (decision 0045): present — with the acting role — while the session runs,
+/// gone when the last session retires. The fake harness snapshots the marker
+/// from inside its run, which is the only moment it can be seen.
+#[test]
+fn the_daemon_stamps_the_acting_role_marker_around_each_session() {
+    let f = claiming_fixture();
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.serve_once(ANCHOR, &[]);
+
+    let seen: Vec<_> = std::fs::read_dir(f.root().join(".trellis/runtime"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("marker-seen"))
+        .collect();
+    assert!(!seen.is_empty(), "a session saw the marker while it ran");
+    let content = std::fs::read_to_string(seen[0].path()).unwrap();
+    assert!(
+        content
+            .lines()
+            .any(|l| l.starts_with("org/founder ") && l.ends_with(" plan:plans/ship-it.md")),
+        "the marker names the acting role and the session: {content:?}"
+    );
+    assert!(
+        !f.root().join(".trellis/acting-role").exists(),
+        "the marker leaves with the last session"
     );
 }
 

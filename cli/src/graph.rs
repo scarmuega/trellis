@@ -30,6 +30,12 @@ pub struct Derived {
     pub funded: HashMap<String, Vec<FundEdge>>,
     pub plan_status: HashMap<String, Option<PlanStatus>>,
     pub plan_awaits: HashMap<String, Vec<String>>,
+    /// Accepted successor → the decisions it supersedes, resolved (globs
+    /// expanded when they match exactly one). The successor carries the edge
+    /// (spec rule 6): the superseded file never changes, so liveness is
+    /// derived here, never declared on the target. Only accepted successors
+    /// enter — a draft supersedes nothing yet.
+    pub decision_supersedes: HashMap<String, Vec<String>>,
 }
 
 pub fn derive(tree: &Tree) -> Derived {
@@ -69,6 +75,48 @@ pub fn derive(tree: &Tree) -> Derived {
                 })
                 .collect();
         d.induced.insert(a.rel.clone(), edges);
+    }
+
+    // Decisions never move (rule 13), so their rel is their address. An
+    // ill-formed edge — self, non-decision, unresolvable, ambiguous glob —
+    // stays out of the map (the target stays live, fail closed) and lint
+    // item 26 owns the complaint.
+    let decision_rels: Vec<String> = tree
+        .by_kind(Kind::Decision)
+        .map(|a| a.rel.clone())
+        .collect();
+    for a in tree.by_kind(Kind::Decision) {
+        if a.status().as_deref() != Some("accepted") {
+            continue;
+        }
+        let raw =
+            a.fm.as_ref()
+                .and_then(|fm| fm.get_list("supersedes"))
+                .unwrap_or_default();
+        let mut targets: Vec<String> = Vec::new();
+        for r in raw {
+            let r = r.trim().to_string();
+            if r == a.rel || !r.starts_with("decisions/") {
+                continue;
+            }
+            if let Some(prefix) = r.split_once('*').map(|(p, _)| p) {
+                let mut hits: Vec<&String> = decision_rels
+                    .iter()
+                    .filter(|d| d.starts_with(prefix) && **d != a.rel)
+                    .collect();
+                hits.sort();
+                if let [only] = hits.as_slice() {
+                    targets.push((*only).clone());
+                }
+            } else if decision_rels.contains(&r) {
+                targets.push(r);
+            }
+        }
+        if !targets.is_empty() {
+            targets.sort();
+            targets.dedup();
+            d.decision_supersedes.insert(a.rel.clone(), targets);
+        }
     }
 
     // Keyed by *address*, not location: an archived plan is still named by
@@ -215,55 +263,28 @@ impl Derived {
     /// Cycles in the `awaits:` graph (item 22). Each cycle is a path of plan
     /// rels; edges only exist between plans present in the tree.
     pub fn awaits_cycles(&self) -> Vec<Vec<String>> {
-        let mut cycles: Vec<Vec<String>> = Vec::new();
-        let mut done: HashSet<String> = HashSet::new();
-        let mut nodes: Vec<&String> = self.plan_awaits.keys().collect();
-        nodes.sort();
+        cycles_in(&self.plan_awaits)
+    }
 
-        for start in nodes {
-            if done.contains(start.as_str()) {
-                continue;
-            }
-            let mut stack: Vec<(String, usize)> = vec![(start.clone(), 0)];
-            let mut path: Vec<String> = vec![];
-            let mut on_path: HashSet<String> = HashSet::new();
+    /// Cycles in the decision `supersedes:` graph (item 26) — a cycle erases
+    /// liveness for every member, so it is a violation, not a curiosity.
+    pub fn decision_supersession_cycles(&self) -> Vec<Vec<String>> {
+        cycles_in(&self.decision_supersedes)
+    }
 
-            while let Some((node, edge_idx)) = stack.pop() {
-                if edge_idx == 0 {
-                    path.push(node.clone());
-                    on_path.insert(node.clone());
-                }
-                let targets = self
-                    .plan_awaits
-                    .get(&node)
-                    .map(|v| {
-                        v.iter()
-                            .filter(|t| self.plan_awaits.contains_key(*t))
-                            .cloned()
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                if edge_idx < targets.len() {
-                    let target = targets[edge_idx].clone();
-                    stack.push((node.clone(), edge_idx + 1));
-                    if on_path.contains(&target) {
-                        let pos = path.iter().position(|p| p == &target).unwrap();
-                        let mut cycle = path[pos..].to_vec();
-                        cycle.sort();
-                        if !cycles.contains(&cycle) {
-                            cycles.push(cycle);
-                        }
-                    } else if !done.contains(&target) {
-                        stack.push((target, 0));
-                    }
-                } else {
-                    done.insert(node.clone());
-                    on_path.remove(&node);
-                    path.pop();
-                }
+    /// Target decision → the accepted successor that supersedes it. A
+    /// decision is live iff it has no entry here (spec rule 6). When several
+    /// successors name the same target, the lexicographically first labels it.
+    pub fn superseded_decisions(&self) -> HashMap<&str, &str> {
+        let mut out: HashMap<&str, &str> = HashMap::new();
+        let mut successors: Vec<&String> = self.decision_supersedes.keys().collect();
+        successors.sort();
+        for successor in successors {
+            for target in &self.decision_supersedes[successor] {
+                out.entry(target.as_str()).or_insert(successor.as_str());
             }
         }
-        cycles
+        out
     }
 
     /// A plan's effective class: strictest across its subdomains' effective
@@ -276,6 +297,156 @@ impl Derived {
             .map(|s| self.effective_class(s))
             .max()
     }
+}
+
+/// Depth-first cycle collection over an adjacency map. Edges only exist
+/// between nodes present as keys — a node with no outgoing edges cannot sit
+/// on a cycle, so the filter drops nothing a cycle needs.
+fn cycles_in(graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+    let mut cycles: Vec<Vec<String>> = Vec::new();
+    let mut done: HashSet<String> = HashSet::new();
+    let mut nodes: Vec<&String> = graph.keys().collect();
+    nodes.sort();
+
+    for start in nodes {
+        if done.contains(start.as_str()) {
+            continue;
+        }
+        let mut stack: Vec<(String, usize)> = vec![(start.clone(), 0)];
+        let mut path: Vec<String> = vec![];
+        let mut on_path: HashSet<String> = HashSet::new();
+
+        while let Some((node, edge_idx)) = stack.pop() {
+            if edge_idx == 0 {
+                path.push(node.clone());
+                on_path.insert(node.clone());
+            }
+            let targets = graph
+                .get(&node)
+                .map(|v| {
+                    v.iter()
+                        .filter(|t| graph.contains_key(*t))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if edge_idx < targets.len() {
+                let target = targets[edge_idx].clone();
+                stack.push((node.clone(), edge_idx + 1));
+                if on_path.contains(&target) {
+                    let pos = path.iter().position(|p| p == &target).unwrap();
+                    let mut cycle = path[pos..].to_vec();
+                    cycle.sort();
+                    if !cycles.contains(&cycle) {
+                        cycles.push(cycle);
+                    }
+                } else if !done.contains(&target) {
+                    stack.push((target, 0));
+                }
+            } else {
+                done.insert(node.clone());
+                on_path.remove(&node);
+                path.pop();
+            }
+        }
+    }
+    cycles
+}
+
+/// How each accepted decision is reached from the operative record (item 26,
+/// Decision hatching pattern). `registry` is `conventions.md`'s decision
+/// registry — passed in because instance registries are not the graph's to
+/// read. Sorted by rel; drafts stay out (an unaccepted decision is still
+/// being authored).
+#[derive(Debug)]
+pub struct DecisionReach {
+    pub rel: String,
+    /// The accepted successor whose `supersedes:` names this decision.
+    pub superseded_by: Option<String>,
+    /// Live authored artifacts outside `decisions/` citing it — a path ref,
+    /// a `decision NNNN` mention, or a plan's `decisions:` entry (globs
+    /// count every decision they match).
+    pub cited_by: Vec<String>,
+    /// Declares `Standing guidance: none` in its own body.
+    pub inert: bool,
+    /// Listed in the decision registry.
+    pub registered: bool,
+}
+
+impl DecisionReach {
+    /// Live but reachable from nothing — the item-26 judgment queue.
+    pub fn unreachable(&self) -> bool {
+        self.superseded_by.is_none() && self.cited_by.is_empty() && !self.inert && !self.registered
+    }
+}
+
+pub fn decision_reach(tree: &Tree, derived: &Derived, registry: &[String]) -> Vec<DecisionReach> {
+    let path_re = regex::Regex::new(r"decisions/\d{4}-[A-Za-z0-9_-]+\.md").unwrap();
+    let mention_re = regex::Regex::new(r"(?i)\bdecision\s+(\d{4})\b").unwrap();
+    let inert_re = regex::Regex::new(r"(?i)standing guidance:\s*none").unwrap();
+
+    let decisions: Vec<&crate::tree::Artifact> = {
+        let mut v: Vec<_> = tree
+            .by_kind(Kind::Decision)
+            .filter(|a| a.status().as_deref() == Some("accepted"))
+            .collect();
+        v.sort_by(|a, b| a.rel.cmp(&b.rel));
+        v
+    };
+
+    let mut cited: HashMap<String, Vec<String>> = HashMap::new();
+    for a in &tree.artifacts {
+        if a.kind == Kind::Decision || a.archived || a.provenance().as_deref() != Some("authored") {
+            continue;
+        }
+        let mut hits: HashSet<String> = HashSet::new();
+        for m in path_re.find_iter(&a.text) {
+            hits.insert(m.as_str().to_string());
+        }
+        for c in mention_re.captures_iter(&a.text) {
+            let prefix = format!("decisions/{}-", &c[1]);
+            for d in &decisions {
+                if d.rel.starts_with(&prefix) {
+                    hits.insert(d.rel.clone());
+                }
+            }
+        }
+        if a.kind == Kind::Plan {
+            for r in
+                a.fm.as_ref()
+                    .and_then(|fm| fm.get_list("decisions"))
+                    .unwrap_or_default()
+            {
+                if let Some(prefix) = r.split_once('*').map(|(p, _)| p) {
+                    for d in &decisions {
+                        if d.rel.starts_with(prefix) {
+                            hits.insert(d.rel.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for hit in hits {
+            cited.entry(hit).or_default().push(a.rel.clone());
+        }
+    }
+
+    let superseded = derived.superseded_decisions();
+    decisions
+        .iter()
+        .map(|d| {
+            let mut cited_by = cited.get(&d.rel).cloned().unwrap_or_default();
+            cited_by.sort();
+            cited_by.dedup();
+            DecisionReach {
+                rel: d.rel.clone(),
+                superseded_by: superseded.get(d.rel.as_str()).map(|s| s.to_string()),
+                cited_by,
+                inert: inert_re.is_match(d.body()),
+                registered: registry.contains(&d.rel),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

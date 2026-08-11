@@ -16,6 +16,7 @@ pub mod backend;
 pub mod channels;
 pub mod client;
 pub mod config;
+pub mod marker;
 #[cfg(unix)]
 pub mod herdr;
 pub mod mcp;
@@ -204,6 +205,16 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     let mut state = State::load(&root);
     let mut backend = Backend::connect(&root, &rt.cfg, opts.once)?;
 
+    // A crash removed no marker lines and adopted sessions should keep
+    // theirs: reconcile `.trellis/acting-role` against what is actually in
+    // flight before the first tick can spawn anything.
+    if !rt.dry_run {
+        let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
+        if let Err(e) = marker::reconcile(&root, &live) {
+            note(&format!("acting-role marker reconcile failed: {e}"));
+        }
+    }
+
     if !opts.once {
         signals::install();
     }
@@ -374,13 +385,16 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
         }
         match &due.task {
             Task::Ritual { name, executor } => {
-                let vars = tmpl::Vars::new().set("ritual", name.clone());
+                let vars = tmpl::Vars::new()
+                    .set("ritual", name.clone())
+                    .set("escalate_to", crate::dispatch::escalate_to(&tree, executor));
                 outcome.record(fire(
                     rt,
                     state,
                     backend,
                     &due.task.key(),
                     &format!("ritual {name} ({executor})"),
+                    executor,
                     &rt.cfg.prompts.ritual,
                     &rt.cfg.harness.ritual_cmd,
                     &rt.cfg.harness.herdr.ritual_args,
@@ -389,18 +403,29 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
                 ));
             }
             Task::DispatchScan => {
-                let report = dispatch::scan(&tree, &rt.shared.sessions);
+                let derived = crate::graph::derive(&tree);
+                let report = dispatch::scan(&tree, &derived, &rt.shared.sessions);
                 for w in &report.warnings {
                     note(&format!("dispatch: {w}"));
                 }
                 for h in &report.held {
                     note(&format!(
-                        "holding {} — awaits {} (status: {}); it stays ready and re-enters the scan next tick",
+                        "holding {} — {}; it stays ready and re-enters the scan next tick",
                         h.plan,
-                        h.awaits,
-                        h.target_status.as_deref().unwrap_or("missing")
+                        h.describe()
                     ));
                     held.push(h.plan.clone());
+                }
+                for h in &report.handoffs {
+                    note(&format!(
+                        "handoff: {} → {} is human-held{} — no session; the work awaits its holder",
+                        h.plan,
+                        h.owner,
+                        h.holder_ref
+                            .as_deref()
+                            .map(|r| format!(" ({r})"))
+                            .unwrap_or_default()
+                    ));
                 }
                 warnings = report.warnings.clone();
 
@@ -409,6 +434,7 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
                     let vars = tmpl::Vars::new()
                         .set("plan", item.plan.clone())
                         .set("owner", item.owner_short.clone())
+                        .set("escalate_to", item.escalate_to.clone())
                         .set("complexity", item.complexity.clone())
                         .set("model", item.model.clone())
                         .set("effort", item.effort.clone())
@@ -419,6 +445,7 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
                         backend,
                         &state::key_plan(&item.plan),
                         &format!("act {} → {}", item.plan, item.owner),
+                        &item.owner,
                         &rt.cfg.prompts.act,
                         &rt.cfg.harness.act_cmd,
                         &rt.cfg.harness.herdr.act_args,
@@ -512,6 +539,7 @@ fn fire(
     backend: &mut Backend,
     key: &str,
     label: &str,
+    role: &str,
     prompt_template: &str,
     argv_template: &[String],
     herdr_args_template: &[String],
@@ -599,6 +627,13 @@ fn fire(
     match backend.spawn(key, label, &launch, token.clone()) {
         Ok(log) => {
             note(&format!("started {label} → logs/{log}"));
+            // The runtime stamps the acting-role marker (decision 0045): the
+            // session finds attribution in place instead of spending a turn
+            // creating it. Attribution, not a lock — a failure is said, not
+            // fatal.
+            if let Err(e) = marker::add(&rt.root, role, &today.to_string(), key) {
+                note(&format!("{label}: acting-role marker write failed: {e}"));
+            }
             state.fired(key, today, Some(log));
             Outcome::Started
         }
@@ -647,6 +682,12 @@ fn render(
 fn retire(rt: &Runtime, done: &spawn::Finished) {
     if let Some(token) = &done.token {
         rt.shared.inbox.retire(token);
+    }
+    if let Err(e) = marker::remove(&rt.root, &done.key) {
+        note(&format!(
+            "{}: acting-role marker removal failed: {e}",
+            done.label
+        ));
     }
 }
 

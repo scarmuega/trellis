@@ -113,7 +113,10 @@ impl Drop for Daemon {
     }
 }
 
-const FM: &str = "---\nprovenance: authored\nowner: org/founder\n";
+// The subdomain keeps ready fixtures past the scan's mechanical readiness
+// precheck (decision 0045).
+const FM: &str =
+    "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 const RECORD: &str = "
 ## Escalations
 

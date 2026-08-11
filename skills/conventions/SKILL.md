@@ -39,7 +39,9 @@ economics.md      pricing, revenue model, unit economics — narrates the
 metrics/          definitions.md (authored) + actuals/ (generated or state-refs)
 plans/            time-bounded execution: status + type + refs; awaits: edges
                   sequence plans (dispatch holds until targets retire)
-decisions/        ADRs, append-only, NNNN-{slug}.md
+decisions/        ADRs, append-only, NNNN-{slug}.md — the why-trail: standing
+                  guidance hatches into the governing artifact; a successor's
+                  supersedes: names what it replaces (live set = the register)
 solution/         context-map.md + {bounded context}/ (README, glossary,
                   contracts/, skills/, deployment units)
 org/              {role}/ = mandate.md (always local) + holder/ (agent package:
@@ -69,7 +71,9 @@ archive/          the terminal tier: this same hierarchy at archive/{live path},
 | Big effort needing independently-managed pieces | sibling `plans/{parent}-{piece}.md` files + an umbrella plan whose body indexes them + a registered family tag + `awaits:` edges between pieces where order matters — never a `plans/{plan}/` folder |
 | Ordering between plans — advance B only after A finishes | `awaits:` in B's frontmatter — dispatch holds B (still `ready`) until A retires; never umbrella prose alone, never `status: blocked` |
 | A blocker, or anything needing a human's decision | an escalation record — fenced `yaml` under `## Escalations` in the artifact it concerns, written by that artifact's owner; never a forge issue, never a separate kind |
-| "Why we chose X" | `decisions/NNNN-{slug}.md` |
+| "Why we chose X" | `decisions/NNNN-{slug}.md` — the why stays here; what X obliges goes to the artifact that governs it |
+| Standing guidance a decision established | the artifact that governs the behavior — `conventions.md`, a mandate, a BC README or `contracts/`, a `rituals.md` row — citing `(decision NNNN)`; never left only in `decisions/` (Decision hatching pattern) |
+| "Which decisions are current?" | `trellis view decisions` or the register in `metrics/actuals/` — a reading over `supersedes:` edges, never a read of all of `decisions/` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
 | "Context-free" procedure | it isn't: a convention (`conventions.md`), a ritual (`rituals.md`), a runtime concern, or a missing BC |
@@ -104,7 +108,10 @@ browse by (spec rule 13, decision 0042).
 4. Mandates are always local; identities are portable, authority is not.
 5. State lives elsewhere; never reason from `actuals/` older than the ritual
    interval.
-6. Decisions are append-only; supersede, never edit.
+6. Decisions are append-only; supersede, never edit — the successor's
+   `supersedes:` names every decision it fully replaces (liveness is computed,
+   partial influence stays prose), and a decision is memory, not a manual: its
+   standing guidance lands in the governing artifact, citing it.
 7. Directories hold kinds; groupings are tags. New directory ⇒ new artifact kind
    (own frontmatter, lifecycle, owner). Linkability alone never justifies one. A
    path encodes only what is fixed for an artifact's life — kind, provenance —
@@ -222,7 +229,19 @@ Resolution is the owner's edit: answer beneath the record, flip
 plan owes an open record (lint item 24); nothing is deleted.
 
 **Record a decision**: next NNNN, context/decision/consequences/alternatives.
-Superseding = new file that names the one it replaces.
+In the same change, land the standing guidance it establishes in the artifact
+that governs the behavior, citing `(decision NNNN)` — a decision establishing
+nothing standing says `Standing guidance: none.` in its Consequences.
+Superseding = new file carrying `supersedes:` with every decision it fully
+replaces (partial influence stays prose in its Consequences).
+
+**Compact a decision pile** (a domain whose guidance lives only in the trail):
+the owner walks `decisions/` newest→oldest classifying each — still-operative,
+superseded-in-prose, or inert. Hatch still-operative guidance into its
+governing artifact with a citation; record prose-era supersessions and inert
+classifications in `conventions.md`'s decision registry (judgment made once —
+the frozen files carry no marks); record the codification as one new decision.
+`trellis lint --items 26` names the unreachable set before and after.
 
 **Before creating any new directory**: apply rule 7's promotion test. Default
 answer is body content with a stable anchor.
@@ -241,5 +260,6 @@ incomplete pivots, plan refs resolve, plan sequencing edges resolve and stay
 acyclic, context-map relations back their language claims, escalation records
 well-formed and every blocked plan stating its blocker, mandates have
 authority, append-only
-decisions, registered tags, no secrets, no grouping directories, actuals
-freshness).
+decisions, decision supersession well-formed and accepted decisions reachable
+from the operative record, registered tags, no secrets, no grouping
+directories, actuals freshness).

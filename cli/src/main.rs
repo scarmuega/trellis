@@ -118,7 +118,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: DispatchCmd,
     },
-    /// Generated views (board | codeowners | tags | orgchart | escalations)
+    /// Generated views (board | plan-graph | codeowners | tags | orgchart | escalations | decisions)
     View {
         name: String,
         /// Write to the canonical path (or --out) instead of stdout
@@ -802,7 +802,8 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             for spec in &map {
                 sessions.apply(spec)?;
             }
-            let report = dispatch::scan(&tree, &sessions);
+            let derived = graph::derive(&tree);
+            let report = dispatch::scan(&tree, &derived, &sessions);
             match cli.format {
                 Format::Json => print_json(&report),
                 Format::Text => {
@@ -810,11 +811,17 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                         println!("warning: {w}");
                     }
                     for h in &report.held {
+                        println!("held: {} — {}", h.plan, h.describe());
+                    }
+                    for h in &report.handoffs {
                         println!(
-                            "held: {} — awaits {} (status: {})",
+                            "handoff: {} → {} (human holder{})",
                             h.plan,
-                            h.awaits,
-                            h.target_status.as_deref().unwrap_or("missing")
+                            h.owner,
+                            h.holder_ref
+                                .as_deref()
+                                .map(|r| format!(": {r}"))
+                                .unwrap_or_default()
                         );
                     }
                     for d in &report.dispatch {
@@ -823,7 +830,10 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                             d.plan, d.owner, d.complexity, d.model, d.effort, d.budget_usd
                         );
                     }
-                    if report.dispatch.is_empty() && report.held.is_empty() {
+                    if report.dispatch.is_empty()
+                        && report.held.is_empty()
+                        && report.handoffs.is_empty()
+                    {
                         println!("(no ready plans)");
                     }
                 }

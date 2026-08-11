@@ -18,6 +18,7 @@ pub mod graph;
 pub mod lint;
 pub mod markdown;
 pub mod model;
+pub mod org;
 pub mod plan_ops;
 pub mod readiness;
 pub mod refs;
