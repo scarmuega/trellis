@@ -140,10 +140,13 @@ browse by (spec rule 13, decision 0042).
 
 ## Procedures
 
-**Scaffold a domain**: copy the plugin's `${CLAUDE_PLUGIN_ROOT}/template/`; fill `market.md`,
-`brand.md`, `economics.md` first; replace `<owner>` placeholders; adjust
-`conventions.md` registries and boundary guarantees; date and pin
-`decisions/0000-adopt-trellis.md`; delete `template/README.md`.
+**Scaffold a domain**: `trellis scaffold <dir> --owner <role>` — it copies the
+template, substitutes the `<owner>` placeholders, and dates
+`decisions/0000-adopt-trellis.md`. Then the judgment half: fill `market.md`,
+`brand.md`, `economics.md` first; adjust `conventions.md` registries and
+boundary guarantees. Without the binary: copy
+`${CLAUDE_PLUGIN_ROOT}/template/` and do the substitutions by hand; delete
+`template/README.md`.
 
 **Advance a strategy**: create `strategy/{name}.md` at `status: raw` — `need:`
 pointing at a founding-map `## N-{slug}` anchor, `differentiation:`. Advance on
@@ -190,6 +193,14 @@ harness's plan mode gathers research and approval, then the artifact persists to
 Without the command: draft manually per the instance's plan schema, registering
 new types and tags in `conventions.md` first.
 
+**Advance a plan's lifecycle**: the CLI owns the transitions and refuses
+illegal ones — `trellis plan release` (draft → ready, gated on the mechanical
+readiness share), `claim` (ready → active, refused while held), `block`
+(→ blocked, writing the escalation record the status owes), `unblock`
+(blocked → ready), `retire` (the owner's verdict). `trellis plan list` and
+`trellis readiness <plan>` are the reads. Hand-edit the `status:` field only
+where the binary is absent.
+
 **Challenge the plans**: `/trellis:focus [scope]` where the binding offers it —
 evaluates `ready`, `active`, and `blocked` plans against the problem they answer to,
 metrics as evidence (canonical checklist:
@@ -218,13 +229,17 @@ lives in the instance's runtime binding. Sequencing works the same way: `awaits:
 on a released plan holds its dispatch until every named plan retires. Not a template role: it operates the
 business, not the model.
 
-**Raise an escalation**: write a record into the `## Escalations` section of the
-artifact that carries the problem — `raised`, `by`, `to` (the raiser's
-`escalate-to:`), `status: open`, and the question asked of a human (schema in the
-instance's `conventions.md`). Only that artifact's `owner:` writes one, so a role
-whose mandate does not reach the artifact reports the finding and the owner
-transcribes it — this is why `org/focus` and `org/steward` escalate by reporting.
-Resolution is the owner's edit: answer beneath the record, flip
+**Raise an escalation**:
+`trellis escalate add <artifact> --by <role> --asks "<the question>"` — the CLI
+owns the record schema, derives `to:` from the raiser's mandate, and refuses
+targets the raiser must not write; `trellis escalate resolve` closes one, and
+`trellis plan block` bundles the record with the status flip a blocked plan
+owes. Without the binary, the record is a fenced `yaml` block under
+`## Escalations` in the artifact that carries the problem (schema in the
+instance's `conventions.md`). Only that artifact's `owner:` writes one, so a
+role whose mandate does not reach the artifact reports the finding and the
+owner transcribes it — this is why `org/focus` and `org/steward` escalate by
+reporting. Resolution is the owner's edit: answer beneath the record, flip
 `status: resolved`, and make whatever act it unblocks separately. A `blocked`
 plan owes an open record (lint item 24); nothing is deleted.
 
@@ -251,15 +266,8 @@ answer is body content with a stable anchor.
 
 ## Lint checklist
 
-For audits, run the canonical checklist at
-`${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` — the same set the
-`trellis:steward` agent enforces (frontmatter validity, subdomain derivation
-edges, strategy validity, orphan detection, funding-edge validity, economic
-orphans, capture points, core-ranking, technology-free founding map,
-incomplete pivots, plan refs resolve, plan sequencing edges resolve and stay
-acyclic, context-map relations back their language claims, escalation records
-well-formed and every blocked plan stating its blocker, mandates have
-authority, append-only
-decisions, decision supersession well-formed and accepted decisions reachable
-from the operative record, registered tags, no secrets, no grouping
-directories, actuals freshness).
+For audits: `trellis lint --format json` runs every mechanical item and its
+`judgment` array names exactly what remains for a reader; the canonical
+checklist — the single source for both halves — is
+`${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md`, the same set the
+`trellis:steward` agent enforces.

@@ -31,6 +31,10 @@ pub const PLACEHOLDERS: &[&str] = &[
     // deriving. Falls back to the role itself when the mandate is silent, so
     // it always renders.
     "escalate_to",
+    // The plan's effective automation class, computed by the scan — the
+    // derivation whose instructions used to cost the session the whole
+    // conventions read. Empty for rituals, which carry no plan.
+    "automation",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

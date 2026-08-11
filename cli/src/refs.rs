@@ -107,10 +107,22 @@ pub fn resolve(raw: &str, tree: &Tree) -> Result<(), String> {
                 };
                 if let Some(anchor) = anchor {
                     let want = slugify(&anchor);
-                    // Slug match: heading level and case don't matter.
-                    let hit = artifact.headings.iter().any(|h| h.slug == want);
+                    // Slug match: heading level and case don't matter. A
+                    // first-column table cell is an anchor too — the kernel's
+                    // own template defines metrics as rows of a definitions
+                    // table, and the plan schema points `metrics:` refs at
+                    // them, so a resolver that only reads headings fails the
+                    // template's own convention.
+                    let hit = artifact.headings.iter().any(|h| h.slug == want)
+                        || crate::markdown::tables(&artifact.text, 0)
+                            .iter()
+                            .flat_map(|t| &t.rows)
+                            .filter_map(|(cells, _)| cells.first())
+                            .any(|cell| slugify(cell) == want);
                     if !hit {
-                        return Err(format!("{path} has no heading matching #{anchor}"));
+                        return Err(format!(
+                            "{path} has no heading or table row matching #{anchor}"
+                        ));
                     }
                 }
                 Ok(())

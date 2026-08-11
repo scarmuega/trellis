@@ -16,10 +16,13 @@ enforce conventions and keep generated views fresh; you never author or overrule
 2. Read `org/steward/mandate.md` in that root. It defines your authority and its
    limits (`scope`, `authority`, `escalate-to`). Act only within it — if it grants
    nothing beyond flagging, you flag and escalate; you never merge, fix, or override.
-3. Load the `trellis:conventions` skill if available; otherwise read the root's
-   `conventions.md` and the spec ref in `decisions/0000-adopt-trellis.md`. The
-   instance's `conventions.md` is authoritative over general convention where they
-   differ.
+3. Read what the invoked ritual actually needs from the root's
+   `conventions.md` — the **Retention** horizon for the archive sweep, the
+   **Carried-content registry** for scope — and the cadences in `rituals.md`.
+   Not the whole file and not the `trellis:conventions` skill: the mechanical
+   derivations it teaches are the CLI's job (`trellis lint` reports scope,
+   the registries drive `archive --sweep`), and the instance's `conventions.md`
+   stays authoritative where you do read it.
 
 ## Then, run the invoked ritual
 
@@ -51,9 +54,15 @@ artifact already carries an open record saying the same thing.
 - **Metric sweep** — compare `metrics/actuals/` against targets in
   `metrics/definitions.md`. Report every plan whose `metrics:` refs deviate to
   its owner, who annotates the plan; you never write into it. Never reason from
-  `actuals/` older than the freshness window in `rituals.md`.
+  `actuals/` older than the freshness window in `rituals.md` —
+  `trellis lint --items 12` computes the staleness check for you; the
+  target-vs-actual join is still yours by hand.
 - **Derivation sweep** — find commits touching `market.md`, `strategy/`, or a
-  context's `contracts/`, and plans retired, since the last sweep. For each
+  context's `contracts/`, and plans retired, since the last sweep. The standing
+  classifications are already computed: `trellis lint --items 3,14,17,19,20,21`
+  names the orphaned subdomains, missing derivation edges, incomplete pivots,
+  and economic orphans mechanically — walk its findings before reading anything
+  by hand; what stays yours is the change-driven fan-out below. For each
   change, escalate every downstream
   artifact — the
   subdomains induced by an edited or retired strategy, `context-map.md`, plans
@@ -91,15 +100,13 @@ artifact already carries an open record saying the same thing.
   rewrite no refs — a ref names the live path on either side of the move.
   Never file `decisions/`: append-only shared memory is superseded, not
   retired.
-- **Plan dispatch** — enumerate plans with `status: ready`, skipping any whose
-  `awaits:` targets are not all `retired` (held — declared sequencing, never a
-  blocker: the plan stays `ready` and clears itself), and, for each, start a
-  *separate* `/trellis:act {owner} advance {plan}` invocation so the work runs
-  under that owner's authority (an agent-held owner advances it, a human-held
-  owner receives a handoff; the owner's act flips ready→active on pickup). You
-  only start the owner's act — you never do the plan work yourself and you flip
-  no status. Where the binding runs the scan itself — the `trellis serve`
-  daemon does — you are not invoked for it at all.
+- **Plan dispatch** — where the binding runs the scan itself (the
+  `trellis serve` daemon does) you are not invoked for this at all. Invoked by
+  hand: run `trellis dispatch scan` — its holds, handoffs, and readiness
+  verdicts are the scan's output, never yours to recompute — and start one
+  *separate* `/trellis:act {owner} advance {plan}` per dispatch row, so the
+  work runs under that owner's authority. You only start the owner's act; you
+  never do the plan work yourself and you flip no status.
 
 ## Boundaries (hard)
 

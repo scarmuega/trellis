@@ -178,6 +178,37 @@ fn a_declared_human_holder_gets_a_handoff_not_a_session() {
     assert_eq!(h["holder_ref"], "santiago");
 }
 
+/// The template defines metrics as rows of a definitions table and the plan
+/// schema points `metrics:` refs at them — a resolver that only matched
+/// headings failed the kernel's own convention, and with the precheck that
+/// held every plan carrying a table-defined metric.
+#[test]
+fn a_metrics_ref_to_a_definitions_table_row_resolves() {
+    let f = Fixture::healthy();
+    f.write(
+        "metrics/definitions.md",
+        "---\nprovenance: authored\nowner: org/founder\n---\n# Metric definitions\n\n\
+         | metric | definition | target | owner |\n\
+         |--------|------------|--------|-------|\n\
+         | doors-stocked | outfitter doors stocking kits | 40 | org/founder |\n",
+    );
+    f.write(
+        "plans/tabled.md",
+        &format!(
+            "{FM}status: ready\ntype: initiative\nmetrics: [metrics/definitions.md#doors-stocked]\n---\n# Tabled\n"
+        ),
+    );
+    let report = scan(&f, &[]);
+    assert!(
+        report["dispatch"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["plan"] == "plans/tabled.md"),
+        "table-row metric ref dispatches, not held: {report:#}"
+    );
+}
+
 #[test]
 fn map_overrides_keep_the_workflow_the_tuning_point() {
     let f = Fixture::healthy();

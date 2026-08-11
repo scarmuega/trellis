@@ -246,12 +246,13 @@ impl Default for Prompts {
         Prompts {
             act: "/trellis:act {owner} advance {plan} toward its objective: make the next \
                   increment of progress within your authority. Dispatched: the runtime has \
-                  pre-verified the mechanical readiness items and this plan's holds, and \
-                  the acting-role marker is already stamped — evaluate only the judgment \
-                  items. Claim with `trellis plan claim {plan}`; on an uncleared blocker \
-                  `trellis plan block {plan} --by {owner} --asks …` (escalations go to \
-                  {escalate_to}); write escalation records with `trellis escalate add`; \
-                  leave a trail."
+                  pre-verified the mechanical readiness items and this plan's holds, the \
+                  acting-role marker is already stamped, and the change mechanics are \
+                  computed — {automation}; core never lands, it is proposed. Evaluate only \
+                  the judgment items. Claim with `trellis plan claim {plan}`; on an \
+                  uncleared blocker `trellis plan block {plan} --by {owner} --asks …` \
+                  (escalations go to {escalate_to}); write escalation records with \
+                  `trellis escalate add`; leave a trail."
                 .into(),
             ritual: "/trellis:ritual {ritual}".into(),
         }

@@ -44,6 +44,37 @@ here and a matching `vx.y.z` git tag.
 
 ### Changed
 
+- **The coder agent commands instead of explains (follows 0045):** the scan
+  now computes the plan's change mechanics — a new `{automation}` placeholder
+  carries each subdomain's effective class and the strictest one into the act
+  prompt (`DispatchItem.automation`, visible on `/api/dispatch`; empty for
+  rituals) — so `agents/coder.md` stops teaching the derivation and stops
+  loading the conventions skill for it. The rewrite (164 → 125 lines) reads
+  only the mandate, the plan, and three named `conventions.md` sections
+  (boundary guarantees, runtime binding, secrets policy); the flip/record
+  mechanics the CLI enforces are commanded in one line each rather than
+  re-explained; the boundaries keep only what judgment can violate, with a
+  note that the gate holds the mechanical ones. The judgment-dense sections —
+  contracts as published language, verify-before-done, PR trail, domain state
+  never in the proposal, residue discipline — are kept whole: those are
+  behaviors, not derivable facts.
+
+- **The steward and the conventions skill stop re-deriving what the CLI
+  owns:** the steward's plan-dispatch section collapses to "run
+  `trellis dispatch scan`, act each row" (the daemon case never invokes it at
+  all); its bind step reads the two `conventions.md` registries it needs
+  instead of loading the whole skill; the metric sweep points at
+  `trellis lint --items 12` for freshness and the derivation sweep at
+  `--items 3,14,17,19,20,21` for the standing classifications, leaving the
+  change-driven fan-out — for now — by hand. The skill's procedures catch up
+  with the verbs: scaffold leads with `trellis scaffold`, escalations with
+  `trellis escalate add/resolve`, a new lifecycle paragraph names
+  `plan release/claim/block/unblock/retire`, and the lint-checklist section
+  is two lines pointing at `trellis lint` instead of a prose re-enumeration.
+  The two remaining manual sweeps are chartered as draft plans
+  (`plans/sweep-derivation-command.md`, `plans/metrics-diff-command.md`) —
+  the same extraction 0045 made for readiness, awaiting their own release.
+
 - **Default complexity tiers retuned one notch down:** `mechanical` is
   `opus:medium` (was `opus:high`), `standard` is `opus:high` (was
   `opus:xhigh`); `deep` stays `fable:xhigh`. Budgets unchanged. A measured
@@ -52,6 +83,15 @@ here and a matching `vx.y.z` git tag.
   binding's, and instances retune in `runtime.toml` as ever (decision 0032).
 
 ### Fixed
+
+- **A `#anchor` ref resolves to a first-column table row, not only a
+  heading.** The kernel's own template defines metrics as rows of the
+  definitions table and the plan schema points `metrics:` refs at them, but
+  `refs::resolve` matched headings only — so every domain that followed the
+  template's format failed lint item 4 and readiness item 3 on refs that were
+  correct, which the 0045 precheck then turned into held plans (observed
+  live: 52 plans in one domain, one table). The eval fixtures never caught it
+  because they define metrics as headings — both shapes resolve now.
 
 - **The herdr backend no longer mistakes a dropped prompt for a finished
   turn.** Observed live: herdr accepts `agent.prompt` while Claude Code is

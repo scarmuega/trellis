@@ -22,10 +22,38 @@ pub struct DispatchItem {
     /// mandate is silent — a declared field the session would otherwise
     /// spend a read deriving (decision 0045).
     pub escalate_to: String,
+    /// The plan's effective automation class, rendered per subdomain — the
+    /// derivation the coder used to load the whole conventions skill for.
+    pub automation: String,
     pub complexity: String,
     pub model: String,
     pub effort: String,
     pub budget_usd: f64,
+}
+
+/// The plan's change mechanics as one line: each subdomain's effective class
+/// and the strictest one, which is what binds. The precheck (readiness item
+/// 4) has already guaranteed this is computable for anything dispatched; an
+/// uncomputable class reads `core` — propose, never land.
+pub fn automation_line(tree: &Tree, derived: &Derived, plan_rel: &str) -> String {
+    let subs = tree
+        .get(plan_rel)
+        .and_then(|p| p.fm.as_ref())
+        .and_then(|f| f.get_list("subdomains"))
+        .unwrap_or_default();
+    let effective = derived
+        .plan_class(tree, plan_rel)
+        .map(|c| c.as_str())
+        .unwrap_or("core");
+    let parts: Vec<String> = subs
+        .iter()
+        .map(|s| format!("{s}: {}", derived.effective_class(s).as_str()))
+        .collect();
+    match parts.len() {
+        0 => format!("effective class {effective}"),
+        1 => format!("effective class {effective} ({})", parts[0]),
+        _ => format!("effective class {effective} ({})", parts.join(", ")),
+    }
 }
 
 /// Where a role's escalations go: its mandate's `escalate-to:`, falling back
@@ -311,6 +339,7 @@ pub fn scan(tree: &Tree, derived: &Derived, map: &SessionMap) -> ScanReport {
         report.dispatch.push(DispatchItem {
             plan: plan.rel.clone(),
             escalate_to: escalate_to(tree, &owner),
+            automation: automation_line(tree, derived, &plan.rel),
             owner_short,
             owner,
             complexity: complexity.as_str().to_string(),

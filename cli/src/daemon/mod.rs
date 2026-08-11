@@ -387,7 +387,8 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
             Task::Ritual { name, executor } => {
                 let vars = tmpl::Vars::new()
                     .set("ritual", name.clone())
-                    .set("escalate_to", crate::dispatch::escalate_to(&tree, executor));
+                    .set("escalate_to", crate::dispatch::escalate_to(&tree, executor))
+                    .set("automation", "");
                 outcome.record(fire(
                     rt,
                     state,
@@ -435,6 +436,7 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
                         .set("plan", item.plan.clone())
                         .set("owner", item.owner_short.clone())
                         .set("escalate_to", item.escalate_to.clone())
+                        .set("automation", item.automation.clone())
                         .set("complexity", item.complexity.clone())
                         .set("model", item.model.clone())
                         .set("effort", item.effort.clone())
