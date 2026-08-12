@@ -32,6 +32,18 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Every errand is a template; the only command is act (decision 0051):**
+  `[prompts]` in `runtime.toml` becomes a name → template map, and the binary
+  embeds `commands/act.md` alone — `{procedure}` always renders the act
+  body, and what refine or ritual add on top now lives in their default
+  templates (framework-authored, instance-overridable, the `rituals.md`-row
+  precedent). Any extra `[prompts]` key is a new operator-requestable errand
+  with no recompile: `trellis dispatch request <errand> <plan>
+  "<instruction>"`, `POST /api/plans/{slug}/errands/{name}` (with `/refine`
+  as the alias the route shipped under), `GET /api/errands` feeding the
+  board's Act menu. `act` and `ritual` stay the triggers' own, never
+  requestable. Old flat `[prompts]` overrides keep working unchanged.
+
 - **The spawn prompt is a rendering of the command (decision 0050):**
   daemon-spawned sessions no longer open with a slash command only an
   installed plugin can resolve. The binary embeds `commands/act.md`,

@@ -308,12 +308,15 @@ choices:
   calls, so a role that writes code can build and test what it implements; what
   bounds it is the role's mandate, the automation class, the provenance gate, and
   the approval gate below — not a tool allowlist.
-- Plan refinement: `/trellis:refine <plan> [instruction]` interactively —
-  `act(owner, refinement)` over the plan's content, never its execution. An
-  operator may request it of the running dispatcher headlessly (`trellis
-  dispatch refine <plan> "<instruction>"`, or the board's Act menu through
-  serve's relay); the loop stays the only spawner and every gate act carries
-  still applies (decision 0048).
+- Operator errands: every spawned session is an `act` under a template from
+  `runtime.toml`'s `[prompts]` table (decision 0051) — `refine`
+  (`act(owner, refinement)` over a plan's content, never its execution) is
+  the shipped requestable one, `/trellis:refine` its interactive spelling
+  (decision 0048), and any extra `[prompts]` key this instance adds is a new
+  errand. An operator requests one of the running dispatcher headlessly
+  (`trellis dispatch request <errand> <plan> "<instruction>"`, or the
+  board's Act menu through serve's relay); the loop stays the only spawner
+  and every gate act carries still applies.
 - Status flips from the board: the drawer's status menu performs the same
   guarded lifecycle moves as `trellis plan release | claim | unblock |
   retire` — readiness gates release, holds gate claim, retired is terminal —
