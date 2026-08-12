@@ -158,12 +158,19 @@ pub fn artifact_rows(tree: &Tree) -> Vec<ArtifactRow> {
 #[derive(Debug, Serialize)]
 pub struct PlanRow {
     pub plan: String,
+    /// The body's first `#` heading — how the plan names itself, where the
+    /// path is only where it lives.
+    pub title: Option<String>,
     pub status: Option<String>,
     pub r#type: Option<String>,
     pub owner: Option<String>,
     pub complexity: Option<String>,
     /// The `awaits:` target holding this plan, when one does.
     pub held: Option<String>,
+    /// Every `awaits:` target, held or not — the plan's outgoing edges in
+    /// the sequencing DAG, so a caller can draw the graph from the census
+    /// alone. Targets are live addresses (spec rule 13).
+    pub awaits: Vec<String>,
     pub dwell_days: Option<i64>,
     pub open_escalations: usize,
     /// Filed in the terminal tier. Rows carry it rather than being dropped
@@ -185,10 +192,20 @@ pub fn plan_rows(tree: &Tree, git: &Git, derived: &Derived, today: Date) -> Vec<
                     .map(|d| dates::days_between(d, today))
             });
             PlanRow {
+                title: p
+                    .headings
+                    .iter()
+                    .find(|h| h.level == 1)
+                    .map(|h| h.text.clone()),
                 r#type: p.fm.as_ref().and_then(|f| f.get_str("type")),
                 owner: p.owner(),
                 complexity: p.fm.as_ref().and_then(|f| f.get_str("complexity")),
                 held: derived.hold(&p.rel).map(|(t, _)| t),
+                awaits: derived
+                    .plan_awaits
+                    .get(crate::tree::live_path(&p.rel))
+                    .cloned()
+                    .unwrap_or_default(),
                 dwell_days: dwell,
                 open_escalations: escalation_records(p)
                     .iter()
