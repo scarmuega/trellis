@@ -57,7 +57,7 @@ fn a_first_pass_fires_every_scheduled_row() {
         "ritual conventions lint — executed by org/steward (trellis runtime)."
     );
     let prompt = argv[1..].join("\n");
-    assert!(prompt.contains("Find the row"), "{prompt}");
+    assert!(prompt.contains("read its row"), "{prompt}");
     assert!(prompt.contains("Bind to the domain root"), "{prompt}");
 
     let state = f.rituals_state();

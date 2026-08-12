@@ -304,9 +304,21 @@ enum DispatchCmd {
         #[arg(long, value_name = "SPEC")]
         map: Vec<String>,
     },
-    /// Ask the running dispatcher to spawn one refine session — the plan's
-    /// owner reshaping its content per the instruction, never executing it
-    /// (decision 0048)
+    /// Ask the running dispatcher to spawn one errand session over a plan —
+    /// any [prompts] entry that is not a trigger's (decision 0051)
+    Request {
+        /// The errand — a [prompts] key ("refine", or one this root added)
+        errand: String,
+        /// The plan (plans/x.md, plans/x, or x)
+        plan: String,
+        /// What to do (e.g. "split the scope")
+        instruction: String,
+        /// Reach a daemon at this host:port instead of the one on this root
+        #[arg(long, value_name = "ADDR")]
+        addr: Option<String>,
+    },
+    /// Alias for `dispatch request refine` — the shipped errand: the plan's
+    /// owner reshaping its content, never executing it (decision 0048)
     Refine {
         /// The plan (plans/x.md, plans/x, or x)
         plan: String,
@@ -847,16 +859,31 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }),
 
         Cmd::Dispatch {
-            cmd:
+            cmd: cmd @ (DispatchCmd::Request { .. } | DispatchCmd::Refine { .. }),
+        } => {
+            // `dispatch refine` is `dispatch request refine` by another name.
+            let (errand, plan, instruction, addr) = match cmd {
+                DispatchCmd::Request {
+                    errand,
+                    plan,
+                    instruction,
+                    addr,
+                } => (errand, plan, instruction, addr),
                 DispatchCmd::Refine {
                     plan,
                     instruction,
                     addr,
-                },
-        } => {
+                } => ("refine".to_string(), plan, instruction, addr),
+                _ => unreachable!(),
+            };
             let root = Root::discover(cli.root.as_deref())?.path;
-            let outcome =
-                daemon::client::refine(&root, addr.as_deref(), &plan, &instruction)?;
+            let outcome = daemon::client::request_errand(
+                &root,
+                addr.as_deref(),
+                &errand,
+                &plan,
+                &instruction,
+            )?;
             match cli.format {
                 Format::Json => print_json(&outcome),
                 Format::Text => {
@@ -868,7 +895,8 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                             .to_string()
                     };
                     println!(
-                        "requested: {} → {} ({}, {} / {} / ${})",
+                        "requested: {} {} → {} ({}, {} / {} / ${})",
+                        get("errand"),
                         get("plan"),
                         get("owner"),
                         get("complexity"),

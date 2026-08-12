@@ -1,7 +1,9 @@
-//! Refine: an operator asks a plan's owner to reshape its content, and the
-//! dispatch loop — still the only spawner — fires the session (decision
-//! 0048). The route is honored locally on the dispatcher's socket, relayed
-//! by serve, and every other non-GET stays refused.
+//! Errand requests: an operator asks a plan's owner to run a configured
+//! errand over it, and the dispatch loop — still the only spawner — fires
+//! the session (decisions 0048, 0051). `refine` is the shipped errand and
+//! `/refine` its route alias; any extra `[prompts]` key is a new errand with
+//! no recompile. Honored locally on the dispatcher's socket, relayed by
+//! serve, every other non-GET refused.
 
 mod common;
 
@@ -289,7 +291,7 @@ fn the_cli_requests_and_reports_the_outcome() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
     assert!(
-        stdout.contains("requested: plans/reshape-me.md → org/founder"),
+        stdout.contains("requested: refine plans/reshape-me.md → org/founder"),
         "{stdout}"
     );
 
@@ -337,4 +339,82 @@ fn post(port: u16, path: &str, body: &str) -> (u16, String) {
 fn get(port: u16, path: &str) -> (u16, serde_json::Value) {
     let (code, text) = request(port, "GET", path, "");
     (code, serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+}
+
+/// The refining fixture plus one instance-defined errand — the whole point
+/// of decision 0051: a new errand is a config entry, not a recompile.
+fn errand_fixture() -> Fixture {
+    let f = refining_fixture();
+    let existing = f.read("runtime.toml");
+    f.write(
+        "runtime.toml",
+        &format!(
+            "{existing}\n[prompts]\naudit = \"\"\"audit {{plan}} as {{owner}} (trellis runtime).\n\nThe ask, verbatim: {{instruction}}\n\n{{procedure}}\"\"\"\n"
+        ),
+    );
+    f
+}
+
+#[test]
+fn an_instance_defined_errand_is_requestable_and_spawns() {
+    let f = errand_fixture();
+    let daemon = Daemon::dispatch(&f);
+
+    let body = serde_json::json!({ "instruction": "take stock of the scope" }).to_string();
+    let (code, text) = post(
+        daemon.port,
+        "/api/plans/reshape-me/errands/audit",
+        &body,
+    );
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["errand"], "audit");
+    assert_eq!(v["outcome"], "requested");
+
+    let argv = until("the audit session to start", || {
+        f.invocations().into_iter().next()
+    });
+    assert_eq!(
+        argv[0],
+        "audit plans/reshape-me.md as founder (trellis runtime)."
+    );
+    let prompt = argv.join("\n");
+    assert!(prompt.contains("verbatim: take stock of the scope"), "{prompt}");
+    assert!(prompt.contains("Bind to the domain root"), "{prompt}");
+}
+
+#[test]
+fn unknown_and_trigger_errands_are_refused_and_the_list_is_served() {
+    let f = errand_fixture();
+    let daemon = Daemon::dispatch(&f);
+
+    let body = serde_json::json!({ "instruction": "do a thing" }).to_string();
+    let (code, text) = post(daemon.port, "/api/plans/reshape-me/errands/summon", &body);
+    assert_eq!(code, 404, "{text}");
+    assert!(text.contains("audit, refine"), "names the set: {text}");
+
+    // The triggers' own names are not an operator's to request.
+    for reserved in ["act", "ritual"] {
+        let (code, text) = post(
+            daemon.port,
+            &format!("/api/plans/reshape-me/errands/{reserved}"),
+            &body,
+        );
+        assert_eq!(code, 404, "{text}");
+        assert!(text.contains("trigger"), "{text}");
+    }
+
+    let (code, list) = get(daemon.port, "/api/errands");
+    assert_eq!(code, 200);
+    assert_eq!(
+        list,
+        serde_json::json!(["audit", "refine"]),
+        "requestable errands, sorted"
+    );
+
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(
+        f.invocations().is_empty(),
+        "a refusal must never reach the spawner"
+    );
 }

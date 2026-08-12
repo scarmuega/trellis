@@ -17,18 +17,34 @@ use crate::dispatch::SessionMap;
 
 pub const FILE: &str = "runtime.toml";
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub server: Server,
     pub scheduler: Scheduler,
     pub harness: Harness,
-    pub prompts: Prompts,
+    /// The errand table (decision 0051): name → prompt template. See
+    /// `default_prompts` — the three shipped entries merge under whatever
+    /// the instance declares, and any extra key is a new requestable errand.
+    pub prompts: std::collections::HashMap<String, String>,
     pub sessions: Sessions,
     /// Push transports for newly opened escalation records. The seam is
     /// 0038's; the one adapter that ships is `kind = "herdr"` (decision
     /// 0043). Any other kind is still refused rather than quietly ignored.
     pub channels: Vec<ChannelCfg>,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        RuntimeConfig {
+            server: Server::default(),
+            scheduler: Scheduler::default(),
+            harness: Harness::default(),
+            prompts: default_prompts(),
+            sessions: Sessions::default(),
+            channels: Vec::new(),
+        }
+    }
 }
 
 /// One `[[channels]]` entry.
@@ -247,80 +263,94 @@ impl Default for Harness {
     }
 }
 
-/// The three prompt templates, one per spawn kind. The defaults are
-/// self-contained (decision 0050): a per-session-unique first line — the
-/// herdr backend proves delivery by matching the prompt's opening against
-/// pane scrollback, so the first line must discriminate — the computed facts
-/// (decision 0045), and `{procedure}`, the canonical `commands/*.md` body
-/// rendered by the daemon. The contract still lives in those files, not
-/// here; an instance preferring the installed-plugin spelling sets these
-/// back to `/trellis:act {owner} …` and everything renders as before.
-#[derive(Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Prompts {
-    pub act: String,
-    pub ritual: String,
-    /// One refine session (decision 0048). The refinement contract lives in
-    /// `commands/refine.md` — carried here only as its `{procedure}`
-    /// rendering.
-    pub refine: String,
-}
+/// The bridge every default template ends on, ahead of `{procedure}`.
+const PROCEDURE_BRIDGE: &str = "The procedure below is the trellis framework's \
+     commands/act.md, rendered into this prompt so no installed plugin is \
+     required; the domain root's conventions.md is authoritative over it where \
+     they differ.";
 
-impl Default for Prompts {
-    fn default() -> Self {
-        Prompts {
-            act: "{plan} — dispatched act as {owner} (trellis runtime).\n\
-                  \n\
-                  Act as {owner}: advance {plan} toward its objective — make the next \
-                  increment of progress within your authority. The runtime has \
-                  pre-verified the mechanical readiness items and this plan's holds, the \
-                  acting-role marker is already stamped (leave it alone), and the change \
-                  mechanics are computed: {automation}; core never lands, it is proposed. \
-                  Evaluate only the judgment items. Claim with `trellis plan claim \
-                  {plan}`; on an uncleared blocker `trellis plan block {plan} --by \
-                  {owner} --asks …` (escalations go to {escalate_to}); write escalation \
-                  records with `trellis escalate add`; leave a trail.\n\
-                  \n\
-                  The procedure below is the trellis framework's commands/act.md, \
-                  rendered into this prompt so no installed plugin is required; the \
-                  domain root's conventions.md is authoritative over it where they \
-                  differ.\n\
-                  \n\
-                  {procedure}"
-                .into(),
-            ritual: "ritual {ritual} — executed by {executor} (trellis runtime).\n\
-                  \n\
-                  Execute the ritual \"{ritual}\" from rituals.md as {executor}. The \
-                  runtime resolved the executor from the row and stamped the acting-role \
-                  marker (leave it alone); escalations go to {escalate_to}. Read the row \
-                  for the procedure and its cadence — the freshness window for any \
-                  metrics involved.\n\
-                  \n\
-                  The procedure below is the trellis framework's commands/ritual.md with \
-                  the commands/act.md procedure it delegates to, rendered into this \
-                  prompt so no installed plugin is required; the domain root's \
-                  conventions.md is authoritative over it where they differ.\n\
-                  \n\
-                  {procedure}"
-                .into(),
-            refine: "refine {plan} as {owner} (trellis runtime).\n\
-                  \n\
-                  Act as {owner}: refine {plan} — reshape its content, never execute it. \
-                  The operator's instruction, verbatim: {instruction}\n\
-                  \n\
-                  The runtime has already resolved you as the plan's owner and verified \
-                  the plan is live and owned; the acting-role marker is already stamped \
-                  (leave it alone); escalations go to {escalate_to}.\n\
-                  \n\
-                  The procedure below is the trellis framework's commands/refine.md with \
-                  the commands/act.md procedure it delegates to, rendered into this \
-                  prompt so no installed plugin is required; the domain root's \
-                  conventions.md is authoritative over it where they differ.\n\
-                  \n\
-                  {procedure}"
-                .into(),
-        }
-    }
+/// The errand table (decision 0051): every spawn prompt is a template in this
+/// map, and `act` is the only procedure the binary carries — `{procedure}`
+/// always renders its body. Three framework-authored defaults ship (`act` for
+/// the dispatch loop, `ritual` for the cadence pass, `refine` as the shipped
+/// operator-requestable errand); an instance entry overrides its name, and
+/// any *additional* name is a new requestable errand — `[prompts] audit =
+/// "…"` needs no recompile. What an errand adds on top of act (the refine
+/// contract, the ritual framing) lives in its template: the default is
+/// framework-authored, and an instance that rewrites it owns the variant,
+/// exactly as with a rituals.md row.
+///
+/// Every default opens with a per-session-unique first line — the herdr
+/// backend proves delivery by matching the prompt's opening against pane
+/// scrollback, so the first line must discriminate.
+pub fn default_prompts() -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    map.insert(
+        "act".to_string(),
+        format!(
+            "{{plan}} — dispatched act as {{owner}} (trellis runtime).\n\
+             \n\
+             Act as {{owner}}: advance {{plan}} toward its objective — make the next \
+             increment of progress within your authority. The runtime has \
+             pre-verified the mechanical readiness items and this plan's holds, the \
+             acting-role marker is already stamped (leave it alone), and the change \
+             mechanics are computed: {{automation}}; core never lands, it is proposed. \
+             Evaluate only the judgment items. Claim with `trellis plan claim \
+             {{plan}}`; on an uncleared blocker `trellis plan block {{plan}} --by \
+             {{owner}} --asks …` (escalations go to {{escalate_to}}); write escalation \
+             records with `trellis escalate add`; leave a trail.\n\
+             \n\
+             {PROCEDURE_BRIDGE}\n\
+             \n\
+             {{procedure}}"
+        ),
+    );
+    map.insert(
+        "ritual".to_string(),
+        format!(
+            "ritual {{ritual}} — executed by {{executor}} (trellis runtime).\n\
+             \n\
+             Execute the ritual \"{{ritual}}\" from rituals.md as {{executor}}: read \
+             its row and take the procedure (a skill ref or inline steps) and the \
+             cadence — the freshness window for any metrics involved. The runtime \
+             resolved the executor and stamped the acting-role marker (leave it \
+             alone); escalations go to {{escalate_to}}. Deliver findings through the \
+             instance's escalation channel; an executor that owns no artifact reports \
+             each finding verbatim, addressed to the owner who transcribes it.\n\
+             \n\
+             {PROCEDURE_BRIDGE}\n\
+             \n\
+             {{procedure}}"
+        ),
+    );
+    map.insert(
+        "refine".to_string(),
+        format!(
+            "refine {{plan}} as {{owner}} (trellis runtime).\n\
+             \n\
+             Act as {{owner}}: refine {{plan}} — reshape its content, never execute \
+             it. The operator's instruction, verbatim: {{instruction}}\n\
+             \n\
+             The runtime has already resolved you as the plan's owner and verified \
+             the plan is live and owned; the acting-role marker is already stamped \
+             (leave it alone); escalations go to {{escalate_to}}.\n\
+             \n\
+             The refinement contract: the write target is the plan artifact itself, \
+             plus any new plans a split produces — nothing else; never claim the \
+             plan, never advance its contexts:, never touch the solution or the \
+             problem space. New plans from a split are filed status: draft with this \
+             plan's owner:, sequenced with awaits:. Keep frontmatter valid; preserve \
+             status: unless the instruction says otherwise. The plan's automation \
+             class still decides how the edit lands; anything beyond the owner's \
+             authority is an escalation, not an improvisation. Report what changed, \
+             plans created by a split, and escalations raised.\n\
+             \n\
+             {PROCEDURE_BRIDGE}\n\
+             \n\
+             {{procedure}}"
+        ),
+    );
+    map
 }
 
 /// `model:effort:budget` per complexity tier — the same triples
@@ -348,8 +378,14 @@ impl RuntimeConfig {
             }
             Err(e) => return Err(anyhow::anyhow!("{}: {e}", path.display())),
         };
-        let cfg: RuntimeConfig =
+        let mut cfg: RuntimeConfig =
             basic_toml::from_str(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        // The shipped errands merge under the instance's [prompts]: an entry
+        // overrides its name, an absent name keeps the default, and any extra
+        // name is a new errand (decision 0051).
+        for (name, template) in default_prompts() {
+            cfg.prompts.entry(name).or_insert(template);
+        }
         cfg.validate()
             .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
         Ok(cfg)
@@ -366,9 +402,9 @@ impl RuntimeConfig {
         }
         tmpl::check("harness.act_cmd", &self.harness.act_cmd)?;
         tmpl::check("harness.ritual_cmd", &self.harness.ritual_cmd)?;
-        tmpl::check("prompts.act", std::slice::from_ref(&self.prompts.act))?;
-        tmpl::check("prompts.ritual", std::slice::from_ref(&self.prompts.ritual))?;
-        tmpl::check("prompts.refine", std::slice::from_ref(&self.prompts.refine))?;
+        for (name, template) in &self.prompts {
+            tmpl::check(&format!("prompts.{name}"), std::slice::from_ref(template))?;
+        }
         if self.scheduler.tick_secs == 0 {
             anyhow::bail!("scheduler.tick_secs must be at least 1");
         }
@@ -496,6 +532,30 @@ mod tests {
     fn a_misspelled_key_refuses_rather_than_being_ignored() {
         let err = parse("[scheduler]\ntick_seconds = 5\n").unwrap_err();
         assert!(err.to_string().contains("tick_seconds"), "{err}");
+    }
+
+    #[test]
+    fn the_shipped_errands_merge_under_instance_prompts() {
+        let cfg = parse("[prompts]\nrefine = \"custom {plan} {instruction}\"\n").unwrap();
+        assert_eq!(cfg.prompts["refine"], "custom {plan} {instruction}");
+        // The names the instance did not touch keep their defaults.
+        assert!(cfg.prompts["act"].contains("{procedure}"));
+        assert!(cfg.prompts["ritual"].contains("{procedure}"));
+    }
+
+    #[test]
+    fn an_extra_prompt_key_is_a_new_requestable_errand() {
+        let cfg = parse("[prompts]\naudit = \"audit {plan}: {instruction}\"\n").unwrap();
+        assert_eq!(
+            crate::daemon::errands_available(&cfg),
+            vec!["audit".to_string(), "refine".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_errand_template_still_catches_misspelled_placeholders() {
+        let err = parse("[prompts]\naudit = \"{instrucion}\"\n").unwrap_err();
+        assert!(err.to_string().contains("instrucion"), "{err}");
     }
 
     #[test]

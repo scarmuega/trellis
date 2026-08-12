@@ -120,66 +120,93 @@ pub struct Shared {
     /// The read-only server overlays the dispatcher's `status.json` — it has
     /// no pass of its own to report (decision 0046).
     pub overlay_status: bool,
-    /// This process runs the dispatch loop, so its socket honors the refine
-    /// request locally (decision 0048); everywhere else the route relays or
-    /// refuses.
+    /// This process runs the dispatch loop, so its socket honors errand
+    /// requests locally (decisions 0048, 0051); everywhere else the route
+    /// relays or refuses.
     pub dispatches: bool,
-    /// Refine sessions an operator asked for, drained by the next pass. The
+    /// Errand sessions an operator asked for, drained by the next pass. The
     /// queue is memory only — a request is one-shot and best-effort, and the
     /// loop stays the only spawner.
-    pub refines: Mutex<Vec<RefineRequest>>,
-    /// Ask the loop to pass now without queueing anything. Set when a refine
+    pub errands: Mutex<Vec<ErrandRequest>>,
+    /// The operator-requestable errand names this config carries: every
+    /// `[prompts]` key except `act` and `ritual`, which belong to their
+    /// triggers (decision 0051). Sorted, computed once at startup.
+    pub errands_available: Vec<String>,
+    /// Ask the loop to pass now without queueing anything. Set when a request
     /// is refused as in-flight: `status.in_flight` is only as fresh as the
     /// last pass, so if that session actually ended, the nudged pass reaps it
     /// and the operator's retry succeeds within a second instead of a tick.
     pub nudge: std::sync::atomic::AtomicBool,
 }
 
-/// One operator ask: refine this plan's content per this instruction.
+/// The `[prompts]` keys reserved for the runtime's own triggers: the dispatch
+/// loop and the cadence pass. Everything else in the map is an operator's to
+/// request.
+pub const TRIGGER_ERRANDS: &[&str] = &["act", "ritual"];
+
+/// The requestable errand names a config carries, sorted.
+pub fn errands_available(cfg: &RuntimeConfig) -> Vec<String> {
+    let mut names: Vec<String> = cfg
+        .prompts
+        .keys()
+        .filter(|k| !TRIGGER_ERRANDS.contains(&k.as_str()))
+        .cloned()
+        .collect();
+    names.sort();
+    names
+}
+
+/// One operator ask: run this errand over this plan, per this instruction.
 #[derive(Debug, Clone)]
-pub struct RefineRequest {
+pub struct ErrandRequest {
+    /// A `[prompts]` key that is not a trigger's ("refine", or whatever the
+    /// instance added).
+    pub errand: String,
     /// The plan rel ("plans/x.md").
     pub plan: String,
     pub instruction: String,
 }
 
 impl Shared {
-    /// Queue a refine. A second request for a plan already queued replaces
-    /// its instruction — the operator changed their mind, not their target.
-    pub fn request_refine(&self, plan: &str, instruction: &str) {
-        let mut queue = self.refines.lock().unwrap();
+    /// Queue an errand. A second request for a plan already queued replaces
+    /// its errand and instruction — the operator changed their mind, not
+    /// their target, and one plan carries one session either way.
+    pub fn request_errand(&self, errand: &str, plan: &str, instruction: &str) {
+        let mut queue = self.errands.lock().unwrap();
         if let Some(existing) = queue.iter_mut().find(|r| r.plan == plan) {
+            existing.errand = errand.to_string();
             existing.instruction = instruction.to_string();
         } else {
-            queue.push(RefineRequest {
+            queue.push(ErrandRequest {
+                errand: errand.to_string(),
                 plan: plan.to_string(),
                 instruction: instruction.to_string(),
             });
         }
     }
 
-    pub fn take_refines(&self) -> Vec<RefineRequest> {
-        std::mem::take(&mut *self.refines.lock().unwrap())
+    pub fn take_errands(&self) -> Vec<ErrandRequest> {
+        std::mem::take(&mut *self.errands.lock().unwrap())
     }
 
-    pub fn has_refines(&self) -> bool {
-        !self.refines.lock().unwrap().is_empty()
+    pub fn has_errands(&self) -> bool {
+        !self.errands.lock().unwrap().is_empty()
     }
 }
 
-/// Why a refine request is refused, in the tree's own vocabulary. Checked at
-/// the route when the request arrives, and again by the pass that drains it —
-/// the tree may have changed in between, and the loop trusts only its own
-/// snapshot (decision 0048).
+/// Why an errand request is refused, in the tree's own vocabulary. Checked
+/// at the route when the request arrives, and again by the pass that drains
+/// it — the tree may have changed in between, and the loop trusts only its
+/// own snapshot (decision 0048).
 #[derive(Debug)]
-pub enum RefineRefusal {
+pub enum ErrandRefusal {
     /// Not a plan in this root, live or archived.
     NotAPlan,
     /// Retired or archived: the terminal tier is frozen content.
     Terminal,
     /// No `owner:` — no mandate to act under.
     Unowned,
-    /// The owner's holder is a declared human: refinement is theirs to do by
+    /// The owner's holder is a declared human: the work is theirs to do by
     /// hand, not a session's to run.
     Handoff {
         owner: String,
@@ -187,18 +214,18 @@ pub enum RefineRefusal {
     },
 }
 
-impl RefineRefusal {
+impl ErrandRefusal {
     pub fn describe(&self, rel: &str) -> String {
         match self {
-            RefineRefusal::NotAPlan => format!("{rel} is not a plan in this root"),
-            RefineRefusal::Terminal => {
-                format!("{rel} is in the terminal tier — refine reshapes live plans, not history")
+            ErrandRefusal::NotAPlan => format!("{rel} is not a plan in this root"),
+            ErrandRefusal::Terminal => {
+                format!("{rel} is in the terminal tier — errands work live plans, not history")
             }
-            RefineRefusal::Unowned => {
-                format!("{rel} declares no owner: — there is no mandate to refine it under")
+            ErrandRefusal::Unowned => {
+                format!("{rel} declares no owner: — there is no mandate to act under")
             }
-            RefineRefusal::Handoff { owner, holder_ref } => format!(
-                "{rel}: {owner} is human-held{} — refinement is a handoff, not a session",
+            ErrandRefusal::Handoff { owner, holder_ref } => format!(
+                "{rel}: {owner} is human-held{} — this is a handoff, not a session",
                 holder_ref
                     .as_deref()
                     .map(|r| format!(" ({r})"))
@@ -208,24 +235,25 @@ impl RefineRefusal {
     }
 }
 
-/// Whether one plan may be refined right now; `Ok` carries its `owner:`.
-pub fn validate_refine(tree: &Tree, rel: &str) -> Result<String, RefineRefusal> {
+/// Whether one plan may carry an errand session right now; `Ok` carries its
+/// `owner:`.
+pub fn validate_errand(tree: &Tree, rel: &str) -> Result<String, ErrandRefusal> {
     let Some(plan) = tree.get_addressed(rel) else {
-        return Err(RefineRefusal::NotAPlan);
+        return Err(ErrandRefusal::NotAPlan);
     };
     if plan.kind != crate::tree::Kind::Plan {
-        return Err(RefineRefusal::NotAPlan);
+        return Err(ErrandRefusal::NotAPlan);
     }
     if plan.archived || plan.status().as_deref() == Some("retired") {
-        return Err(RefineRefusal::Terminal);
+        return Err(ErrandRefusal::Terminal);
     }
     let Some(owner) = plan.owner() else {
-        return Err(RefineRefusal::Unowned);
+        return Err(ErrandRefusal::Unowned);
     };
     let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
     let holder = crate::org::holder(tree, &owner_short);
     if holder.is_declared_human() {
-        return Err(RefineRefusal::Handoff {
+        return Err(ErrandRefusal::Handoff {
             owner,
             holder_ref: holder.reference,
         });
@@ -238,10 +266,9 @@ struct Runtime {
     root: PathBuf,
     cfg: RuntimeConfig,
     plugin_dir: Option<String>,
-    /// The rendered `commands/*.md` bodies the default prompts inject as
-    /// `{procedure}` (decision 0050) — embedded copies, or the plugin
-    /// checkout's when one is known.
-    procedures: procedure::Procedures,
+    /// The act body every prompt's `{procedure}` renders (decisions 0050,
+    /// 0051) — the embedded copy, or the plugin checkout's when one is known.
+    procedure: String,
     /// The port the back-channel is reachable on, once bound. `None` under
     /// `--dry-run`, which spawns nothing that could call back.
     port: Option<u16>,
@@ -292,7 +319,8 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: true,
         dispatches: false,
-        refines: Mutex::new(Vec::new()),
+        errands: Mutex::new(Vec::new()),
+        errands_available: errands_available(&cfg),
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = Pidfile::claim(&root, "serve.pid", "trellis serve")?;
@@ -339,7 +367,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         sessions.apply(spec)?;
     }
     let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
-    let procedures = procedure::Procedures::load(plugin_dir.as_deref().map(Path::new))?;
+    let procedure = procedure::load(plugin_dir.as_deref().map(Path::new))?;
 
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
@@ -355,7 +383,8 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: false,
         dispatches: true,
-        refines: Mutex::new(Vec::new()),
+        errands: Mutex::new(Vec::new()),
+        errands_available: errands_available(&cfg),
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = if opts.once {
@@ -368,7 +397,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         root: root.clone(),
         cfg,
         plugin_dir,
-        procedures,
+        procedure,
         port: None,
         dry_run: opts.dry_run,
         channels,
@@ -467,7 +496,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
     cfg.validate()?;
     let sessions = cfg.session_map()?;
     let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
-    let procedures = procedure::Procedures::load(plugin_dir.as_deref().map(Path::new))?;
+    let procedure = procedure::load(plugin_dir.as_deref().map(Path::new))?;
 
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
@@ -483,7 +512,8 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: false,
         dispatches: false,
-        refines: Mutex::new(Vec::new()),
+        errands: Mutex::new(Vec::new()),
+        errands_available: errands_available(&cfg),
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // No channels: announcing newly-open records is the dispatcher's watch.
@@ -491,7 +521,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         root: root.clone(),
         cfg,
         plugin_dir,
-        procedures,
+        procedure,
         port: None,
         dry_run: opts.dry_run,
         channels: channels::Channels::new(),
@@ -593,7 +623,7 @@ fn open_channels(cfg: &RuntimeConfig) -> anyhow::Result<channels::Channels> {
 /// Sleep out the tick interval, waking early if a stop was asked for. Returns
 /// whether it was. Polled in slices rather than one long sleep: a `SIGTERM`
 /// that waits a full minute to be noticed reads as a hung daemon. The same
-/// slices notice a queued refine request (decision 0048), so an operator's
+/// slices notice a queued errand request (decision 0048), so an operator's
 /// ask starts within a fraction of a second, not a tick — no Condvar needed
 /// on a loop that already polls this often.
 fn sleep_until_tick_or_signal(tick_secs: u64, shared: &Shared) -> bool {
@@ -603,7 +633,7 @@ fn sleep_until_tick_or_signal(tick_secs: u64, shared: &Shared) -> bool {
         if signals::stopping() {
             return true;
         }
-        if shared.has_refines() {
+        if shared.has_errands() {
             return false;
         }
         if shared
@@ -726,17 +756,25 @@ fn dispatch_pass(
 
     let mut outcome = Pass::default();
 
-    // Operator-requested refine sessions drain first (decision 0048): an
-    // explicit ask outranks the scheduled scan for the same slots. Each is
+    // Operator-requested errand sessions drain first (decisions 0048, 0051):
+    // an explicit ask outranks the scheduled scan for the same slots. Each is
     // one-shot — re-validated against this pass's tree, then fired or dropped
     // with its reason, never carried to a later pass. No cooldown: the
     // cooldown throttles unattended respawns, and this is the attended case.
-    for req in rt.shared.take_refines() {
-        let owner = match validate_refine(&tree, &req.plan) {
+    for req in rt.shared.take_errands() {
+        let Some(prompt) = rt.cfg.prompts.get(&req.errand) else {
+            note(&format!(
+                "{} {} dropped — no [prompts] entry names that errand",
+                req.errand, req.plan
+            ));
+            continue;
+        };
+        let owner = match validate_errand(&tree, &req.plan) {
             Ok(owner) => owner,
             Err(refusal) => {
                 note(&format!(
-                    "refine dropped — {}",
+                    "{} dropped — {}",
+                    req.errand,
                     refusal.describe(&req.plan)
                 ));
                 continue;
@@ -755,15 +793,15 @@ fn dispatch_pass(
             .set("model", session.model.clone())
             .set("effort", session.effort.clone())
             .set("budget", session.budget_usd.to_string())
-            .set("procedure", rt.procedures.refine.clone());
+            .set("procedure", rt.procedure.clone());
         let started = fire(
             rt,
             state,
             backend,
             &key,
-            &format!("refine {} → {}", req.plan, owner),
+            &format!("{} {} → {}", req.errand, req.plan, owner),
             &owner,
-            &rt.cfg.prompts.refine,
+            prompt,
             &rt.cfg.harness.act_cmd,
             &rt.cfg.harness.herdr.act_args,
             vars,
@@ -802,7 +840,7 @@ fn dispatch_pass(
             .set("model", item.model.clone())
             .set("effort", item.effort.clone())
             .set("budget", item.budget_usd.to_string())
-            .set("procedure", rt.procedures.act.clone());
+            .set("procedure", rt.procedure.clone());
         let started = fire(
             rt,
             state,
@@ -810,7 +848,7 @@ fn dispatch_pass(
             &key,
             &format!("act {} → {}", item.plan, item.owner),
             &item.owner,
-            &rt.cfg.prompts.act,
+            &rt.cfg.prompts["act"],
             &rt.cfg.harness.act_cmd,
             &rt.cfg.harness.herdr.act_args,
             vars,
@@ -925,7 +963,7 @@ fn rituals_pass(
             )
             .set("automation", "")
             .set("executor", due.task.executor.clone())
-            .set("procedure", rt.procedures.ritual.clone());
+            .set("procedure", rt.procedure.clone());
         let started = fire(
             rt,
             state,
@@ -933,7 +971,7 @@ fn rituals_pass(
             &due.task.key(),
             &format!("ritual {} ({})", due.task.name, due.task.executor),
             &due.task.executor,
-            &rt.cfg.prompts.ritual,
+            &rt.cfg.prompts["ritual"],
             &rt.cfg.harness.ritual_cmd,
             &rt.cfg.harness.herdr.ritual_args,
             vars,
@@ -1160,9 +1198,7 @@ fn names(cfg: &RuntimeConfig, placeholder: &str) -> bool {
         }
     };
     harness
-        || cfg.prompts.act.contains(placeholder)
-        || cfg.prompts.ritual.contains(placeholder)
-        || cfg.prompts.refine.contains(placeholder)
+        || cfg.prompts.values().any(|p| p.contains(placeholder))
 }
 
 fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {

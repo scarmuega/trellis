@@ -16,14 +16,15 @@
 //! and `POST /api/sessions/{token}/answer` carries the reply (decision 0041).
 //! Both write `.trellis/runtime/` and no artifact; both concern a session
 //! already running under a mandate this surface did not grant and cannot
-//! widen. `POST /api/plans/{slug}/refine` (decision 0048) enqueues an
-//! operator's ask that the plan's own `owner:` reshape its content: honored
+//! widen. `POST /api/plans/{slug}/errands/{name}` (decisions 0048, 0051 —
+//! `/refine` is the alias the route shipped under) enqueues an operator's ask
+//! that the plan's own `owner:` run a configured errand over it: honored
 //! locally only on the dispatcher's socket — where the loop, still the only
 //! spawner, re-validates and fires it — and answered by serve purely as a
-//! relay to that socket. The plan is already in the domain and the mandate is
-//! the one it already declares (decision 0029), so nothing here grants or
-//! widens anything. Relaying is the verb the daemon is chartered for, not
-//! judgment. `POST /api/plans/{slug}/status` (decision 0049) is the operator's
+//! relay to that socket. The errand is a `[prompts]` template, the plan is
+//! already in the domain, and the mandate is the one it already declares
+//! (decision 0029), so nothing here grants or widens anything. Relaying is
+//! the verb the daemon is chartered for, not judgment. `POST /api/plans/{slug}/status` (decision 0049) is the operator's
 //! own lifecycle verbs behind the window: the same guarded flip `trellis plan
 //! release | claim | unblock | retire` performs, behind the same gates
 //! (readiness on release, holds on claim), honored on the dispatcher's socket
@@ -133,19 +134,20 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
         {
             return answer(request, shared, &ticket);
         }
-        if let Some(slug) = path
-            .strip_prefix("/api/plans/")
-            .and_then(|rest| rest.strip_suffix("/refine"))
-            .map(str::to_string)
-        {
-            return refine(request, shared, &slug);
-        }
-        if let Some(slug) = path
-            .strip_prefix("/api/plans/")
-            .and_then(|rest| rest.strip_suffix("/status"))
-            .map(str::to_string)
-        {
-            return status_flip(request, shared, &slug);
+        if let Some(rest) = path.strip_prefix("/api/plans/") {
+            // `/{slug}/errands/{name}` requests any configured errand
+            // (decision 0051); `/{slug}/refine` is the alias the route
+            // shipped under (decision 0048).
+            if let Some((slug, name)) = rest.split_once("/errands/") {
+                let (slug, name) = (slug.to_string(), name.to_string());
+                return errand(request, shared, &slug, &name);
+            }
+            if let Some(slug) = rest.strip_suffix("/refine").map(str::to_string) {
+                return errand(request, shared, &slug, "refine");
+            }
+            if let Some(slug) = rest.strip_suffix("/status").map(str::to_string) {
+                return status_flip(request, shared, &slug);
+            }
         }
     }
     if request.method() != &Method::Get {
@@ -155,6 +157,13 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
     match path.as_str() {
         "" => request
             .respond(Response::from_string(INDEX).with_header(header("text/html; charset=utf-8"))),
+        // The requestable errand names (decision 0051): the [prompts] keys
+        // minus the triggers' own. Config-derived, so every process answers
+        // from the same runtime.toml it loaded — no relay needed.
+        "/api/errands" => json(
+            request,
+            &serde_json::to_value(&shared.errands_available).unwrap_or(serde_json::Value::Null),
+        ),
         "/api/status" => {
             let status = shared.status.lock().unwrap();
             let mut value = serde_json::to_value(&*status).unwrap_or(serde_json::Value::Null);
@@ -251,12 +260,15 @@ fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Resul
     }
 }
 
-/// `POST /api/plans/{slug}/refine` — an operator asks the plan's `owner:` to
-/// reshape its content (decision 0048). Honored locally only where the
-/// dispatch loop runs — the handler validates mechanically and enqueues; the
-/// loop is the only spawner. Serve answers the same path purely as a relay to
-/// the dispatcher's socket; a rituals pass refuses it.
-fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
+/// `POST /api/plans/{slug}/errands/{name}` — an operator asks the plan's
+/// `owner:` to run one of the configured errands over it (decisions 0048,
+/// 0051; `refine` is the shipped one and `…/refine` its alias). Honored
+/// locally only where the dispatch loop runs — the handler validates
+/// mechanically and enqueues; the loop is the only spawner. Serve answers the
+/// same path purely as a relay to the dispatcher's socket — including for
+/// errand names it does not know, because the errand table is the
+/// dispatcher's config to judge; a rituals pass refuses it.
+fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std::io::Result<()> {
     let mut body = String::new();
     if let Err(e) = request.as_reader().read_to_string(&mut body) {
         return error(request, 400, &format!("cannot read the request body: {e}"));
@@ -282,24 +294,44 @@ fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<
         return error(
             request,
             400,
-            "the instruction is longer than 4096 bytes — a refinement brief, not a document",
+            "the instruction is longer than 4096 bytes — an errand brief, not a document",
         );
     }
     let rel = format!("plans/{}.md", slug.trim_end_matches(".md"));
 
     if shared.dispatches {
+        if super::TRIGGER_ERRANDS.contains(&name) {
+            return error(
+                request,
+                404,
+                &format!(
+                    "{name} belongs to the runtime's own trigger — the dispatch loop and \
+                     the cadence pass fire it; it is not an operator request"
+                ),
+            );
+        }
+        if !shared.errands_available.iter().any(|e| e == name) {
+            return error(
+                request,
+                404,
+                &format!(
+                    "no errand named {name} — this root's [prompts] carries: {}",
+                    shared.errands_available.join(", ")
+                ),
+            );
+        }
         let (tree, _, _, _) = match snapshot(&shared.root) {
             Ok(s) => s,
             Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),
         };
-        let owner = match super::validate_refine(&tree, &rel) {
+        let owner = match super::validate_errand(&tree, &rel) {
             Ok(owner) => owner,
             Err(refusal) => {
                 let (code, outcome) = match &refusal {
-                    super::RefineRefusal::NotAPlan => (404, "not-a-plan"),
-                    super::RefineRefusal::Terminal => (409, "terminal"),
-                    super::RefineRefusal::Unowned => (409, "unowned"),
-                    super::RefineRefusal::Handoff { .. } => (409, "handoff"),
+                    super::ErrandRefusal::NotAPlan => (404, "not-a-plan"),
+                    super::ErrandRefusal::Terminal => (409, "terminal"),
+                    super::ErrandRefusal::Unowned => (409, "unowned"),
+                    super::ErrandRefusal::Handoff { .. } => (409, "handoff"),
                 };
                 let body = serde_json::json!({
                     "plan": rel,
@@ -346,11 +378,12 @@ fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<
         }
         let (complexity, session) =
             crate::dispatch::plan_session(&tree, &shared.sessions, &rel);
-        shared.request_refine(&rel, &instruction);
+        shared.request_errand(name, &rel, &instruction);
         return json(
             request,
             &serde_json::json!({
                 "plan": rel,
+                "errand": name,
                 "outcome": "requested",
                 "owner": owner,
                 "complexity": complexity.as_str(),
@@ -377,7 +410,7 @@ fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<
         return match super::client::raw(
             addr.trim(),
             "POST",
-            &format!("/api/plans/{slug}/refine"),
+            &format!("/api/plans/{slug}/errands/{name}"),
             Some(&forward),
         ) {
             Ok((code, body)) => request.respond(

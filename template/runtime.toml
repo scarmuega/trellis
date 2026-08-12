@@ -119,16 +119,31 @@ retain = "on-failure"
 # herdr and the next daemon adopts them; "stop" closes their workspaces.
 on_shutdown = "detach"
 
-# The prompts are self-contained (decision 0050): {procedure} is the
-# canonical commands/*.md body — act alone for act, refine/ritual composed
-# with the act procedure they delegate to — rendered by the daemon from its
-# embedded copy (or the --plugin-root checkout), so the spawned session needs
-# no installed plugin. The contract still lives in those files, never here.
-# The first line is deliberately per-session-unique: the herdr backend proves
-# a prompt landed by matching its opening against pane scrollback.
+# The errand table (decision 0051): every session the runtime spawns is an
+# entry here, name → prompt template, and the only procedure the binary
+# carries is act — {procedure} always renders commands/act.md (embedded, or
+# the --plugin-root checkout's copy), so no installed plugin is required.
+# What an errand does beyond act lives in its template, and each template is
+# self-contained (decision 0050).
 #
-# An instance that prefers the installed-plugin spelling sets the old
-# one-liners back — e.g. act = "/trellis:act {owner} advance {plan} …" — and
+# Three names are the runtime's own and ship as defaults (shown below,
+# verbatim): "act" is what the dispatch loop fires per dispatchable plan,
+# "ritual" what the cadence pass fires per due row, "refine" the shipped
+# operator-requestable errand. Any OTHER key you add is a new requestable
+# errand, no recompile:
+#
+#   audit = """audit {plan} as {owner} (trellis runtime).
+#
+#   The ask, verbatim: {instruction}
+#
+#   {procedure}"""
+#
+# then `trellis dispatch request audit <plan> "…"`, or the board's Act menu,
+# or POST /api/plans/{slug}/errands/audit; GET /api/errands lists them. The
+# first line of every template is deliberately per-session-unique — the
+# herdr backend proves a prompt landed by matching its opening against pane
+# scrollback. An instance that prefers the installed-plugin spelling sets a
+# one-liner back — e.g. act = "/trellis:act {owner} advance {plan} …" — and
 # everything renders as before; the daemon always supplies every placeholder
 # and the template chooses which to name.
 [prompts]
@@ -142,22 +157,24 @@ The procedure below is the trellis framework's commands/act.md, rendered into th
 
 ritual = """ritual {ritual} — executed by {executor} (trellis runtime).
 
-Execute the ritual "{ritual}" from rituals.md as {executor}. The runtime resolved the executor from the row and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. Read the row for the procedure and its cadence — the freshness window for any metrics involved.
+Execute the ritual "{ritual}" from rituals.md as {executor}: read its row and take the procedure (a skill ref or inline steps) and the cadence — the freshness window for any metrics involved. The runtime resolved the executor and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. Deliver findings through the instance's escalation channel; an executor that owns no artifact reports each finding verbatim, addressed to the owner who transcribes it.
 
-The procedure below is the trellis framework's commands/ritual.md with the commands/act.md procedure it delegates to, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
 
 {procedure}"""
 
-# One refine session (decision 0048): the operator's {instruction} rides
-# verbatim; the refinement contract lives in commands/refine.md and reaches
-# the session as its {procedure} rendering.
+# The shipped requestable errand (decision 0048): the operator's
+# {instruction} rides verbatim, and the refinement contract is this
+# template's own prose — rewrite it here and you own the variant.
 refine = """refine {plan} as {owner} (trellis runtime).
 
 Act as {owner}: refine {plan} — reshape its content, never execute it. The operator's instruction, verbatim: {instruction}
 
 The runtime has already resolved you as the plan's owner and verified the plan is live and owned; the acting-role marker is already stamped (leave it alone); escalations go to {escalate_to}.
 
-The procedure below is the trellis framework's commands/refine.md with the commands/act.md procedure it delegates to, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+The refinement contract: the write target is the plan artifact itself, plus any new plans a split produces — nothing else; never claim the plan, never advance its contexts:, never touch the solution or the problem space. New plans from a split are filed status: draft with this plan's owner:, sequenced with awaits:. Keep frontmatter valid; preserve status: unless the instruction says otherwise. The plan's automation class still decides how the edit lands; anything beyond the owner's authority is an escalation, not an improvisation. Report what changed, plans created by a split, and escalations raised.
+
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
 
 {procedure}"""
 

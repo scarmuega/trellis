@@ -157,7 +157,7 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`); plan refinement via `/trellis:refine` (`commands/refine.md`) — `act(owner, refinement)` over a plan's content, never its execution (decision 0048) |
 | act | `/trellis:act <role> [input]` (`commands/act.md`) interactively; headless, the dispatcher renders that same command file into the spawn prompt (decision 0050) — computed facts first, the procedure body after — so the spawned session needs no installed plugin, and any harness that takes a prompt can carry it. A domain preferring the slash spelling restores it in `runtime.toml`'s `[prompts]`; `--plugin-root` swaps a live checkout in place of the embedded procedure text, and `--plugin-dir` remains the uninstalled-checkout option for the hooks and skills the interactive plane still needs. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
 | schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
-| ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting refinement of a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048). An instance that needs a real ingress binds it and records the choice |
+| ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting an errand over a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048, 0051). An instance that needs a real ingress binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
 | ledger | git history; the acting role is recorded in the session marker and named in commits. Per-session logs under `.trellis/runtime/logs/` are the daemon's trail — gitignored, single-machine, never the ledger |
@@ -186,18 +186,27 @@ the daily cadence used to be that backstop by accident, the loop needs it on
 purpose. Reports are transitions, not standing facts: a hold is announced
 when it appears and when it clears, never once per tick.
 
-**Plan refinement (`/trellis:refine`, decision 0048).** Reshaping a plan's
-content — simplify, split, refactor — is `act(owner, refinement)`: the command
-resolves the plan's `owner:` and delegates to the act procedure with a
-contract whose write target is the plan artifact (plus split-off drafts) and
-nothing else. Interactively it is plane 1. Headlessly, an operator requests it
-of the running dispatcher — `trellis dispatch refine <plan> "<instruction>"`,
-or `POST /api/plans/{slug}/refine` on the dispatcher's own socket, which serve
-answers only as a relay — and the loop, still the only spawner, validates
-against a fresh tree and fires one session through the same seam as dispatch,
-in the same per-plan keyspace so a refine and an advance never overlap. The
-instruction rides verbatim into the prompt; on a non-loopback bind that is an
-unauthenticated prompt door, which is why the loopback default is
+**Operator errands (decisions 0048, 0051).** Every session the runtime
+spawns is `act` under some framing, and every framing is a template: the
+`[prompts]` table in `runtime.toml` maps errand names to prompt templates,
+three of them shipped as framework-authored defaults — `act` (the dispatch
+loop's), `ritual` (the cadence pass's), and `refine`, the shipped
+operator-requestable errand: `act(owner, refinement)`, a contract whose
+write target is the plan artifact (plus split-off drafts) and nothing else,
+carried in its default template. Any additional key an instance declares is
+a new requestable errand, no recompile — the instance owns its templates the
+way it owns its `rituals.md` rows. Interactively, refine is plane 1
+(`/trellis:refine`). Headlessly, an operator requests any errand of the
+running dispatcher — `trellis dispatch request <errand> <plan>
+"<instruction>"` (`dispatch refine` is the alias), or `POST
+/api/plans/{slug}/errands/{name}` on the dispatcher's own socket
+(`…/refine` aliased), which serve answers only as a relay, and `GET
+/api/errands` lists — and the loop, still the only spawner, validates
+against a fresh tree and fires one session through the same seam as
+dispatch, in the same per-plan keyspace so an errand and an advance never
+overlap. `act` and `ritual` stay the triggers' own, never requestable. The
+instruction rides verbatim into the prompt; on a non-loopback bind that is
+an unauthenticated prompt door, which is why the loopback default is
 load-bearing.
 
 **Rituals (`trellis rituals`).** One pass of the wall-clock work: compute the
@@ -216,9 +225,9 @@ snapshot overlaid on `/api/status` — labelled with whether that process is
 still alive. Read-only is structural: there is no write path, so every change
 still enters through a session bound by its mandate, the gate, and the
 artifact's automation class. The one non-read it answers besides 0041's
-answer route is the refine request (decision 0048), and only as a relay to
-the dispatcher's socket — serve itself spawns nothing, and answers 503 when
-no dispatcher runs. It binds loopback by default, carries no authentication,
+answer route is the errand request (decisions 0048, 0051), and only as a
+relay to the dispatcher's socket — serve itself spawns nothing, and answers
+503 when no dispatcher runs. It binds loopback by default, carries no authentication,
 and may be down without stopping anything. The other non-read it relays is
 the status flip (decision 0049): `POST /api/plans/{slug}/status` performs, on
 the dispatcher's socket, exactly the guarded lifecycle move `trellis plan
@@ -380,7 +389,7 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   (premise 5: infrastructure ahead of evidence); push transports beyond the
   adapter seam; any write path on the serving surface *beyond* the single answer
   route 0041 buys — which relays a reply to a session already running under a
-  mandate and touches no artifact — the refine request 0048 buys, which
+  mandate and touches no artifact — the errand request 0048/0051 buys, which
   names a plan already in the domain (0029) to the dispatch loop, the only
   spawner, and serve merely relays, and the status flip 0049 buys, which is
   the operator's own lifecycle verb behind the same relay, gates included.

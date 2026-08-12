@@ -149,14 +149,16 @@ pub fn answer(
     Ok(resolved)
 }
 
-/// `trellis dispatch refine` — ask the running dispatcher to spawn one
-/// refine session (decision 0048). The route lives on the dispatcher's
-/// socket; serve answers it too, as a relay; rituals refuses it — so the
-/// address resolution skips `rituals.addr`. On refusal the daemon's reason
-/// comes back verbatim as the error.
-pub fn refine(
+/// `trellis dispatch request` — ask the running dispatcher to spawn one
+/// errand session over a plan (decisions 0048, 0051; `refine` is the shipped
+/// errand and `dispatch refine` its alias). The route lives on the
+/// dispatcher's socket; serve answers it too, as a relay; rituals refuses it
+/// — so the address resolution skips `rituals.addr`. On refusal the daemon's
+/// reason comes back verbatim as the error.
+pub fn request_errand(
     root: &Path,
     addr: Option<&str>,
+    errand: &str,
     plan: &str,
     instruction: &str,
 ) -> anyhow::Result<serde_json::Value> {
@@ -188,7 +190,7 @@ pub fn refine(
     let text = request(
         &addr,
         "POST",
-        &format!("/api/plans/{slug}/refine"),
+        &format!("/api/plans/{slug}/errands/{errand}"),
         Some(&body),
     )?;
     Ok(serde_json::from_str(&text)?)
