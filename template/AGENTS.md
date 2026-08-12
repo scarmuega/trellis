@@ -50,4 +50,6 @@ decision register in `metrics/actuals/` — a superseded decision stays in
 
 If your harness runs the Trellis plugin, the `trellis:conventions` skill loads
 this map and the schemas; `/trellis:act`, `/trellis:plan`, `/trellis:focus`, and
-`/trellis:ritual` invoke roles and rituals.
+`/trellis:ritual` invoke roles and rituals. A session the daemon spawned needs
+none of that: its prompt already carries the act procedure rendered from those
+same command files (decision 0050) — follow the prompt.

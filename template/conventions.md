@@ -272,8 +272,10 @@ How this domain is operated day to day (contract: the `runtime.md` companion of
 the spec version pinned in `decisions/0000-adopt-trellis.md`). This instance's
 choices:
 
-- Harness: Claude Code with the `trellis` plugin — interactive sessions at the
-  root; headless `claude -p` for the scheduled plane.
+- Harness: Claude Code with the `trellis` plugin for interactive sessions at
+  the root; headless `claude -p` for the scheduled plane, whose prompts carry
+  the act procedure rendered from the plugin's own command files (decision
+  0050) — the spawned session needs no installed plugin.
 - Clock: `trellis serve`, run wherever this repository is checked out
   (config: `runtime.toml`; board and API on `http://127.0.0.1:7357`). It reads
   `rituals.md` at every pass, so cadences need no wiring kept in step with
@@ -292,7 +294,8 @@ choices:
   A row whose cadence has no day count (`on demand`) is never fired
   automatically and is reported as unscheduled, so its silence is visible.
 - Plan dispatch: the daemon runs the deterministic scan (`trellis dispatch
-  scan`) on its cadence and starts a `/trellis:act {owner} advance …` per
+  scan`) on its cadence and starts one act session — `advance {plan}` as its
+  `owner:`, the act procedure rendered into the prompt (decision 0050) — per
   `status: ready` plan — the `plan dispatch` row in `rituals.md`, carrying no
   judgment and so run as wiring rather than as a steward session. Each plan's
   work runs under its owner's authority. A plan whose `awaits:` targets are not

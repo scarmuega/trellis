@@ -32,6 +32,24 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **The spawn prompt is a rendering of the command (decision 0050):**
+  daemon-spawned sessions no longer open with a slash command only an
+  installed plugin can resolve. The binary embeds `commands/act.md`,
+  `refine.md`, and `ritual.md`; the default prompts compose a per-session
+  header, the computed facts of 0045, and `{procedure}` — the canonical
+  command body, frontmatter stripped, refine/ritual rendered together with
+  the act procedure they delegate to. The contract stays in the command
+  files (0048 upheld); the prompt is a rendering of them, identical at the
+  binary's build SHA. `--plugin-root` / `CLAUDE_PLUGIN_ROOT` swap a live
+  checkout's `commands/`; an instance that prefers the plugin spelling sets
+  `[prompts]` back to `/trellis:act …` and renders exactly as before. The
+  interactive plane, the gate hook, and skills still ride the installed
+  plugin. New placeholders `{procedure}` and `{executor}`; the herdr
+  prompt-delivery needle now cuts at the prompt's first line, which the
+  defaults make per-session-unique. Updated: `spec/runtime.md`,
+  `template/runtime.toml`, `template/conventions.md`, `template/AGENTS.md`,
+  CI trigger paths (`commands/**` now changes the binary).
+
 - **The runtime splits by what its time means (decision 0046):** `trellis
   serve` was one process owning three unlike things, and the seam showed the
   day 0045 landed — an `awaits:` chain released its next plan minutes after
