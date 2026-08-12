@@ -311,6 +311,11 @@ choices:
   dispatch refine <plan> "<instruction>"`, or the board's Act menu through
   serve's relay); the loop stays the only spawner and every gate act carries
   still applies (decision 0048).
+- Status flips from the board: the drawer's status menu performs the same
+  guarded lifecycle moves as `trellis plan release | claim | unblock |
+  retire` — readiness gates release, holds gate claim, retired is terminal —
+  through the dispatcher's socket via serve's relay (decision 0049). The
+  window grants the operator nothing plane 1 did not already.
 - Ingress: **unbound**. This instance has no event-driven plane: an outside
   event (email, ticket, webhook) reaches the domain when a human brings it into
   an interactive session. The daemon's HTTP surface is read-only by

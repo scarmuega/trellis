@@ -65,6 +65,24 @@ export interface RefineOutcome {
   [key: string]: unknown;
 }
 
+export interface FlipOutcome {
+  plan: string;
+  outcome: string;
+  from?: string;
+  to?: string;
+  [key: string]: unknown;
+}
+
+// Thrown on a refused flip so the UI can tell "not-ready" (offer force)
+// from every other refusal.
+export class FlipError extends Error {
+  outcome?: string;
+  constructor(message: string, outcome?: string) {
+    super(message);
+    this.outcome = outcome;
+  }
+}
+
 export const api = {
   status: () => getJson<DaemonStatus>("/api/status"),
   board: () => getJson<Board>("/api/board"),
@@ -91,6 +109,28 @@ export const api = {
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) throw new Error(body?.error ?? `refine failed (${res.status})`);
+    return body;
+  },
+  // Flip a plan's lifecycle status (decision 0049) — the same guarded move
+  // as `trellis plan release | claim | unblock | retire`, relayed by serve
+  // to the dispatcher. `force` overrides the readiness gate on release.
+  setStatus: async (
+    rel: string,
+    status: string,
+    force = false,
+  ): Promise<FlipOutcome> => {
+    const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
+    const res = await fetch(`/api/plans/${encodeURIComponent(slug)}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, force }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok)
+      throw new FlipError(
+        body?.error ?? `status change failed (${res.status})`,
+        body?.outcome,
+      );
     return body;
   },
   answer: (ticket: string, answer: string) =>

@@ -218,7 +218,13 @@ artifact's automation class. The one non-read it answers besides 0041's
 answer route is the refine request (decision 0048), and only as a relay to
 the dispatcher's socket — serve itself spawns nothing, and answers 503 when
 no dispatcher runs. It binds loopback by default, carries no authentication,
-and may be down without stopping anything.
+and may be down without stopping anything. The other non-read it relays is
+the status flip (decision 0049): `POST /api/plans/{slug}/status` performs, on
+the dispatcher's socket, exactly the guarded lifecycle move `trellis plan
+release | claim | unblock | retire` performs — readiness gates release (with
+the CLI's own force override), holds gate claim, a plan with a session in
+flight is refused, blocked and draft are not reachable by flip — so the
+window grants the operator nothing plane 1 did not already.
 
 **Implementation holders.** A plan whose `contexts:` land in code needs a holder
 that can write it, and that holder is domain-local (decision 0047, superseding
@@ -373,6 +379,7 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   (premise 5: infrastructure ahead of evidence); push transports beyond the
   adapter seam; any write path on the serving surface *beyond* the single answer
   route 0041 buys — which relays a reply to a session already running under a
-  mandate and touches no artifact — and the refine request 0048 buys, which
+  mandate and touches no artifact — the refine request 0048 buys, which
   names a plan already in the domain (0029) to the dispatch loop, the only
-  spawner, and serve merely relays.
+  spawner, and serve merely relays, and the status flip 0049 buys, which is
+  the operator's own lifecycle verb behind the same relay, gates included.

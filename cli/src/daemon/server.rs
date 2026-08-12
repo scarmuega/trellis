@@ -11,7 +11,7 @@
 //! ingress: an HTTP door into `act` would be a trigger plane with no mandate
 //! behind it (decision 0038).
 //!
-//! Three routes are not reads, and none weakens that. `/mcp/{token}` is the
+//! Four routes are not reads, and none weakens that. `/mcp/{token}` is the
 //! back-channel a spawned session calls to ask a question or report progress,
 //! and `POST /api/sessions/{token}/answer` carries the reply (decision 0041).
 //! Both write `.trellis/runtime/` and no artifact; both concern a session
@@ -23,8 +23,13 @@
 //! relay to that socket. The plan is already in the domain and the mandate is
 //! the one it already declares (decision 0029), so nothing here grants or
 //! widens anything. Relaying is the verb the daemon is chartered for, not
-//! judgment. Every other non-GET is still 405, and that is worth keeping
-//! true.
+//! judgment. `POST /api/plans/{slug}/status` (decision 0049) is the operator's
+//! own lifecycle verbs behind the window: the same guarded flip `trellis plan
+//! release | claim | unblock | retire` performs, behind the same gates
+//! (readiness on release, holds on claim), honored on the dispatcher's socket
+//! and relayed by serve — the surface grants nothing the shell did not
+//! already, and serve itself still holds no write path. Every other non-GET
+//! is still 405, and that is worth keeping true.
 //!
 //! Handlers hold no cache: each recomputes from a fresh tree. The bind
 //! address defaults to loopback because the surface carries no authentication
@@ -115,9 +120,8 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
     };
     let path = path.trim_end_matches('/').to_string();
 
-    // The two routes that are not reads. Both concern a session already
-    // running under a mandate, and both write `.trellis/runtime/` and no
-    // artifact — see the module doc, which is where the argument lives.
+    // The routes that are not reads — see the module doc, which is where
+    // the argument for each lives.
     if request.method() == &Method::Post {
         if let Some(token) = path.strip_prefix("/mcp/").map(str::to_string) {
             return session_call(request, shared, &token);
@@ -135,6 +139,13 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
             .map(str::to_string)
         {
             return refine(request, shared, &slug);
+        }
+        if let Some(slug) = path
+            .strip_prefix("/api/plans/")
+            .and_then(|rest| rest.strip_suffix("/status"))
+            .map(str::to_string)
+        {
+            return status_flip(request, shared, &slug);
         }
     }
     if request.method() != &Method::Get {
@@ -367,6 +378,220 @@ fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<
             addr.trim(),
             "POST",
             &format!("/api/plans/{slug}/refine"),
+            Some(&forward),
+        ) {
+            Ok((code, body)) => request.respond(
+                Response::from_string(body)
+                    .with_status_code(code)
+                    .with_header(json_header()),
+            ),
+            Err(e) => error(
+                request,
+                503,
+                &format!("the dispatcher did not answer: {e} — is `trellis dispatch run` up?"),
+            ),
+        };
+    }
+
+    error(request, 405, "this process runs no dispatch loop")
+}
+
+/// `POST /api/plans/{slug}/status` — the operator's lifecycle verbs behind
+/// the window (decision 0049). Body is `{"status": "ready | active |
+/// retired", "force": false}`. The flip is exactly the guarded edit `trellis
+/// plan release | claim | unblock | retire` performs — same source-state
+/// guard, same readiness gate on release, same hold check on claim — so who
+/// may flip stays the invoker's mandate, not this tool's business
+/// (plan_ops). Honored where the dispatch loop runs; serve relays.
+fn status_flip(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
+    let mut body = String::new();
+    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+        return error(request, 400, &format!("cannot read the request body: {e}"));
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(&body).ok();
+    let target = parsed
+        .as_ref()
+        .and_then(|v| v.get("status"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let force = parsed
+        .as_ref()
+        .and_then(|v| v.get("force"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let to = match PlanStatus::parse(&target) {
+        Some(PlanStatus::Draft) => {
+            return error(
+                request,
+                400,
+                "nothing flips back to draft — draft is where a plan starts",
+            );
+        }
+        Some(PlanStatus::Blocked) => {
+            return error(
+                request,
+                400,
+                "blocking is an escalation, not a bare flip — `trellis plan block` records who is blocked and on what",
+            );
+        }
+        Some(to) => to,
+        None => {
+            return error(
+                request,
+                400,
+                "send {\"status\": \"ready | active | retired\"} — the transitions the lifecycle verbs perform",
+            );
+        }
+    };
+    let rel = format!("plans/{}.md", slug.trim_end_matches(".md"));
+
+    if shared.dispatches {
+        let (tree, _, derived, _) = match snapshot(&shared.root) {
+            Ok(s) => s,
+            Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),
+        };
+        let refuse = |request: Request, code: u16, outcome: &str, message: String| {
+            let body = serde_json::json!({
+                "plan": rel,
+                "outcome": outcome,
+                "error": message,
+            })
+            .to_string();
+            request.respond(
+                Response::from_string(body)
+                    .with_status_code(code)
+                    .with_header(json_header()),
+            )
+        };
+        if !matches!(tree.get(&rel).map(|a| &a.kind), Some(crate::tree::Kind::Plan)) {
+            return refuse(
+                request,
+                404,
+                "not-a-plan",
+                format!("{rel} is not a plan in this root"),
+            );
+        }
+        let key = super::state::key_plan(&rel);
+        let in_flight = shared
+            .status
+            .lock()
+            .unwrap()
+            .in_flight
+            .iter()
+            .any(|s| s.key == key);
+        if in_flight {
+            // Same staleness bargain as refine: nudge a pass so a session
+            // that actually ended is reaped and a retry lands in a second.
+            shared
+                .nudge
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return refuse(
+                request,
+                409,
+                "in-flight",
+                format!(
+                    "{rel} has a session running — flipping status under it would fight the session; \
+                     if it just finished, retry in a moment"
+                ),
+            );
+        }
+        let abs = tree.root.path.join(&rel);
+        // plan_ops speaks in the path it was handed; the board speaks in tree
+        // addresses, so refusals shed the absolute root prefix.
+        let in_tree_vocabulary =
+            |e: anyhow::Error| e.to_string().replace(&format!("{}/", tree.root.path.display()), "");
+        let from: &[PlanStatus] = match to {
+            PlanStatus::Ready => &[PlanStatus::Draft, PlanStatus::Blocked],
+            PlanStatus::Active => &[PlanStatus::Ready],
+            _ => &[
+                PlanStatus::Draft,
+                PlanStatus::Ready,
+                PlanStatus::Active,
+                PlanStatus::Blocked,
+            ],
+        };
+        let current = match crate::plan_ops::current_status(&abs) {
+            Ok(c) => c,
+            Err(e) => return refuse(request, 409, "illegal", in_tree_vocabulary(e)),
+        };
+        if to == PlanStatus::Ready && current == PlanStatus::Draft && !force {
+            match crate::readiness::check(&tree, &derived, &rel) {
+                Ok(report) if !report.mechanical_pass => {
+                    let fails: Vec<String> = report
+                        .items
+                        .iter()
+                        .filter(|i| i.status == crate::readiness::ItemStatus::Fail)
+                        .map(|i| format!("{} — {}", i.title, i.detail))
+                        .collect();
+                    return refuse(
+                        request,
+                        409,
+                        "not-ready",
+                        format!(
+                            "{rel} fails the mechanical readiness share: {} (walk checks/plan-readiness.md, or send force: true)",
+                            fails.join("; ")
+                        ),
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => return refuse(request, 500, "error", e.to_string()),
+            }
+        }
+        if to == PlanStatus::Active {
+            if let Some((target, status)) = derived.hold(&rel) {
+                return refuse(
+                    request,
+                    409,
+                    "held",
+                    format!(
+                        "{rel} is held — awaits {target} (status: {}); the hold clears when every target retires",
+                        status
+                            .map(|s| s.as_str().to_string())
+                            .unwrap_or_else(|| "missing".into())
+                    ),
+                );
+            }
+        }
+        return match crate::plan_ops::flip(&abs, from, to) {
+            Ok(was) => {
+                // The pass the nudge wakes refreshes status.json — and a plan
+                // released into an agent-operated domain is released to its
+                // agents, so a due dispatch may fire on it now, not next tick.
+                shared
+                    .nudge
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                json(
+                    request,
+                    &serde_json::json!({
+                        "plan": rel,
+                        "outcome": "flipped",
+                        "from": was.as_str(),
+                        "to": to.as_str(),
+                    }),
+                )
+            }
+            Err(e) => refuse(request, 409, "illegal", in_tree_vocabulary(e)),
+        };
+    }
+
+    if shared.overlay_status {
+        // Serve relays and decides nothing — refusals come back verbatim.
+        let addr_path = super::config::RuntimeConfig::runtime_dir(&shared.root)
+            .join(super::DISPATCH_ADDRFILE);
+        let Ok(addr) = std::fs::read_to_string(&addr_path) else {
+            return error(
+                request,
+                503,
+                "no dispatcher is running on this root — start `trellis dispatch run`",
+            );
+        };
+        let forward = serde_json::json!({ "status": target, "force": force }).to_string();
+        return match super::client::raw(
+            addr.trim(),
+            "POST",
+            &format!("/api/plans/{slug}/status"),
             Some(&forward),
         ) {
             Ok((code, body)) => request.respond(
