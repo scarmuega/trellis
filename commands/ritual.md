@@ -4,12 +4,16 @@ argument-hint: <ritual name>
 ---
 
 Execute one ritual from the domain's `rituals.md` — the scheduled plane of the
-runtime contract (`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md`). A ritual is
-`act(executor, procedure)`: this command looks up the row and delegates to the
-`/trellis:act` procedure.
+runtime contract (the trellis plugin's `spec/runtime.md`;
+`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md` where the plugin is installed). A
+ritual is `act(executor, procedure)`: this procedure looks up the row and
+delegates to the `/trellis:act` procedure (rendered below this one under
+dispatch).
 
-Argument: `$ARGUMENTS` — the ritual name, matched case-insensitively against the
-ritual column of `rituals.md`.
+Input — the **ritual name**, matched case-insensitively against the ritual
+column of `rituals.md`. Invoked as `/trellis:ritual`, `$ARGUMENTS` supplies
+it. Invoked under dispatch, the preamble above this procedure names it and the
+resolved executor.
 
 ## Procedure
 
@@ -17,11 +21,13 @@ ritual column of `rituals.md`.
    directory holding `conventions.md`, `problem/`, `solution/`, and `org/`; not
    found → say so and stop) and read its `rituals.md`.
 
-2. **Find the row** matching `$ARGUMENTS`. No match, or no argument → list the
+2. **Find the row** matching the ritual name. No match, or no name → list the
    rituals (name, cadence, executor) and stop. From the row take the
    **executor** (an org role), the **procedure** (a skill ref or inline steps),
    and the **cadence** — the freshness window for any `metrics/actuals/` data
-   involved (never reason from data older than it; spec rule 5).
+   involved (never reason from data older than it; spec rule 5). Under
+   dispatch the preamble already names the executor; still read the row for
+   the procedure and the cadence.
 
 3. **Delegate to act**: perform the `/trellis:act` procedure with the executor
    as the role and the ritual's procedure as the input — resolve the mandate,

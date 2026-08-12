@@ -5,23 +5,28 @@ argument-hint: <plan> [instruction]
 
 Refine one plan's *content* — simplify its scope, split it, refactor its
 structure — as an act of the role that owns it. Refine is
-`act(owner, refinement)`: this command resolves the plan's `owner:` and
-delegates to the `/trellis:act` procedure with the refinement contract below as
-the input. It never executes the plan; advancing a plan toward its objective is
-dispatch's errand, not this one. Runtime contract:
-`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md`.
+`act(owner, refinement)`: this procedure resolves the plan's `owner:` and
+delegates to the `/trellis:act` procedure (rendered below this one under
+dispatch) with the refinement contract below as the input. It never executes
+the plan; advancing a plan toward its objective is dispatch's errand, not this
+one. Runtime contract: the trellis plugin's `spec/runtime.md`
+(`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md` where the plugin is installed).
 
-Arguments: `$ARGUMENTS` — the first token is the plan (`plans/x.md`, `plans/x`,
-or `x`); everything after it is the instruction. No instruction means: report
-the plan's refinement candidates (scope seams, natural split points, stale
-sections, readiness gaps a rewrite would close) and await one.
+Inputs — a **plan** (`plans/x.md`, `plans/x`, or `x`) and an **instruction**
+(or empty). Invoked as `/trellis:refine`, `$ARGUMENTS` supplies them: the
+first token is the plan, everything after it the instruction. Invoked under
+dispatch, the preamble above this procedure names them, and the runtime has
+already resolved and validated the plan and its `owner:` (decision 0048's
+resolver). No instruction means: report the plan's refinement candidates
+(scope seams, natural split points, stale sections, readiness gaps a rewrite
+would close) and await one.
 
 ## Procedure
 
 1. **Bind to the domain root** (nearest directory at or above the working
    directory holding `conventions.md`, `problem/`, `solution/`, and `org/`; not
    found → say so and stop). Read the root's `conventions.md` — authoritative
-   over this command where they differ.
+   over this procedure where they differ.
 
 2. **Resolve the plan**: normalize the argument to `plans/{name}.md` and read
    it. Not found (live or under `archive/`) → say so and stop. `status:

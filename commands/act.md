@@ -4,20 +4,24 @@ argument-hint: <role> [input or instruction]
 ---
 
 Invoke a Trellis org role: bind its mandate, adopt its holder, execute the input
-within its authority, escalate anything beyond it. Runtime contract:
-`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md`.
+within its authority, escalate anything beyond it. Runtime contract: the
+trellis plugin's `spec/runtime.md` (`${CLAUDE_PLUGIN_ROOT}/spec/runtime.md`
+where the plugin is installed; under dispatch the operative parts are restated
+in the prompt that carries this procedure).
 
-Arguments: `$ARGUMENTS` — the first token is the role name (matching
-`org/{role}/`); everything after it is the input. No input means: report the
-role's standing state (mandate summary, pending escalations, rituals it
-executes) and await instruction.
+Inputs — a **role** (matching `org/{role}/`) and an **input** (an instruction,
+or empty). Invoked as `/trellis:act`, `$ARGUMENTS` supplies them: the first
+token is the role, everything after it the input. Invoked under dispatch, the
+preamble above this procedure names them. No input means: report the role's
+standing state (mandate summary, pending escalations, rituals it executes) and
+await instruction.
 
 ## Procedure
 
 1. **Bind to the domain root**: the nearest directory at or above the working
    directory holding `conventions.md`, `problem/`, `solution/`, and `org/`. Not
    in a Trellis root → say so and stop. Read the root's `conventions.md`
-   (authoritative over this command where they differ) — especially its
+   (authoritative over this procedure where they differ) — especially its
    "Runtime binding" and secrets-policy sections.
 
 2. **Resolve the mandate**: read `org/{role}/mandate.md`. If the role does not
