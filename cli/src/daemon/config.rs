@@ -187,12 +187,12 @@ pub struct Harness {
     /// argv for one `act` session. Claude Code is the reference adapter;
     /// another harness is this array, rewritten.
     ///
-    /// The defaults name no `{plugin_dir}`: the daemon runs on a machine
-    /// where the plugin is installed in the harness, which is the whole
-    /// premise of operating locally. A checkout that is *not* installed —
-    /// running against a working tree, say — adds `--plugin-dir
-    /// {plugin_dir}` here and supplies it with `--plugin-root` or
-    /// `CLAUDE_PLUGIN_ROOT`.
+    /// The defaults name no `{plugin_dir}`: the default prompts render the
+    /// act procedure into the prompt itself (decision 0050), so the spawned
+    /// session needs no installed plugin. `--plugin-dir {plugin_dir}` is
+    /// still how an instance points sessions at an uninstalled checkout's
+    /// hooks and skills — supplied with `--plugin-root` or
+    /// `CLAUDE_PLUGIN_ROOT`, which also swap the procedure source.
     ///
     /// They do name `{mcp}`: the session's back-channel, so it can ask a
     /// question rather than block its plan (decision 0041). A harness that
@@ -247,31 +247,78 @@ impl Default for Harness {
     }
 }
 
+/// The three prompt templates, one per spawn kind. The defaults are
+/// self-contained (decision 0050): a per-session-unique first line — the
+/// herdr backend proves delivery by matching the prompt's opening against
+/// pane scrollback, so the first line must discriminate — the computed facts
+/// (decision 0045), and `{procedure}`, the canonical `commands/*.md` body
+/// rendered by the daemon. The contract still lives in those files, not
+/// here; an instance preferring the installed-plugin spelling sets these
+/// back to `/trellis:act {owner} …` and everything renders as before.
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Prompts {
     pub act: String,
     pub ritual: String,
-    /// One refine session (decision 0048). Thin by design: the refinement
-    /// contract lives in `commands/refine.md`, not in this string.
+    /// One refine session (decision 0048). The refinement contract lives in
+    /// `commands/refine.md` — carried here only as its `{procedure}`
+    /// rendering.
     pub refine: String,
 }
 
 impl Default for Prompts {
     fn default() -> Self {
         Prompts {
-            act: "/trellis:act {owner} advance {plan} toward its objective: make the next \
-                  increment of progress within your authority. Dispatched: the runtime has \
+            act: "{plan} — dispatched act as {owner} (trellis runtime).\n\
+                  \n\
+                  Act as {owner}: advance {plan} toward its objective — make the next \
+                  increment of progress within your authority. The runtime has \
                   pre-verified the mechanical readiness items and this plan's holds, the \
-                  acting-role marker is already stamped, and the change mechanics are \
-                  computed — {automation}; core never lands, it is proposed. Evaluate only \
-                  the judgment items. Claim with `trellis plan claim {plan}`; on an \
-                  uncleared blocker `trellis plan block {plan} --by {owner} --asks …` \
-                  (escalations go to {escalate_to}); write escalation records with \
-                  `trellis escalate add`; leave a trail."
+                  acting-role marker is already stamped (leave it alone), and the change \
+                  mechanics are computed: {automation}; core never lands, it is proposed. \
+                  Evaluate only the judgment items. Claim with `trellis plan claim \
+                  {plan}`; on an uncleared blocker `trellis plan block {plan} --by \
+                  {owner} --asks …` (escalations go to {escalate_to}); write escalation \
+                  records with `trellis escalate add`; leave a trail.\n\
+                  \n\
+                  The procedure below is the trellis framework's commands/act.md, \
+                  rendered into this prompt so no installed plugin is required; the \
+                  domain root's conventions.md is authoritative over it where they \
+                  differ.\n\
+                  \n\
+                  {procedure}"
                 .into(),
-            ritual: "/trellis:ritual {ritual}".into(),
-            refine: "/trellis:refine {plan} {instruction}".into(),
+            ritual: "ritual {ritual} — executed by {executor} (trellis runtime).\n\
+                  \n\
+                  Execute the ritual \"{ritual}\" from rituals.md as {executor}. The \
+                  runtime resolved the executor from the row and stamped the acting-role \
+                  marker (leave it alone); escalations go to {escalate_to}. Read the row \
+                  for the procedure and its cadence — the freshness window for any \
+                  metrics involved.\n\
+                  \n\
+                  The procedure below is the trellis framework's commands/ritual.md with \
+                  the commands/act.md procedure it delegates to, rendered into this \
+                  prompt so no installed plugin is required; the domain root's \
+                  conventions.md is authoritative over it where they differ.\n\
+                  \n\
+                  {procedure}"
+                .into(),
+            refine: "refine {plan} as {owner} (trellis runtime).\n\
+                  \n\
+                  Act as {owner}: refine {plan} — reshape its content, never execute it. \
+                  The operator's instruction, verbatim: {instruction}\n\
+                  \n\
+                  The runtime has already resolved you as the plan's owner and verified \
+                  the plan is live and owned; the acting-role marker is already stamped \
+                  (leave it alone); escalations go to {escalate_to}.\n\
+                  \n\
+                  The procedure below is the trellis framework's commands/refine.md with \
+                  the commands/act.md procedure it delegates to, rendered into this \
+                  prompt so no installed plugin is required; the domain root's \
+                  conventions.md is authoritative over it where they differ.\n\
+                  \n\
+                  {procedure}"
+                .into(),
         }
     }
 }

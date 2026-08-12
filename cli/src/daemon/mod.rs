@@ -20,6 +20,7 @@ pub mod marker;
 #[cfg(unix)]
 pub mod herdr;
 pub mod mcp;
+pub mod procedure;
 pub mod sched;
 pub mod server;
 pub mod spawn;
@@ -237,6 +238,10 @@ struct Runtime {
     root: PathBuf,
     cfg: RuntimeConfig,
     plugin_dir: Option<String>,
+    /// The rendered `commands/*.md` bodies the default prompts inject as
+    /// `{procedure}` (decision 0050) — embedded copies, or the plugin
+    /// checkout's when one is known.
+    procedures: procedure::Procedures,
     /// The port the back-channel is reachable on, once bound. `None` under
     /// `--dry-run`, which spawns nothing that could call back.
     port: Option<u16>,
@@ -334,6 +339,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         sessions.apply(spec)?;
     }
     let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
+    let procedures = procedure::Procedures::load(plugin_dir.as_deref().map(Path::new))?;
 
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
@@ -362,6 +368,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         root: root.clone(),
         cfg,
         plugin_dir,
+        procedures,
         port: None,
         dry_run: opts.dry_run,
         channels,
@@ -460,6 +467,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
     cfg.validate()?;
     let sessions = cfg.session_map()?;
     let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
+    let procedures = procedure::Procedures::load(plugin_dir.as_deref().map(Path::new))?;
 
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
@@ -483,6 +491,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         root: root.clone(),
         cfg,
         plugin_dir,
+        procedures,
         port: None,
         dry_run: opts.dry_run,
         channels: channels::Channels::new(),
@@ -745,7 +754,8 @@ fn dispatch_pass(
             .set("complexity", complexity.as_str())
             .set("model", session.model.clone())
             .set("effort", session.effort.clone())
-            .set("budget", session.budget_usd.to_string());
+            .set("budget", session.budget_usd.to_string())
+            .set("procedure", rt.procedures.refine.clone());
         let started = fire(
             rt,
             state,
@@ -791,7 +801,8 @@ fn dispatch_pass(
             .set("complexity", item.complexity.clone())
             .set("model", item.model.clone())
             .set("effort", item.effort.clone())
-            .set("budget", item.budget_usd.to_string());
+            .set("budget", item.budget_usd.to_string())
+            .set("procedure", rt.procedures.act.clone());
         let started = fire(
             rt,
             state,
@@ -912,7 +923,9 @@ fn rituals_pass(
                 "escalate_to",
                 crate::dispatch::escalate_to(&tree, &due.task.executor),
             )
-            .set("automation", "");
+            .set("automation", "")
+            .set("executor", due.task.executor.clone())
+            .set("procedure", rt.procedures.ritual.clone());
         let started = fire(
             rt,
             state,
@@ -1146,7 +1159,10 @@ fn names(cfg: &RuntimeConfig, placeholder: &str) -> bool {
             uses(&cfg.harness.herdr.act_args) || uses(&cfg.harness.herdr.ritual_args)
         }
     };
-    harness || cfg.prompts.act.contains(placeholder) || cfg.prompts.ritual.contains(placeholder)
+    harness
+        || cfg.prompts.act.contains(placeholder)
+        || cfg.prompts.ritual.contains(placeholder)
+        || cfg.prompts.refine.contains(placeholder)
 }
 
 fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {

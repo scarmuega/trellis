@@ -279,7 +279,7 @@ impl HerdrPool {
             self.cfg.kind,
             shell_quote(args)
         )?;
-        writeln!(file, "# prompt: {prompt}")?;
+        writeln!(file, "# prompt: {}", prompt.replace('\n', "\n# "))?;
 
         let (workspace_id, pane_id) = self.client.workspace_create(&self.root, label)?;
 
@@ -661,11 +661,15 @@ fn prompt_landed(session: &Session, client: &Client) -> bool {
 }
 
 /// Enough of the prompt to be unmistakable in scrollback, short enough to
-/// survive line wrapping at any plausible pane width.
+/// survive line wrapping at any plausible pane width. Cut at the first line
+/// before the character cut: the default prompts are multiline and open with
+/// a per-session-unique header (decision 0050), and a needle carrying a
+/// newline would never match wrapped scrollback.
 fn prompt_needle(prompt: &str) -> &str {
-    match prompt.char_indices().nth(24) {
-        Some((i, _)) => &prompt[..i],
-        None => prompt,
+    let first_line = prompt.split('\n').next().unwrap_or(prompt);
+    match first_line.char_indices().nth(24) {
+        Some((i, _)) => &first_line[..i],
+        None => first_line,
     }
 }
 
@@ -739,4 +743,21 @@ fn append_tail(path: &Path, tail: &str) -> std::io::Result<()> {
 /// A connect failure, as opposed to herdr answering with a refusal.
 fn is_unreachable(e: &anyhow::Error) -> bool {
     e.to_string().contains("cannot reach herdr")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prompt_needle;
+
+    #[test]
+    fn the_needle_is_the_first_line_and_never_carries_a_newline() {
+        let prompt = "plans/x.md — dispatched act as coder (trellis runtime).\n\nAct as coder…";
+        let needle = prompt_needle(prompt);
+        assert!(!needle.contains('\n'), "{needle:?}");
+        assert!(prompt.starts_with(needle));
+        assert_eq!(needle.chars().count(), 24);
+
+        assert_eq!(prompt_needle("short\nrest"), "short");
+        assert_eq!(prompt_needle("bare"), "bare");
+    }
 }

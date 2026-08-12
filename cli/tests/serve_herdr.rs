@@ -141,10 +141,13 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     let prompt = &herdr.params_for("agent.prompt")[0];
     assert_eq!(prompt["target"], "p1");
     let text = prompt["text"].as_str().unwrap();
+    // The rendered default (decision 0050): a discriminating first line, the
+    // computed facts, and the act procedure — no slash command to resolve.
     assert!(
-        text.starts_with("/trellis:act founder advance plans/ship-it.md"),
+        text.starts_with("plans/ship-it.md — dispatched act as founder"),
         "{text}"
     );
+    assert!(text.contains("Bind to the domain root"), "{text}");
 
     let tokens = &herdr.params_for("pane.report_metadata")[0]["tokens"];
     assert_eq!(tokens["trellis_key"], "plan:plans/ship-it.md");

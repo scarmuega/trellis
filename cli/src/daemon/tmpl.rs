@@ -38,6 +38,13 @@ pub const PLACEHOLDERS: &[&str] = &[
     // The operator's refinement instruction, relayed verbatim into the
     // prompt (decision 0048). Set only for refine sessions.
     "instruction",
+    // The rendered procedure body — the canonical commands/*.md, embedded in
+    // the binary and composed per prompt kind, so a spawned session needs no
+    // installed plugin (decision 0050).
+    "procedure",
+    // A ritual's executor role, resolved from its rituals.md row — under
+    // dispatch the preamble names it so the session need not re-derive it.
+    "executor",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =
@@ -157,5 +164,14 @@ mod tests {
     fn text_that_is_not_a_placeholder_passes_through() {
         let got = substitute("prompt", &t(&["a {Braced} literal"]), &Vars::new()).unwrap();
         assert_eq!(got, vec!["a {Braced} literal"]);
+    }
+
+    #[test]
+    fn a_substituted_value_is_not_rescanned() {
+        // The procedure body carries `org/{role}/`-style prose (decision
+        // 0050); values must land literally, never be treated as templates.
+        let vars = Vars::new().set("procedure", "touch only org/{role}/ and plans/{name}.md");
+        let got = substitute("act", &t(&["{procedure}"]), &vars).unwrap();
+        assert_eq!(got, vec!["touch only org/{role}/ and plans/{name}.md"]);
     }
 }

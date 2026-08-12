@@ -51,9 +51,11 @@ backend = "process"
 # argv arrays, never shell strings: a placeholder fills exactly one argument,
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
-# {ritual} {complexity} {mcp} {escalate_to} {automation}. A second harness
-# (pi, Codex, OpenCode) is these two lines rewritten — Claude Code is the
-# reference adapter, not a hardcode.
+# {ritual} {complexity} {mcp} {escalate_to} {automation} {instruction}
+# {procedure} {executor}. A second harness (pi, Codex, OpenCode) is these two
+# lines rewritten — Claude Code is the reference adapter, not a hardcode, and
+# since the default prompts are self-contained (decision 0050) the second
+# harness needs no plugin dialect of its own.
 #
 # {mcp} is the session's back-channel: the daemon serves MCP on its own socket,
 # and a session handed the endpoint can ask a question and wait for an answer
@@ -64,11 +66,14 @@ backend = "process"
 # channel lives with the process that spawned the session (dispatch or
 # rituals — decision 0046); only --dry-run runs without one.
 #
-# No --plugin-dir below: the daemon runs where the plugin is installed in the
-# harness, which is the premise of operating locally. Against a checkout that
-# is not installed, add "--plugin-dir", "{plugin_dir}" and supply it with
+# No --plugin-dir below: the default prompts render the act procedure into
+# the prompt itself (decision 0050), so a spawned session needs no installed
+# plugin. --plugin-dir remains how sessions reach an uninstalled checkout's
+# hooks and skills: add "--plugin-dir", "{plugin_dir}" and supply it with
 # --plugin-root or CLAUDE_PLUGIN_ROOT — naming {plugin_dir} without either is
 # refused at startup rather than pointing a session at the wrong plugin.
+# --plugin-root / CLAUDE_PLUGIN_ROOT also swap the {procedure} source from
+# the binary's embedded copy to the live checkout's commands/.
 #
 # No --allowedTools on the act session: an allowlist that omits Bash leaves
 # every PR draft by construction, and what actually bounds the session is the
@@ -114,13 +119,47 @@ retain = "on-failure"
 # herdr and the next daemon adopts them; "stop" closes their workspaces.
 on_shutdown = "detach"
 
+# The prompts are self-contained (decision 0050): {procedure} is the
+# canonical commands/*.md body — act alone for act, refine/ritual composed
+# with the act procedure they delegate to — rendered by the daemon from its
+# embedded copy (or the --plugin-root checkout), so the spawned session needs
+# no installed plugin. The contract still lives in those files, never here.
+# The first line is deliberately per-session-unique: the herdr backend proves
+# a prompt landed by matching its opening against pane scrollback.
+#
+# An instance that prefers the installed-plugin spelling sets the old
+# one-liners back — e.g. act = "/trellis:act {owner} advance {plan} …" — and
+# everything renders as before; the daemon always supplies every placeholder
+# and the template chooses which to name.
 [prompts]
-act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority. Dispatched: the runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped, and the change mechanics are computed — {automation}; core never lands, it is proposed. Evaluate only the judgment items. Claim with `trellis plan claim {plan}`; on an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail."
-ritual = "/trellis:ritual {ritual}"
+act = """{plan} — dispatched act as {owner} (trellis runtime).
+
+Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. Claim with `trellis plan claim {plan}`; on an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail.
+
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+
+{procedure}"""
+
+ritual = """ritual {ritual} — executed by {executor} (trellis runtime).
+
+Execute the ritual "{ritual}" from rituals.md as {executor}. The runtime resolved the executor from the row and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. Read the row for the procedure and its cadence — the freshness window for any metrics involved.
+
+The procedure below is the trellis framework's commands/ritual.md with the commands/act.md procedure it delegates to, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+
+{procedure}"""
+
 # One refine session (decision 0048): the operator's {instruction} rides
-# verbatim; the refinement contract itself lives in commands/refine.md, so
-# this string stays thin on purpose.
-refine = "/trellis:refine {plan} {instruction}"
+# verbatim; the refinement contract lives in commands/refine.md and reaches
+# the session as its {procedure} rendering.
+refine = """refine {plan} as {owner} (trellis runtime).
+
+Act as {owner}: refine {plan} — reshape its content, never execute it. The operator's instruction, verbatim: {instruction}
+
+The runtime has already resolved you as the plan's owner and verified the plan is live and owned; the acting-role marker is already stamped (leave it alone); escalations go to {escalate_to}.
+
+The procedure below is the trellis framework's commands/refine.md with the commands/act.md procedure it delegates to, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+
+{procedure}"""
 
 # Complexity → session resources. The spec defines the tiers (reasoning depth,
 # never size); this is where this binding turns them into a model, an effort

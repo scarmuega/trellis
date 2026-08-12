@@ -49,10 +49,16 @@ fn a_first_pass_fires_every_scheduled_row() {
 
     assert_eq!(rituals_run(&f), vec!["conventions lint"]);
     let argv = &f.invocations()[0];
+    // The prompt element line-splits in the harness's argv log; its first
+    // line is the discriminating header the default renders (decision 0050),
+    // and the procedure body follows in the same element.
     assert_eq!(
-        argv[1], "/trellis:ritual conventions lint",
-        "the prompt is rendered and stays one argument"
+        argv[1],
+        "ritual conventions lint — executed by org/steward (trellis runtime)."
     );
+    let prompt = argv[1..].join("\n");
+    assert!(prompt.contains("Find the row"), "{prompt}");
+    assert!(prompt.contains("Bind to the domain root"), "{prompt}");
 
     let state = f.rituals_state();
     assert_eq!(
@@ -158,19 +164,23 @@ fn a_dry_run_reports_the_command_and_changes_nothing() {
 }
 
 #[test]
-fn the_default_config_runs_the_installed_plugin_without_pointing_at_a_checkout() {
+fn the_default_config_needs_no_plugin_at_all() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
-    // No runtime.toml at all, and no CLAUDE_PLUGIN_ROOT: the defaults are the
-    // reference binding's, and they must start on a machine where the plugin
-    // is simply installed in the harness — which is every machine a local
-    // daemon runs on.
+    // No runtime.toml, no CLAUDE_PLUGIN_ROOT, no installed plugin: the
+    // default prompt is self-contained — the procedure rendered from the
+    // binary's embedded commands (decision 0050), no slash command to
+    // resolve, no checkout named.
     let out = f.rituals_once(ANCHOR, &["--dry-run"]);
 
     assert!(
-        out.contains("claude -p '/trellis:ritual conventions lint'"),
+        out.contains("ritual conventions lint — executed by org/steward"),
         "{out}"
     );
+    assert!(out.contains("Bind to the domain root"), "{out}");
+    // The procedure prose may *mention* /trellis:act; the prompt must not
+    // *open* with a slash command the harness would have to resolve.
+    assert!(!out.contains("-p '/trellis:"), "{out}");
     assert!(out.contains("--permission-mode acceptEdits"), "{out}");
     assert!(
         !out.contains("--plugin-dir"),
@@ -203,6 +213,24 @@ ritual_cmd = ["claude", "--plugin-dir", "{plugin_dir}"]
 }
 
 #[test]
+fn an_instance_keeping_the_slash_spelling_renders_exactly_as_before() {
+    let f = Fixture::healthy();
+    f.write("rituals.md", RITUALS);
+    // The migration story (decision 0050): the daemon always supplies every
+    // placeholder; a prompt override that still names the plugin spelling
+    // renders untouched, procedure and all unused.
+    f.write(
+        "runtime.toml",
+        "[prompts]\nritual = \"/trellis:ritual {ritual}\"\n",
+    );
+    let out = f.rituals_once(ANCHOR, &["--dry-run"]);
+    assert!(
+        out.contains("claude -p '/trellis:ritual conventions lint'"),
+        "{out}"
+    );
+}
+
+#[test]
 fn a_domain_may_still_point_its_sessions_at_a_checkout() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
@@ -212,6 +240,32 @@ fn a_domain_may_still_point_its_sessions_at_a_checkout() {
 ritual_cmd = ["claude", "-p", "{prompt}", "--plugin-dir", "{plugin_dir}"]
 "#,
     );
-    let out = f.rituals_once(ANCHOR, &["--dry-run", "--plugin-root", "/tmp/plugin"]);
-    assert!(out.contains("--plugin-dir /tmp/plugin"), "{out}");
+    // A configured checkout must carry its commands (decision 0050): the
+    // {procedure} source swaps to it, so a bare directory is refused.
+    let checkout = tempfile::tempdir().unwrap();
+    let commands = checkout.path().join("commands");
+    std::fs::create_dir_all(&commands).unwrap();
+    for name in ["act.md", "refine.md", "ritual.md"] {
+        std::fs::write(
+            commands.join(name),
+            "---\ndescription: probe\n---\nCHECKOUT-SENTINEL procedure body\n",
+        )
+        .unwrap();
+    }
+    let root = checkout.path().display().to_string();
+    let out = f.rituals_once(ANCHOR, &["--dry-run", "--plugin-root", &root]);
+    assert!(out.contains(&format!("--plugin-dir {root}")), "{out}");
+    assert!(
+        out.contains("CHECKOUT-SENTINEL"),
+        "the live checkout's procedure rides the prompt: {out}"
+    );
+
+    // The same config against a checkout with no commands refuses to start.
+    let empty = tempfile::tempdir().unwrap();
+    let out = f.rituals_expect_failure(ANCHOR, &[
+        "--dry-run",
+        "--plugin-root",
+        &empty.path().display().to_string(),
+    ]);
+    assert!(out.contains("commands"), "{out}");
 }

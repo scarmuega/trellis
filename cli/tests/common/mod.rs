@@ -326,6 +326,28 @@ exit 9
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    /// `trellis rituals …` expected to refuse: stdout+stderr, asserted nonzero.
+    #[allow(dead_code)]
+    pub fn rituals_expect_failure(&self, today: &str, args: &[&str]) -> String {
+        let out = self
+            .bin()
+            .env("TRELLIS_TODAY", today)
+            .args(["rituals"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "rituals succeeded where a refusal was owed: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    }
+
     /// The built binary, for the cases that must not block on completion.
     pub fn bin_path() -> PathBuf {
         assert_cmd::cargo::cargo_bin("trellis")

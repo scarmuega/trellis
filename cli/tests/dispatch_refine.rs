@@ -123,12 +123,17 @@ fn a_refine_request_spawns_on_the_wake_and_carries_the_instruction() {
     assert_eq!(outcome["plan"], "plans/reshape-me.md");
 
     // The tick is an hour away, so only the wake can have started this — and
-    // the prompt the harness got is the framework command, instruction
-    // riding verbatim.
+    // the prompt the harness got is the rendered framework procedure
+    // (decision 0050): unique first line, instruction verbatim, the
+    // refinement contract and the act body it delegates to.
     let argv = until("the refine session to start", || {
         f.invocations().into_iter().next()
     });
-    assert_eq!(argv[0], "/trellis:refine plans/reshape-me.md split the scope");
+    assert_eq!(argv[0], "refine plans/reshape-me.md as founder (trellis runtime).");
+    let prompt = argv.join("\n");
+    assert!(prompt.contains("verbatim: split the scope"), "{prompt}");
+    assert!(prompt.contains("The refinement contract"), "{prompt}");
+    assert!(prompt.contains("Bind to the domain root"), "{prompt}");
 }
 
 #[test]
