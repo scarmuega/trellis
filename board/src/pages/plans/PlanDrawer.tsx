@@ -5,9 +5,9 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, FlipError } from "../../lib/api";
 
-// Preset refinement instructions — UI sugar over the framework command,
-// which accepts any instruction (commands/refine.md carries the contract).
-const ACTIONS = [
+// Preset instructions for the shipped `refine` errand — UI sugar; the errand
+// accepts any instruction, and other errands get the custom box.
+const REFINE_PRESETS = [
   {
     label: "Simplify scope",
     instruction:
@@ -25,12 +25,14 @@ const ACTIONS = [
   },
 ];
 
-/// The Act menu: canned refinements plus a custom instruction, POSTing to the
-/// refine route through serve's relay (decision 0048).
+/// The Act menu, built from the daemon's own errand table (decision 0051):
+/// one section per requestable errand — refine's canned presets plus a
+/// custom instruction, other errands with the custom instruction alone —
+/// POSTing through serve's relay (decision 0048).
 function ActMenu({ rel }: { rel: string }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState(false);
+  const [custom, setCustom] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -40,15 +42,24 @@ function ActMenu({ rel }: { rel: string }) {
     queryFn: api.status,
     refetchInterval: 10_000,
   });
+  const { data: errands } = useQuery({
+    queryKey: ["errands"],
+    queryFn: api.errands,
+    staleTime: 60_000,
+  });
   const dispatcherUp = status?.dispatch_running === true;
   const inFlight = (status?.dispatch?.in_flight ?? []).some(
     (s) => s.key === `plan:${rel}`,
   );
 
   const mutation = useMutation({
-    mutationFn: (instruction: string) => api.refine(rel, instruction),
+    mutationFn: ({ errand, instruction }: { errand: string; instruction: string }) =>
+      api.requestErrand(rel, errand, instruction),
     onSuccess: (outcome) => {
-      show(true, `refinement session requested — ${outcome.owner} (${outcome.model}/${outcome.effort})`);
+      show(
+        true,
+        `${outcome.errand ?? "errand"} session requested — ${outcome.owner} (${outcome.model}/${outcome.effort})`,
+      );
       queryClient.invalidateQueries({ queryKey: ["status"] });
       queryClient.invalidateQueries({ queryKey: ["artifact", rel] });
     },
@@ -62,10 +73,11 @@ function ActMenu({ rel }: { rel: string }) {
   };
   useEffect(() => () => clearTimeout(clearTimer.current), []);
 
-  const run = (instruction: string) => {
+  const run = (errand: string, instruction: string) => {
     setOpen(false);
-    setCustom(false);
-    mutation.mutate(instruction);
+    setCustom(null);
+    setText("");
+    mutation.mutate({ errand, instruction });
   };
 
   const disabled = !dispatcherUp || inFlight || mutation.isPending;
@@ -74,6 +86,8 @@ function ActMenu({ rel }: { rel: string }) {
     : inFlight
       ? "a session is already running on this plan"
       : undefined;
+
+  const available = errands ?? ["refine"];
 
   return (
     <div className="relative">
@@ -87,42 +101,55 @@ function ActMenu({ rel }: { rel: string }) {
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 w-64 rounded-md border border-neutral-200 bg-white p-1 shadow-lg">
-          {ACTIONS.map((a) => (
-            <button
-              key={a.label}
-              onClick={() => run(a.instruction)}
-              className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100"
-              title={a.instruction}
-            >
-              {a.label}
-            </button>
-          ))}
-          {!custom ? (
-            <button
-              onClick={() => setCustom(true)}
-              className="block w-full rounded px-2 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-100"
-            >
-              Custom…
-            </button>
-          ) : (
-            <div className="p-1.5">
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={3}
-                autoFocus
-                placeholder="what should the owner do to this plan?"
-                className="w-full rounded border border-neutral-200 p-1.5 text-xs focus:border-neutral-400 focus:outline-none"
-              />
-              <button
-                onClick={() => text.trim() && run(text.trim())}
-                disabled={!text.trim()}
-                className="mt-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white disabled:opacity-40"
-              >
-                Request
-              </button>
+          {available.map((errand) => (
+            <div key={errand}>
+              {available.length > 1 && (
+                <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-neutral-400 uppercase">
+                  {errand}
+                </p>
+              )}
+              {errand === "refine" &&
+                REFINE_PRESETS.map((a) => (
+                  <button
+                    key={a.label}
+                    onClick={() => run("refine", a.instruction)}
+                    className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100"
+                    title={a.instruction}
+                  >
+                    {a.label}
+                  </button>
+                ))}
+              {custom !== errand ? (
+                <button
+                  onClick={() => {
+                    setCustom(errand);
+                    setText("");
+                  }}
+                  className="block w-full rounded px-2 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-100"
+                >
+                  {errand === "refine" ? "Custom…" : `${errand}…`}
+                </button>
+              ) : (
+                <div className="p-1.5">
+                  <textarea
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    rows={3}
+                    autoFocus
+                    placeholder="what should the owner do to this plan?"
+                    className="w-full rounded border border-neutral-200 p-1.5 text-xs focus:border-neutral-400 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => text.trim() && run(errand, text.trim())}
+                    disabled={!text.trim()}
+                    className="mt-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white disabled:opacity-40"
+                  >
+                    Request
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          ))}
         </div>
       )}
       {result && (

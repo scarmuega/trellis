@@ -56,8 +56,9 @@ export interface DaemonStatus {
   [key: string]: unknown;
 }
 
-export interface RefineOutcome {
+export interface ErrandOutcome {
   plan: string;
+  errand?: string;
   outcome: string;
   owner?: string;
   model?: string;
@@ -98,17 +99,28 @@ export const api = {
     if (!res.ok) throw new Error(`view ${name}: ${res.status}`);
     return res.text();
   },
-  // Ask the plan's owner to reshape its content (decision 0048). Serve
-  // relays this to the dispatcher; a refusal's reason comes back verbatim.
-  refine: async (rel: string, instruction: string): Promise<RefineOutcome> => {
+  // The operator-requestable errand names this root's [prompts] carries
+  // (decision 0051) — "refine" ships; instances add their own.
+  errands: () => getJson<string[]>("/api/errands"),
+  // Ask the plan's owner to run an errand over it (decisions 0048, 0051).
+  // Serve relays this to the dispatcher; a refusal comes back verbatim.
+  requestErrand: async (
+    rel: string,
+    errand: string,
+    instruction: string,
+  ): Promise<ErrandOutcome> => {
     const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
-    const res = await fetch(`/api/plans/${encodeURIComponent(slug)}/refine`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction }),
-    });
+    const res = await fetch(
+      `/api/plans/${encodeURIComponent(slug)}/errands/${encodeURIComponent(errand)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instruction }),
+      },
+    );
     const body = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(body?.error ?? `refine failed (${res.status})`);
+    if (!res.ok)
+      throw new Error(body?.error ?? `${errand} failed (${res.status})`);
     return body;
   },
   // Flip a plan's lifecycle status (decision 0049) — the same guarded move
