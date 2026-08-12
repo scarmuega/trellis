@@ -252,6 +252,9 @@ impl Default for Harness {
 pub struct Prompts {
     pub act: String,
     pub ritual: String,
+    /// One refine session (decision 0048). Thin by design: the refinement
+    /// contract lives in `commands/refine.md`, not in this string.
+    pub refine: String,
 }
 
 impl Default for Prompts {
@@ -268,6 +271,7 @@ impl Default for Prompts {
                   `trellis escalate add`; leave a trail."
                 .into(),
             ritual: "/trellis:ritual {ritual}".into(),
+            refine: "/trellis:refine {plan} {instruction}".into(),
         }
     }
 }
@@ -317,6 +321,7 @@ impl RuntimeConfig {
         tmpl::check("harness.ritual_cmd", &self.harness.ritual_cmd)?;
         tmpl::check("prompts.act", std::slice::from_ref(&self.prompts.act))?;
         tmpl::check("prompts.ritual", std::slice::from_ref(&self.prompts.ritual))?;
+        tmpl::check("prompts.refine", std::slice::from_ref(&self.prompts.refine))?;
         if self.scheduler.tick_secs == 0 {
             anyhow::bail!("scheduler.tick_secs must be at least 1");
         }

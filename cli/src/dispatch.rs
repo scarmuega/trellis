@@ -56,6 +56,23 @@ pub fn automation_line(tree: &Tree, derived: &Derived, plan_rel: &str) -> String
     }
 }
 
+/// The session a plan's `complexity:` tier maps to — the scan's own
+/// resolution (an absent or illegal tier reads standard), shared with the
+/// refine path so both spawn from one mapping (decision 0048).
+pub fn plan_session<'a>(
+    tree: &Tree,
+    map: &'a SessionMap,
+    plan_rel: &str,
+) -> (Complexity, &'a Session) {
+    let complexity = tree
+        .get_addressed(plan_rel)
+        .and_then(|p| p.fm.as_ref())
+        .and_then(|f| f.get_str("complexity"))
+        .and_then(|c| Complexity::parse(&c))
+        .unwrap_or(Complexity::Standard);
+    (complexity, map.session(complexity))
+}
+
 /// Where a role's escalations go: its mandate's `escalate-to:`, falling back
 /// to the role itself (an escalation to yourself is a report that stands).
 pub fn escalate_to(tree: &Tree, role: &str) -> String {

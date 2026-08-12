@@ -304,6 +304,18 @@ enum DispatchCmd {
         #[arg(long, value_name = "SPEC")]
         map: Vec<String>,
     },
+    /// Ask the running dispatcher to spawn one refine session — the plan's
+    /// owner reshaping its content per the instruction, never executing it
+    /// (decision 0048)
+    Refine {
+        /// The plan (plans/x.md, plans/x, or x)
+        plan: String,
+        /// What to do to the plan's content (e.g. "split the scope")
+        instruction: String,
+        /// Reach a daemon at this host:port instead of the one on this root
+        #[arg(long, value_name = "ADDR")]
+        addr: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -833,6 +845,44 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             once,
             dry_run,
         }),
+
+        Cmd::Dispatch {
+            cmd:
+                DispatchCmd::Refine {
+                    plan,
+                    instruction,
+                    addr,
+                },
+        } => {
+            let root = Root::discover(cli.root.as_deref())?.path;
+            let outcome =
+                daemon::client::refine(&root, addr.as_deref(), &plan, &instruction)?;
+            match cli.format {
+                Format::Json => print_json(&outcome),
+                Format::Text => {
+                    let get = |k: &str| {
+                        outcome
+                            .get(k)
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                            .to_string()
+                    };
+                    println!(
+                        "requested: {} → {} ({}, {} / {} / ${})",
+                        get("plan"),
+                        get("owner"),
+                        get("complexity"),
+                        get("model"),
+                        get("effort"),
+                        outcome
+                            .get("budget_usd")
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or(0.0),
+                    );
+                }
+            }
+            Ok(ok)
+        }
 
         Cmd::Dispatch {
             cmd: DispatchCmd::Scan { map },

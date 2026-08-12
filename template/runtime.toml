@@ -117,6 +117,10 @@ on_shutdown = "detach"
 [prompts]
 act = "/trellis:act {owner} advance {plan} toward its objective: make the next increment of progress within your authority. Dispatched: the runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped, and the change mechanics are computed — {automation}; core never lands, it is proposed. Evaluate only the judgment items. Claim with `trellis plan claim {plan}`; on an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail."
 ritual = "/trellis:ritual {ritual}"
+# One refine session (decision 0048): the operator's {instruction} rides
+# verbatim; the refinement contract itself lives in commands/refine.md, so
+# this string stays thin on purpose.
+refine = "/trellis:refine {plan} {instruction}"
 
 # Complexity → session resources. The spec defines the tiers (reasoning depth,
 # never size); this is where this binding turns them into a model, an effort

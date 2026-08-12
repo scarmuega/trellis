@@ -119,6 +119,117 @@ pub struct Shared {
     /// The read-only server overlays the dispatcher's `status.json` — it has
     /// no pass of its own to report (decision 0046).
     pub overlay_status: bool,
+    /// This process runs the dispatch loop, so its socket honors the refine
+    /// request locally (decision 0048); everywhere else the route relays or
+    /// refuses.
+    pub dispatches: bool,
+    /// Refine sessions an operator asked for, drained by the next pass. The
+    /// queue is memory only — a request is one-shot and best-effort, and the
+    /// loop stays the only spawner.
+    pub refines: Mutex<Vec<RefineRequest>>,
+    /// Ask the loop to pass now without queueing anything. Set when a refine
+    /// is refused as in-flight: `status.in_flight` is only as fresh as the
+    /// last pass, so if that session actually ended, the nudged pass reaps it
+    /// and the operator's retry succeeds within a second instead of a tick.
+    pub nudge: std::sync::atomic::AtomicBool,
+}
+
+/// One operator ask: refine this plan's content per this instruction.
+#[derive(Debug, Clone)]
+pub struct RefineRequest {
+    /// The plan rel ("plans/x.md").
+    pub plan: String,
+    pub instruction: String,
+}
+
+impl Shared {
+    /// Queue a refine. A second request for a plan already queued replaces
+    /// its instruction — the operator changed their mind, not their target.
+    pub fn request_refine(&self, plan: &str, instruction: &str) {
+        let mut queue = self.refines.lock().unwrap();
+        if let Some(existing) = queue.iter_mut().find(|r| r.plan == plan) {
+            existing.instruction = instruction.to_string();
+        } else {
+            queue.push(RefineRequest {
+                plan: plan.to_string(),
+                instruction: instruction.to_string(),
+            });
+        }
+    }
+
+    pub fn take_refines(&self) -> Vec<RefineRequest> {
+        std::mem::take(&mut *self.refines.lock().unwrap())
+    }
+
+    pub fn has_refines(&self) -> bool {
+        !self.refines.lock().unwrap().is_empty()
+    }
+}
+
+/// Why a refine request is refused, in the tree's own vocabulary. Checked at
+/// the route when the request arrives, and again by the pass that drains it —
+/// the tree may have changed in between, and the loop trusts only its own
+/// snapshot (decision 0048).
+#[derive(Debug)]
+pub enum RefineRefusal {
+    /// Not a plan in this root, live or archived.
+    NotAPlan,
+    /// Retired or archived: the terminal tier is frozen content.
+    Terminal,
+    /// No `owner:` — no mandate to act under.
+    Unowned,
+    /// The owner's holder is a declared human: refinement is theirs to do by
+    /// hand, not a session's to run.
+    Handoff {
+        owner: String,
+        holder_ref: Option<String>,
+    },
+}
+
+impl RefineRefusal {
+    pub fn describe(&self, rel: &str) -> String {
+        match self {
+            RefineRefusal::NotAPlan => format!("{rel} is not a plan in this root"),
+            RefineRefusal::Terminal => {
+                format!("{rel} is in the terminal tier — refine reshapes live plans, not history")
+            }
+            RefineRefusal::Unowned => {
+                format!("{rel} declares no owner: — there is no mandate to refine it under")
+            }
+            RefineRefusal::Handoff { owner, holder_ref } => format!(
+                "{rel}: {owner} is human-held{} — refinement is a handoff, not a session",
+                holder_ref
+                    .as_deref()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default()
+            ),
+        }
+    }
+}
+
+/// Whether one plan may be refined right now; `Ok` carries its `owner:`.
+pub fn validate_refine(tree: &Tree, rel: &str) -> Result<String, RefineRefusal> {
+    let Some(plan) = tree.get_addressed(rel) else {
+        return Err(RefineRefusal::NotAPlan);
+    };
+    if plan.kind != crate::tree::Kind::Plan {
+        return Err(RefineRefusal::NotAPlan);
+    }
+    if plan.archived || plan.status().as_deref() == Some("retired") {
+        return Err(RefineRefusal::Terminal);
+    }
+    let Some(owner) = plan.owner() else {
+        return Err(RefineRefusal::Unowned);
+    };
+    let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
+    let holder = crate::org::holder(tree, &owner_short);
+    if holder.is_declared_human() {
+        return Err(RefineRefusal::Handoff {
+            owner,
+            holder_ref: holder.reference,
+        });
+    }
+    Ok(owner)
 }
 
 /// Everything a pass needs that does not change between passes.
@@ -175,6 +286,9 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         sessions,
         inbox: mcp::Inbox::default(),
         overlay_status: true,
+        dispatches: false,
+        refines: Mutex::new(Vec::new()),
+        nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = Pidfile::claim(&root, "serve.pid", "trellis serve")?;
     let port = server::start(Arc::clone(&shared), &cfg.server)?;
@@ -234,6 +348,9 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         sessions,
         inbox: mcp::Inbox::default(),
         overlay_status: false,
+        dispatches: true,
+        refines: Mutex::new(Vec::new()),
+        nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = if opts.once {
         None
@@ -324,7 +441,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
             }
             return Ok(ExitCode::SUCCESS);
         }
-        if sleep_until_tick_or_signal(rt.cfg.scheduler.tick_secs) {
+        if sleep_until_tick_or_signal(rt.cfg.scheduler.tick_secs, &shared) {
             return shutdown(&rt, &mut state, &mut backend);
         }
     }
@@ -357,6 +474,9 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         sessions,
         inbox: mcp::Inbox::default(),
         overlay_status: false,
+        dispatches: false,
+        refines: Mutex::new(Vec::new()),
+        nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // No channels: announcing newly-open records is the dispatcher's watch.
     let mut rt = Runtime {
@@ -463,13 +583,25 @@ fn open_channels(cfg: &RuntimeConfig) -> anyhow::Result<channels::Channels> {
 
 /// Sleep out the tick interval, waking early if a stop was asked for. Returns
 /// whether it was. Polled in slices rather than one long sleep: a `SIGTERM`
-/// that waits a full minute to be noticed reads as a hung daemon.
-fn sleep_until_tick_or_signal(tick_secs: u64) -> bool {
+/// that waits a full minute to be noticed reads as a hung daemon. The same
+/// slices notice a queued refine request (decision 0048), so an operator's
+/// ask starts within a fraction of a second, not a tick — no Condvar needed
+/// on a loop that already polls this often.
+fn sleep_until_tick_or_signal(tick_secs: u64, shared: &Shared) -> bool {
     let slice = std::time::Duration::from_millis(250);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(tick_secs);
     while std::time::Instant::now() < deadline {
         if signals::stopping() {
             return true;
+        }
+        if shared.has_refines() {
+            return false;
+        }
+        if shared
+            .nudge
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return false;
         }
         std::thread::sleep(slice);
     }
@@ -584,6 +716,52 @@ fn dispatch_pass(
         .retain(|p| report.handoffs.iter().any(|h| &h.plan == p));
 
     let mut outcome = Pass::default();
+
+    // Operator-requested refine sessions drain first (decision 0048): an
+    // explicit ask outranks the scheduled scan for the same slots. Each is
+    // one-shot — re-validated against this pass's tree, then fired or dropped
+    // with its reason, never carried to a later pass. No cooldown: the
+    // cooldown throttles unattended respawns, and this is the attended case.
+    for req in rt.shared.take_refines() {
+        let owner = match validate_refine(&tree, &req.plan) {
+            Ok(owner) => owner,
+            Err(refusal) => {
+                note(&format!(
+                    "refine dropped — {}",
+                    refusal.describe(&req.plan)
+                ));
+                continue;
+            }
+        };
+        let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
+        let (complexity, session) =
+            dispatch::plan_session(&tree, &rt.shared.sessions, &req.plan);
+        let key = state::key_plan(&req.plan);
+        let vars = tmpl::Vars::new()
+            .set("plan", req.plan.clone())
+            .set("owner", owner_short)
+            .set("escalate_to", dispatch::escalate_to(&tree, &owner))
+            .set("instruction", req.instruction.clone())
+            .set("complexity", complexity.as_str())
+            .set("model", session.model.clone())
+            .set("effort", session.effort.clone())
+            .set("budget", session.budget_usd.to_string());
+        let started = fire(
+            rt,
+            state,
+            backend,
+            &key,
+            &format!("refine {} → {}", req.plan, owner),
+            &owner,
+            &rt.cfg.prompts.refine,
+            &rt.cfg.harness.act_cmd,
+            &rt.cfg.harness.herdr.act_args,
+            vars,
+            today,
+        );
+        outcome.record(started);
+    }
+
     for item in &report.dispatch {
         let key = state::key_plan(&item.plan);
         // The cooldown is the tight loop's backstop: a session that ended

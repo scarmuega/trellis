@@ -35,6 +35,9 @@ pub const PLACEHOLDERS: &[&str] = &[
     // derivation whose instructions used to cost the session the whole
     // conventions read. Empty for rituals, which carry no plan.
     "automation",
+    // The operator's refinement instruction, relayed verbatim into the
+    // prompt (decision 0048). Set only for refine sessions.
+    "instruction",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

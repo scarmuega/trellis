@@ -48,7 +48,14 @@ fn endpoint(root: &Path) -> anyhow::Result<String> {
     )
 }
 
-fn request(addr: &str, method: &str, path: &str, body: Option<&str>) -> anyhow::Result<String> {
+/// One request, status code and body returned as they came — the seam the
+/// serve relay passes a refine response through verbatim (decision 0048).
+pub(crate) fn raw(
+    addr: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> anyhow::Result<(u16, String)> {
     let mut stream = TcpStream::connect(addr)
         .map_err(|e| anyhow::anyhow!("cannot reach the daemon at {addr}: {e}"))?;
     stream.set_read_timeout(Some(TIMEOUT))?;
@@ -76,8 +83,13 @@ fn request(addr: &str, method: &str, path: &str, body: Option<&str>) -> anyhow::
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|c| c.parse().ok())
         .ok_or_else(|| anyhow::anyhow!("the daemon sent no status line"))?;
+    Ok((code, body.to_string()))
+}
+
+fn request(addr: &str, method: &str, path: &str, body: Option<&str>) -> anyhow::Result<String> {
+    let (code, body) = raw(addr, method, path, body)?;
     if !(200..300).contains(&code) {
-        let detail = serde_json::from_str::<serde_json::Value>(body)
+        let detail = serde_json::from_str::<serde_json::Value>(&body)
             .ok()
             .and_then(|v| {
                 v.get("error")
@@ -87,7 +99,7 @@ fn request(addr: &str, method: &str, path: &str, body: Option<&str>) -> anyhow::
             .unwrap_or_else(|| body.trim().to_string());
         anyhow::bail!("{detail}");
     }
-    Ok(body.to_string())
+    Ok(body)
 }
 
 pub fn pending(root: &Path, addr: Option<&str>) -> anyhow::Result<Vec<Pending>> {
@@ -135,6 +147,51 @@ pub fn answer(
         Some(&body),
     )?;
     Ok(resolved)
+}
+
+/// `trellis dispatch refine` — ask the running dispatcher to spawn one
+/// refine session (decision 0048). The route lives on the dispatcher's
+/// socket; serve answers it too, as a relay; rituals refuses it — so the
+/// address resolution skips `rituals.addr`. On refusal the daemon's reason
+/// comes back verbatim as the error.
+pub fn refine(
+    root: &Path,
+    addr: Option<&str>,
+    plan: &str,
+    instruction: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let addr = match addr {
+        Some(a) => a.to_string(),
+        None => {
+            let mut found = None;
+            for file in [super::DISPATCH_ADDRFILE, super::SERVE_ADDRFILE] {
+                let path = RuntimeConfig::runtime_dir(root).join(file);
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    found = Some(text.trim().to_string());
+                    break;
+                }
+            }
+            found.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no dispatcher is running on this root — start `trellis dispatch run`, \
+                     or point at one with --addr"
+                )
+            })?
+        }
+    };
+    let slug = plan
+        .trim()
+        .strip_prefix("plans/")
+        .unwrap_or(plan.trim())
+        .trim_end_matches(".md");
+    let body = serde_json::json!({ "instruction": instruction }).to_string();
+    let text = request(
+        &addr,
+        "POST",
+        &format!("/api/plans/{slug}/refine"),
+        Some(&body),
+    )?;
+    Ok(serde_json::from_str(&text)?)
 }
 
 /// Block until at least one question is open, then return them.

@@ -11,14 +11,20 @@
 //! ingress: an HTTP door into `act` would be a trigger plane with no mandate
 //! behind it (decision 0038).
 //!
-//! Two routes are not reads, and neither weakens that. `/mcp/{token}` is the
+//! Three routes are not reads, and none weakens that. `/mcp/{token}` is the
 //! back-channel a spawned session calls to ask a question or report progress,
 //! and `POST /api/sessions/{token}/answer` carries the reply (decision 0041).
 //! Both write `.trellis/runtime/` and no artifact; both concern a session
 //! already running under a mandate this surface did not grant and cannot
-//! widen. Relaying a question to a human and the answer back is the "relay"
-//! the daemon is chartered for, not judgment. Every other non-GET is still
-//! 405, and that is worth keeping true.
+//! widen. `POST /api/plans/{slug}/refine` (decision 0048) enqueues an
+//! operator's ask that the plan's own `owner:` reshape its content: honored
+//! locally only on the dispatcher's socket — where the loop, still the only
+//! spawner, re-validates and fires it — and answered by serve purely as a
+//! relay to that socket. The plan is already in the domain and the mandate is
+//! the one it already declares (decision 0029), so nothing here grants or
+//! widens anything. Relaying is the verb the daemon is chartered for, not
+//! judgment. Every other non-GET is still 405, and that is worth keeping
+//! true.
 //!
 //! Handlers hold no cache: each recomputes from a fresh tree. The bind
 //! address defaults to loopback because the surface carries no authentication
@@ -123,6 +129,13 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
         {
             return answer(request, shared, &ticket);
         }
+        if let Some(slug) = path
+            .strip_prefix("/api/plans/")
+            .and_then(|rest| rest.strip_suffix("/refine"))
+            .map(str::to_string)
+        {
+            return refine(request, shared, &slug);
+        }
     }
     if request.method() != &Method::Get {
         return error(request, 405, "this surface is read-only");
@@ -225,6 +238,151 @@ fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Resul
             "no such open question — it was answered already, or its session ended",
         )
     }
+}
+
+/// `POST /api/plans/{slug}/refine` — an operator asks the plan's `owner:` to
+/// reshape its content (decision 0048). Honored locally only where the
+/// dispatch loop runs — the handler validates mechanically and enqueues; the
+/// loop is the only spawner. Serve answers the same path purely as a relay to
+/// the dispatcher's socket; a rituals pass refuses it.
+fn refine(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
+    let mut body = String::new();
+    if let Err(e) = request.as_reader().read_to_string(&mut body) {
+        return error(request, 400, &format!("cannot read the request body: {e}"));
+    }
+    let instruction = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| {
+            v.get("instruction")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if instruction.is_empty() {
+        return error(
+            request,
+            400,
+            "an empty instruction is not an instruction — send {\"instruction\": \"…\"}",
+        );
+    }
+    if instruction.len() > 4096 {
+        return error(
+            request,
+            400,
+            "the instruction is longer than 4096 bytes — a refinement brief, not a document",
+        );
+    }
+    let rel = format!("plans/{}.md", slug.trim_end_matches(".md"));
+
+    if shared.dispatches {
+        let (tree, _, _, _) = match snapshot(&shared.root) {
+            Ok(s) => s,
+            Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),
+        };
+        let owner = match super::validate_refine(&tree, &rel) {
+            Ok(owner) => owner,
+            Err(refusal) => {
+                let (code, outcome) = match &refusal {
+                    super::RefineRefusal::NotAPlan => (404, "not-a-plan"),
+                    super::RefineRefusal::Terminal => (409, "terminal"),
+                    super::RefineRefusal::Unowned => (409, "unowned"),
+                    super::RefineRefusal::Handoff { .. } => (409, "handoff"),
+                };
+                let body = serde_json::json!({
+                    "plan": rel,
+                    "outcome": outcome,
+                    "error": refusal.describe(&rel),
+                })
+                .to_string();
+                return request.respond(
+                    Response::from_string(body)
+                        .with_status_code(code)
+                        .with_header(json_header()),
+                );
+            }
+        };
+        let key = super::state::key_plan(&rel);
+        let in_flight = shared
+            .status
+            .lock()
+            .unwrap()
+            .in_flight
+            .iter()
+            .any(|s| s.key == key);
+        if in_flight {
+            // The snapshot is only as fresh as the last pass. Nudge one now:
+            // if that session actually ended, the pass reaps it and a retry
+            // succeeds in a second instead of a tick.
+            shared
+                .nudge
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let body = serde_json::json!({
+                "plan": rel,
+                "outcome": "in-flight",
+                "error": format!(
+                    "{rel} already has a session running — one plan, one session; \
+                     if it just finished, retry in a moment"
+                ),
+            })
+            .to_string();
+            return request.respond(
+                Response::from_string(body)
+                    .with_status_code(409)
+                    .with_header(json_header()),
+            );
+        }
+        let (complexity, session) =
+            crate::dispatch::plan_session(&tree, &shared.sessions, &rel);
+        shared.request_refine(&rel, &instruction);
+        return json(
+            request,
+            &serde_json::json!({
+                "plan": rel,
+                "outcome": "requested",
+                "owner": owner,
+                "complexity": complexity.as_str(),
+                "model": session.model,
+                "effort": session.effort,
+                "budget_usd": session.budget_usd,
+            }),
+        );
+    }
+
+    if shared.overlay_status {
+        // Serve relays to the process chartered to spawn, and decides
+        // nothing — not even the refusals, which come back verbatim.
+        let addr_path = super::config::RuntimeConfig::runtime_dir(&shared.root)
+            .join(super::DISPATCH_ADDRFILE);
+        let Ok(addr) = std::fs::read_to_string(&addr_path) else {
+            return error(
+                request,
+                503,
+                "no dispatcher is running on this root — start `trellis dispatch run`",
+            );
+        };
+        let forward = serde_json::json!({ "instruction": instruction }).to_string();
+        return match super::client::raw(
+            addr.trim(),
+            "POST",
+            &format!("/api/plans/{slug}/refine"),
+            Some(&forward),
+        ) {
+            Ok((code, body)) => request.respond(
+                Response::from_string(body)
+                    .with_status_code(code)
+                    .with_header(json_header()),
+            ),
+            Err(e) => error(
+                request,
+                503,
+                &format!("the dispatcher did not answer: {e} — is `trellis dispatch run` up?"),
+            ),
+        };
+    }
+
+    error(request, 405, "this process runs no dispatch loop")
 }
 
 /// Everything that reads the domain. One tree load per request, shared by
