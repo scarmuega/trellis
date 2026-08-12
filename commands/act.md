@@ -36,7 +36,7 @@ executes) and await instruction.
    - `holder/system.md` (local package) — its content is your operating
      instructions for this invocation; load the skills and tools it references.
    - `holder/ref.md` naming a plugin agent (e.g. `trellis:steward`,
-     `trellis:coder`) — **adopt it inline**: read the agent's definition and
+     `trellis:focus`) — **adopt it inline**: read the agent's definition and
      continue as it in this same session, the mandate already bound. Never
      Task-delegate to it — a subagent re-reads the same mandate, conventions,
      and plan into a second context, and the measured cost of that double hop

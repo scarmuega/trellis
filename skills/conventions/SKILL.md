@@ -183,9 +183,9 @@ schema, an API that a second context, a party, or a system now consumes — move
 it from prose into the publishing context's `contracts/` as machine-checkable
 published language (tx3, IDL, OpenAPI, a brand guideline), leaving the prose as
 a pointer. Plans deliver against it (readiness item 11 counts its validation as
-verification), the coder lands stabilized interfaces there as part of its PR,
-and the steward's derivation sweep escalates contract edits to consumers per
-`context-map.md`.
+verification), an implementation holder lands stabilized interfaces there as
+part of its PR, and the steward's derivation sweep escalates contract edits to
+consumers per `context-map.md`.
 
 **Create a plan**: `/trellis:plan {topic}` where the binding offers it — the
 harness's plan mode gathers research and approval, then the artifact persists to
@@ -214,20 +214,20 @@ to its owner. The scheduled twin is the `focus` ritual in `rituals.md`.
 
 **Adopt an implementation role** (a domain whose plans land in code): add a role
 per code-bearing bounded context, named for what it does in this domain — mandate
-scoping the subdomains and contexts it may change, then `holder/ref.md` pointing
-at the plugin's portable `trellis:coder`. Name that role as the `owner:` of
-code-bearing plans and dispatch routes to it with no further wiring. The coder
-gates on `${CLAUDE_PLUGIN_ROOT}/checks/plan-readiness.md` before starting, blocks
-and escalates rather than guessing, delivers code as a PR (draft while
-unfinished, never self-merged), and files residue as a `draft` plan for the owner
-to release — proposing `complexity:` and `awaits:` on it where it can scope them,
-most often awaiting the plan it just advanced. On code-bearing plans the owner
-may set `complexity:` at release so
-dispatch can size the session — the tier grades reasoning depth, never size, and
-absent defers to the binding's default; the mapping to concrete session resources
-lives in the instance's runtime binding. Sequencing works the same way: `awaits:`
-on a released plan holds its dispatch until every named plan retires. Not a template role: it operates the
-business, not the model.
+scoping the subdomains and contexts it may change, then a domain-local holder
+package: `holder/system.md` plus at least one eval (the plugin ships no
+implementation agent — decision 0047; the role operates the business, not the
+model). Name that role as the `owner:` of code-bearing plans and dispatch routes
+to it with no further wiring. The discipline the package carries: block and
+escalate on a specification gap rather than guess, deliver code as a PR (draft
+while unfinished, never self-merged), and file residue as a `draft` plan for the
+owner to release — proposing `complexity:` and `awaits:` on it where it can
+scope them, most often awaiting the plan it just advanced. On code-bearing plans
+the owner may set `complexity:` at release so dispatch can size the session —
+the tier grades reasoning depth, never size, and absent defers to the binding's
+default; the mapping to concrete session resources lives in the instance's
+runtime binding. Sequencing works the same way: `awaits:` on a released plan
+holds its dispatch until every named plan retires.
 
 **Raise an escalation**:
 `trellis escalate add <artifact> --by <role> --asks "<the question>"` — the CLI

@@ -2,9 +2,9 @@
 
 Canonical definition of *ready* for a Trellis plan: is this specified enough for
 a taker to execute it without its owner in the loop? Referenced by
-`/trellis:plan` (the owner's release offer) and the `trellis:coder` agent (the
-taker's pickup gate) — this file is the single source; keep both pointing here
-rather than copying the list. One bar, checked twice: what the owner releases is
+`/trellis:plan` (the owner's release offer) and by whatever taker a domain
+binds at pickup — this file is the single source; keep every consumer pointing
+here rather than copying the list. One bar, checked twice: what the owner releases is
 what the taker accepts, so a plan never leaves `draft` on a bar the taker then
 fails it on.
 

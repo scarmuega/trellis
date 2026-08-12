@@ -204,14 +204,14 @@ artifact's automation class. It binds loopback by default, carries no
 authentication, and may be down without stopping anything.
 
 **Implementation holders.** A plan whose `contexts:` land in code needs a holder
-that can write it; the plugin ships `trellis:coder` as the portable one (decision
-0031). A domain adopts it by creating an implementation role — a local mandate
-scoping the subdomains and contexts it may change, plus a `holder/ref.md` to the
-agent — and naming that role as the `owner:` of code-bearing plans; dispatch then
-routes to it through the agent branch of `act`, with no extra wiring. The coder
-gates on `checks/plan-readiness.md` and blocks rather than guesses, delivers code
-as a PR (draft while unfinished) and never merges it, and files residue as a
-`draft` plan. The class still decides who lands the change: `generic` and
+that can write it, and that holder is domain-local (decision 0047, superseding
+0031's plugin-shipped one): an implementation role — a local mandate scoping the
+subdomains and contexts it may change, plus a `holder/system.md` package with at
+least one eval — named as the `owner:` of code-bearing plans; dispatch then
+routes to it through the package branch of `act`, with no extra wiring. The
+discipline the package carries: block on a specification gap rather than guess,
+deliver code as a PR (draft while unfinished) and never merge it, file residue
+as a `draft` plan. The class still decides who lands the change: `generic` and
 `supporting` PRs may be auto-merged by this binding, `core` waits for its owner.
 
 **Escalations.** This binding keeps escalations *in the tree*: the artifact that
@@ -220,7 +220,8 @@ carries the problem carries the escalation, as body content its owner authored
 loop is reconstructible from a checkout — the Loop observability pattern applied
 to the escalation channel, where a forge thread is state filed outside the tree.
 Because it is authored content, only the artifact's `owner:` writes a record: an
-agent acting *as* that owner (the coder under dispatch) writes its own, while an
+agent acting *as* that owner (an implementation holder under dispatch) writes its
+own, while an
 advisory role that owns nothing — `org/focus`, `org/steward` — reports its
 findings for the owner to transcribe, which leaves both roles' write boundaries
 exactly as they were. An escalation with no artifact to sit in stays in the

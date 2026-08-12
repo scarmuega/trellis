@@ -12,6 +12,24 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Removed
+
+- **`trellis:coder` (`agents/coder.md`), superseding decision 0031 (decision
+  0047):** the plugin ships no implementation agent; each domain authors its
+  implementation holder ad hoc as a domain-local package (`holder/system.md` +
+  at least one eval, lint item 6). Dogfooding drove it: the first production
+  adoption needed a mandate-wins override from day one and was then replaced by
+  an inlined package — the agent's generic posture carried domain policy (org
+  boundaries, writable surfaces, verification, how much of the readiness bar a
+  taker re-checks) only as prose each domain overrode. The steward and focus
+  stay portable because they operate the model; implementation operates the
+  business. The coder's behavioral clauses survive as documented discipline in
+  `spec/runtime.md` ("Implementation holders") and the conventions skill's
+  "Adopt an implementation role" procedure; `checks/plan-readiness.md` remains
+  the canonical bar, with the pickup-side share now the domain's call. Updated:
+  `README.md`, `spec/runtime.md`, `template/conventions.md`,
+  `skills/conventions/SKILL.md`, `commands/act.md`, `checks/plan-readiness.md`.
+
 ### Added
 
 - **The runtime splits by what its time means (decision 0046):** `trellis

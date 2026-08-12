@@ -146,8 +146,8 @@ blocked: one line — what stopped
 
 Only the artifact's `owner:` writes a record: an escalation is authored content,
 so a role whose mandate does not reach the artifact reports its finding instead
-and the owner transcribes it. An agent acting *as* the owner (the `trellis:coder`
-under dispatch) writes its own. Resolution is the owner's edit — answer in prose
+and the owner transcribes it. An agent acting *as* the owner (an implementation
+holder under dispatch) writes its own. Resolution is the owner's edit — answer in prose
 beneath the record and flip `status: resolved`; whatever act it unblocks (a plan
 `blocked → ready`) is a separate change. Records stay in the artifact as the
 trail; nothing is deleted.
@@ -328,7 +328,7 @@ choices:
   `org/{role}/holder/ref.md`. A role without one is emitted as a comment line
   naming the gap rather than a silent omission — an owner missing from
   CODEOWNERS is a review gate that quietly is not there. An agent holder that
-  writes code (the plugin's `trellis:coder`) always opens a PR — draft while
+  writes code (a domain's implementation role) always opens a PR — draft while
   the work is unfinished — and never merges its own; which PRs may land without
   review is this instance's wiring, per the class above.
 
