@@ -33,8 +33,10 @@ pub struct InFlight {
     child: Child,
 }
 
-/// One in-flight session, as `/api/status` reports it.
-#[derive(Debug, Serialize)]
+/// One in-flight session, as `/api/status` reports it. Deserialize too: the
+/// read-only server reads these back out of the dispatcher's snapshot file.
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct InFlightView {
     pub key: String,
     pub label: String,

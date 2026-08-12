@@ -13,22 +13,17 @@ use common::{Fixture, ANCHOR};
 
 /// A `trellis serve` running in the background, killed when it goes out of
 /// scope. Started on port 0, so tests never collide over a fixed port.
+/// Read-only by construction (decision 0046): it loads the tree and serves —
+/// dispatching is `serve_dispatch.rs`'s subject, under its own command.
 struct Daemon {
     child: Child,
     port: u16,
 }
 
 impl Daemon {
-    /// Started with `--dry-run` deliberately. These tests are about what the
-    /// surface *says*, and a live dispatcher would claim the fixture's ready
-    /// plan (`ready → active`) partway through, so every comparison against
-    /// the CLI would race the daemon's first tick. Dry run still loads the
-    /// tree, runs the scan, and serves — it just never spawns, which makes
-    /// the tree the fixed thing it needs to be here. Dispatch behaviour is
-    /// `serve_dispatch.rs`'s subject, against a daemon that does spawn.
     fn start(f: &Fixture) -> Daemon {
         let mut child = Command::new(Fixture::bin_path())
-            .args(["serve", "--port", "0", "--tick-secs", "3600", "--dry-run"])
+            .args(["serve", "--port", "0"])
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
@@ -91,19 +86,6 @@ impl Daemon {
             .unwrap_or_else(|e| panic!("GET {path} is not JSON: {e}\n{body}"))
     }
 
-    /// The socket accepts before the first tick finishes, so `/api/status`
-    /// truthfully reports no pass yet for a moment. Everything tree-backed is
-    /// already correct — only the daemon's own facts need the wait.
-    fn await_first_pass(&self) -> serde_json::Value {
-        for _ in 0..100 {
-            let status = self.json("/api/status");
-            if !status["last_pass"].is_null() {
-                return status;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        panic!("no scheduling pass completed within five seconds");
-    }
 }
 
 impl Drop for Daemon {
@@ -300,19 +282,31 @@ fn the_surface_is_read_only() {
     assert!(body.contains("read-only"), "{body}");
 }
 
+/// The read-only server has no pass of its own (decision 0046): it overlays
+/// the dispatcher's `status.json` snapshot and says whether that process is
+/// still running.
 #[test]
-fn the_daemon_reports_its_own_state() {
+fn the_server_reports_itself_and_overlays_the_dispatchers_snapshot() {
     let f = fixture();
+    // A real dispatch pass first, so there is a snapshot to serve. The
+    // claiming harness flips ship-it ready → active; waits.md stays held.
+    f.dispatch_once(ANCHOR, &[]);
     let d = Daemon::start(&f);
-    let status = d.await_first_pass();
+    let status = d.json("/api/status");
     assert_eq!(status["port"], d.port);
-    assert_eq!(status["last_pass"], ANCHOR);
+    assert_eq!(status["process"], "serve");
     assert!(status["pid"].as_u64().unwrap() > 0);
     assert!(status["root"]
         .as_str()
         .unwrap()
         .ends_with(f.root().file_name().unwrap().to_str().unwrap()));
-    assert_eq!(status["held"][0], "plans/waits.md");
+    assert_eq!(status["dispatch"]["process"], "dispatch");
+    assert_eq!(status["dispatch"]["last_pass"], ANCHOR);
+    assert_eq!(status["dispatch"]["held"][0], "plans/waits.md");
+    assert_eq!(
+        status["dispatch_running"], false,
+        "the --once pass exited; the server says so instead of pretending"
+    );
 }
 
 #[test]

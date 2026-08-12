@@ -53,8 +53,12 @@ procedure)` on a timer; ingress is `act(role, payload)` on an event.
 ## Plan dispatch
 
 A plan flagged `status: ready` is one its owner has released for a taker to
-advance. On the dispatch cadence the scheduled plane **enumerates the `ready`
-plans** — a deterministic scan, no judgment — and for each invokes
+advance. The dispatcher **enumerates the `ready` plans continuously** — a
+deterministic scan, no judgment, polled on a tight tick rather than a
+calendar (v19; decision 0046): a ritual's time gap is part of its meaning,
+but dispatch's old daily cadence was a fossil of the forge cron it was ported
+from, and an `awaits:` hold releasing mid-day is precisely the event dispatch
+exists to react to. For each dispatchable plan it invokes
 `act(plan.owner, "advance plans/{slug}.md")`. The holder branch of `act` (step 2
 above) routes it: an agent-package owner advances the plan autonomously; a
 human-held owner receives it as a handoff, never impersonated. The taker flips
@@ -141,52 +145,63 @@ A binding names, for its harness and forge of choice:
 An instance records its binding choices in `conventions.md` under "Runtime
 binding".
 
-## Reference binding: Claude Code + `trellis serve`
+## Reference binding: Claude Code + the `trellis` runtime
 
-The harness runs the sessions, the daemon owns the clock, and a git forge
-carries review. The forge is not the runtime: it holds the ledger and the
+The harness runs the sessions; the runtime is three processes with three
+shapes (decision 0046) — a continuous dispatcher, a cron-shaped rituals pass,
+and a read-only server — and a git forge carries review. The forge is not the runtime: it holds the ledger and the
 approval gate, and nothing schedules or triggers from it (decision 0039).
 
 | service | binding |
 |---|---|
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`) |
-| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template `trellis serve` spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
-| schedule | `trellis serve` — an in-process timer over `rituals.md` rows, read at every pass, spawning one headless `/trellis:ritual <name>` per due row |
+| act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template the dispatcher spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
+| schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. An instance that needs one binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
 | ledger | git history; the acting role is recorded in the session marker and named in commits. Per-session logs under `.trellis/runtime/logs/` are the daemon's trail — gitignored, single-machine, never the ledger |
 
-**Plan dispatch.** The daemon runs the deterministic scan on its own cadence
-(daily by default, read from the `plan dispatch` row in `rituals.md`) and starts
-one headless `/trellis:act <owner> advance …` per `status: ready` plan —
-one act per plan, for clean per-owner attribution. The steward is the row's
-operator of record, but because the scan carries no judgment it is implemented
-as this wiring, not a steward session (the steward mandate's own "extract the
-deterministic parts into tooling"). It maps the plan's `complexity:` tier to the
-session's model, effort, and budget: the tier's meaning is the spec's, the
-effort levels, model names, and prices are this binding's — retuned in
-`runtime.toml`, never in a plan. It reads `awaits:` with the same
-frontmatter-only extraction and holds any `ready` plan whose targets are not all
-`retired` — one `status:` lookup per target, still no judgment. It runs the
-mechanical readiness precheck and the human-holder handoff described above
-with the same frontmatter-only reads, and it carries the session's computed
-facts into the prompt (`{escalate_to}`, the pre-verified gate) so the session
-starts from them rather than re-deriving them. The daemon also owns the
-`.trellis/acting-role` marker for the sessions it spawns — stamped at spawn,
-one line per live session, removed at retirement — so attribution survives a
-session that dies and costs no session a turn (decision 0045; interactive
-invocations still write their own). A concurrency
-cap bounds how many sessions run at once, never how much work a cadence may
-start: a scan that could not start everything it found is not recorded as run,
-so the overflow starts as slots free rather than waiting a full cadence.
+**Plan dispatch (`trellis dispatch run`).** The dispatcher polls the tree
+every tick and starts one headless `/trellis:act <owner> advance …` per
+dispatchable plan — one act per plan, for clean per-owner attribution, no
+calendar gate (decision 0046). The `plan dispatch` row in `rituals.md` stays
+as the operator-of-record declaration and the runner skips it: the loop is
+continuous, not cadenced. The steward is that row's operator, but because the
+scan carries no judgment it is implemented as this wiring, not a steward
+session (the steward mandate's own "extract the deterministic parts into
+tooling"). The scan maps the plan's `complexity:` tier to the session's
+model, effort, and budget — the tier's meaning is the spec's, the prices are
+this binding's, retuned in `runtime.toml`, never in a plan — holds on
+unretired `awaits:` targets and failed mechanical readiness, short-circuits
+declared-human holders into handoffs, and carries the computed facts into the
+prompt (`{escalate_to}`, `{automation}`, the pre-verified gate). The
+dispatcher owns the `.trellis/acting-role` marker for the sessions it spawns
+(decision 0045) and hosts the sessions' MCP back-channel on its own loopback
+socket — the channel lives with the process that owns the session lifecycle.
+A concurrency cap bounds how many sessions run at once; a **retry cooldown**
+bounds how soon a plan whose session ended without claiming may be retried —
+the daily cadence used to be that backstop by accident, the loop needs it on
+purpose. Reports are transitions, not standing facts: a hold is announced
+when it appears and when it clears, never once per tick.
 
-**The serving surface.** The daemon serves the tree read-only over HTTP — the
-computed facts the commands print, the generated views, the open escalation
-records, and an embedded plan board over them. Read-only is structural: there is
-no write path, so every change still enters through a session bound by its
-mandate, the gate, and the artifact's automation class. It binds loopback by
-default and carries no authentication.
+**Rituals (`trellis rituals`).** One pass of the wall-clock work: compute the
+due set from `rituals.md` cadences and the last-fired dates, fire one session
+per due row, drain them, record, exit. Idempotent per day, so the OS may
+invoke it hourly and it only fires what is owed — cron and launchd are better
+wall clocks than a sleeping daemon ever was, and `catchup` decides what a
+window missed while nothing was running does. It opens its own ephemeral
+back-channel for the sessions it drains, and its state lives in its own file
+(`rituals-state.json`), because two processes on one document is a race.
+
+**The serving surface (`trellis serve`).** Read-only over HTTP, and nothing
+else: the computed facts the commands print, the generated views, the open
+escalation records, an embedded plan board, and the dispatcher's `status.json`
+snapshot overlaid on `/api/status` — labelled with whether that process is
+still alive. Read-only is structural: there is no write path, so every change
+still enters through a session bound by its mandate, the gate, and the
+artifact's automation class. It binds loopback by default, carries no
+authentication, and may be down without stopping anything.
 
 **Implementation holders.** A plan whose `contexts:` land in code needs a holder
 that can write it; the plugin ships `trellis:coder` as the portable one (decision
@@ -240,12 +255,14 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
 - Mandate authority is enforced by prompt with a deterministic backstop, not by
   compiled permission profiles.
 - The gate sees Write/Edit, not shell-mediated writes.
-- A crashed session can leave a stale `.trellis/acting-role`; the marker carries
-  a timestamp so the steward's lint can flag it.
-- The clock runs where the daemon runs. A machine that sleeps or shuts down
-  misses cadences; catch-up on waking fires each overdue row once, and
-  `catchup = "skip"` records the window instead for a domain that would rather
-  wait. Nothing fires once per missed window.
+- A crashed session can leave a stale `.trellis/acting-role`; the runtime
+  reconciles its own lines at startup, and the marker carries a timestamp so
+  the steward's lint can flag what remains.
+- The wall clock is whatever invokes `trellis rituals`. A machine that sleeps
+  misses nothing by itself — the next invocation fires each overdue row once,
+  and `catchup = "skip"` records the window instead for a domain that would
+  rather wait. Nothing fires once per missed window. The dispatcher has no
+  such exposure: its loop reacts to the tree, not the calendar.
 - The serving surface and the session logs are single-machine: two operators
   see two boards over one shared repository, and neither log is the ledger.
 - The API carries no authentication. It binds loopback by default; binding

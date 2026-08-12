@@ -272,26 +272,54 @@ exit 9
             .collect()
     }
 
+    /// The dispatcher's state file.
     pub fn state(&self) -> serde_json::Value {
-        let path = self.root().join(".trellis/runtime/state.json");
+        let path = self.root().join(".trellis/runtime/dispatch-state.json");
         std::fs::read_to_string(path)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or(serde_json::Value::Null)
     }
 
-    /// `trellis serve --once …` at a given date, returning its stdout.
-    pub fn serve_once(&self, today: &str, args: &[&str]) -> String {
+    /// The rituals state file.
+    pub fn rituals_state(&self) -> serde_json::Value {
+        let path = self.root().join(".trellis/runtime/rituals-state.json");
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or(serde_json::Value::Null)
+    }
+
+    /// `trellis dispatch run --once …` at a given date, returning its stdout.
+    pub fn dispatch_once(&self, today: &str, args: &[&str]) -> String {
         let out = self
             .bin()
             .env("TRELLIS_TODAY", today)
-            .args(["serve", "--once", "--no-http"])
+            .args(["dispatch", "run", "--once"])
             .args(args)
             .output()
             .unwrap();
         assert!(
             out.status.success(),
-            "serve --once failed: {}{}",
+            "dispatch run --once failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// `trellis rituals …` at a given date, returning its stdout.
+    pub fn rituals_once(&self, today: &str, args: &[&str]) -> String {
+        let out = self
+            .bin()
+            .env("TRELLIS_TODAY", today)
+            .args(["rituals"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "rituals failed: {}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );

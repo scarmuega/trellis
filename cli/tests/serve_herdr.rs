@@ -57,11 +57,11 @@ fn a_newly_opened_escalation_toasts_once_and_only_once() {
     channel_fixture(&f, &herdr.socket);
 
     // First pass seeds: the standing backlog is not news.
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
     assert_eq!(herdr.params_for("notification.show").len(), 0);
 
     f.write("plans/ship-it.md", BLOCKED_WITH_RECORD);
-    f.serve_once("2026-08-04", &[]);
+    f.dispatch_once("2026-08-04", &[]);
     let shown = herdr.params_for("notification.show");
     assert_eq!(shown.len(), 1, "one record, one toast: {shown:?}");
     let title = shown[0]["title"].as_str().unwrap();
@@ -70,7 +70,7 @@ fn a_newly_opened_escalation_toasts_once_and_only_once() {
     assert_eq!(shown[0]["body"], "unblock me");
 
     // The record is still open on the next pass, and already announced.
-    f.serve_once("2026-08-05", &[]);
+    f.dispatch_once("2026-08-05", &[]);
     assert_eq!(herdr.params_for("notification.show").len(), 1, "announced once");
 }
 
@@ -80,7 +80,7 @@ fn a_configured_channel_with_no_herdr_behind_it_refuses_startup() {
     channel_fixture(&f, &f.root().join(".trellis/nobody-home.sock"));
     let out = f
         .bin()
-        .args(["serve", "--once", "--no-http"])
+        .args(["dispatch", "run", "--once"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -98,7 +98,7 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
 
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
     assert!(out.contains("herdr backend: fake"), "{out}");
     assert!(out.contains("started act plans/ship-it.md"), "{out}");
 
@@ -178,7 +178,7 @@ fn a_prompt_dropped_at_startup_is_resubmitted() {
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
 
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
     assert!(out.contains("prompt was dropped at startup — resubmitted (1/2)"), "{out}");
 
     let prompts = herdr.params_for("agent.prompt");
@@ -205,7 +205,7 @@ fn a_session_that_never_takes_its_prompt_is_written_off_not_declared_done() {
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
 
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
     assert!(out.contains("prompt was never taken up — writing the session off"), "{out}");
 
     assert_eq!(
@@ -243,7 +243,7 @@ fn an_adopted_session_holds_its_slot_and_is_never_spawned_twice() {
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
 
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
     assert!(out.contains("adopted act plans/ship-it.md"), "{out}");
     assert!(out.contains("already in flight"), "{out}");
 
@@ -264,7 +264,7 @@ fn the_herdr_backend_with_no_herdr_behind_it_refuses_startup() {
     herdr_backend_fixture(&f, &f.root().join(".trellis/nobody-home.sock"));
     let out = f
         .bin()
-        .args(["serve", "--once", "--no-http"])
+        .args(["dispatch", "run", "--once"])
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -299,7 +299,7 @@ fn a_parked_question_toasts_with_the_command_that_answers_it() {
     // A live daemon on a short tick: the session parks its question during
     // one tick, the next tick pushes it to the channels.
     let mut child = std::process::Command::new(Fixture::bin_path())
-        .args(["serve", "--port", "0", "--tick-secs", "1"])
+        .args(["dispatch", "run", "--tick-secs", "1"])
         .current_dir(f.root())
         .env("TRELLIS_TODAY", common::ANCHOR)
         .env_remove("CLAUDE_PLUGIN_ROOT")
@@ -350,7 +350,7 @@ fn a_dry_run_under_the_herdr_backend_reports_and_touches_nothing() {
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
 
-    let out = f.serve_once(ANCHOR, &["--dry-run"]);
+    let out = f.dispatch_once(ANCHOR, &["--dry-run"]);
     assert!(out.contains("would run act plans/ship-it.md → org/founder in herdr"), "{out}");
     let calls = herdr.calls();
     assert!(

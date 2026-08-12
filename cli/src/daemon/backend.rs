@@ -32,7 +32,15 @@ pub enum Backend {
 }
 
 impl Backend {
-    pub fn connect(root: &Path, cfg: &RuntimeConfig, once: bool) -> anyhow::Result<Backend> {
+    /// `key_prefix` is this process's keyspace (`plan:` for dispatch,
+    /// `ritual:` for rituals — decision 0046): the herdr backend adopts only
+    /// its own orphans, so the two spawners never fight over a session.
+    pub fn connect(
+        root: &Path,
+        cfg: &RuntimeConfig,
+        once: bool,
+        key_prefix: &'static str,
+    ) -> anyhow::Result<Backend> {
         let max = cfg.scheduler.max_concurrent;
         match cfg.harness.backend {
             super::config::BackendKind::Process => {
@@ -44,7 +52,7 @@ impl Backend {
             }
             #[cfg(unix)]
             super::config::BackendKind::Herdr => {
-                let mut pool = HerdrPool::connect(root, &cfg.harness.herdr, max)?;
+                let mut pool = HerdrPool::connect(root, &cfg.harness.herdr, max, key_prefix)?;
                 if once {
                     pool = pool.once_per_task();
                 }
@@ -52,6 +60,7 @@ impl Backend {
             }
             #[cfg(not(unix))]
             super::config::BackendKind::Herdr => {
+                let _ = key_prefix;
                 anyhow::bail!("the herdr backend speaks a unix socket — this platform has none")
             }
         }

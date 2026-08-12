@@ -14,16 +14,75 @@ fn path(root: &Path) -> std::path::PathBuf {
     root.join(".trellis").join("acting-role")
 }
 
-/// Is this line ours for `key`? Daemon lines carry the key as their third
-/// field; anything else — agent-written content included — is not ours.
+/// The marker has two writers since the split (dispatch and rituals are
+/// separate processes — decision 0046), and every mutation is a
+/// read-modify-write. A lockfile serializes them: create-exclusive, retried
+/// briefly, stolen when stale — and everything fails open, because the
+/// marker is attribution, not a lock on the work itself.
+struct Lock(std::path::PathBuf);
+
+impl Lock {
+    fn take(root: &Path) -> Option<Lock> {
+        let _ = std::fs::create_dir_all(root.join(".trellis"));
+        let p = root.join(".trellis").join("acting-role.lock");
+        for _ in 0..40 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&p)
+            {
+                Ok(_) => return Some(Lock(p.clone())),
+                Err(_) => {
+                    // A lock older than 10s belongs to a dead writer.
+                    if let Ok(meta) = std::fs::metadata(&p) {
+                        if let Ok(age) = meta.modified().and_then(|m| {
+                            std::time::SystemTime::now()
+                                .duration_since(m)
+                                .map_err(|e| std::io::Error::other(e.to_string()))
+                        }) {
+                            if age.as_secs() > 10 {
+                                let _ = std::fs::remove_file(&p);
+                                continue;
+                            }
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The key of a daemon line: everything after the role and timestamp,
+/// because ritual keys carry spaces (`ritual:conventions lint`). Anything
+/// not in that three-field shape — agent-written content included — has no
+/// key and is never ours.
+fn line_key(line: &str) -> Option<&str> {
+    let mut fields = line.splitn(3, ' ');
+    let (_role, _ts, key) = (fields.next()?, fields.next()?, fields.next()?);
+    let key = key.trim();
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
+}
+
 fn is_ours(line: &str, key: &str) -> bool {
-    let fields: Vec<&str> = line.split_whitespace().collect();
-    fields.len() == 3 && fields[2] == key
+    line_key(line) == Some(key)
 }
 
 /// Stamp a line for a freshly spawned session. Failures are logged by the
 /// caller's judgment, never fatal: the marker is attribution, not a lock.
 pub fn add(root: &Path, role: &str, timestamp: &str, key: &str) -> std::io::Result<()> {
+    let _lock = Lock::take(root);
     let p = path(root);
     std::fs::create_dir_all(p.parent().expect(".trellis has a parent"))?;
     let mut content = std::fs::read_to_string(&p).unwrap_or_default();
@@ -39,6 +98,7 @@ pub fn add(root: &Path, role: &str, timestamp: &str, key: &str) -> std::io::Resu
 
 /// Drop the retired session's line; delete the file when nothing remains.
 pub fn remove(root: &Path, key: &str) -> std::io::Result<()> {
+    let _lock = Lock::take(root);
     let p = path(root);
     let Ok(content) = std::fs::read_to_string(&p) else {
         return Ok(());
@@ -56,19 +116,21 @@ pub fn remove(root: &Path, key: &str) -> std::io::Result<()> {
 }
 
 /// Startup reconciliation: a crash removes no lines, and adopted sessions
-/// should keep theirs. Keep every daemon-format line whose key is still in
-/// flight, drop the stale ones, and leave non-daemon lines alone.
-pub fn reconcile(root: &Path, live_keys: &[String]) -> std::io::Result<()> {
+/// should keep theirs. Keep every daemon-format line *of this process's own
+/// keyspace* (`plan:` for dispatch, `ritual:` for rituals — the other
+/// process's live lines are not this one's to judge) whose key is still in
+/// flight, drop the stale ones, and leave everything else alone.
+pub fn reconcile(root: &Path, prefix: &str, live_keys: &[String]) -> std::io::Result<()> {
+    let _lock = Lock::take(root);
     let p = path(root);
     let Ok(content) = std::fs::read_to_string(&p) else {
         return Ok(());
     };
     let kept: String = content
         .lines()
-        .filter(|l| {
-            let fields: Vec<&str> = l.split_whitespace().collect();
-            let daemon_line = fields.len() == 3 && fields[2].contains(':');
-            !daemon_line || live_keys.iter().any(|k| k == fields[2])
+        .filter(|l| match line_key(l) {
+            Some(key) if key.starts_with(prefix) => live_keys.iter().any(|k| k == key),
+            _ => true,
         })
         .filter(|l| !l.trim().is_empty())
         .map(|l| format!("{l}\n"))
@@ -116,12 +178,18 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_drops_only_stale_daemon_lines() {
+    fn reconcile_drops_only_stale_lines_of_its_own_keyspace() {
         let dir = tempfile::TempDir::new().unwrap();
         add(dir.path(), "org/coder", "t", "plan:plans/dead.md").unwrap();
         add(dir.path(), "org/coder", "t", "plan:plans/live.md").unwrap();
-        reconcile(dir.path(), &["plan:plans/live.md".into()]).unwrap();
+        add(dir.path(), "org/steward", "t", "ritual:conventions lint").unwrap();
+        reconcile(dir.path(), "plan:", &["plan:plans/live.md".into()]).unwrap();
         let text = std::fs::read_to_string(path(dir.path())).unwrap();
-        assert_eq!(text, "org/coder t plan:plans/live.md\n");
+        assert!(!text.contains("dead"), "{text:?}");
+        assert!(text.contains("plan:plans/live.md"));
+        assert!(
+            text.contains("ritual:conventions"),
+            "the other process's line is not ours to judge: {text:?}"
+        );
     }
 }

@@ -126,6 +126,8 @@ pub struct HerdrPool {
     ledger: Option<HashSet<String>>,
     /// Consecutive reap passes that could not reach herdr at all.
     unreachable_ticks: u32,
+    /// This process's keyspace (decision 0046): adoption takes only its own.
+    key_prefix: &'static str,
 }
 
 impl HerdrPool {
@@ -135,6 +137,7 @@ impl HerdrPool {
         root: &Path,
         cfg: &HerdrHarness,
         max_concurrent: usize,
+        key_prefix: &'static str,
     ) -> anyhow::Result<HerdrPool> {
         let client = Client::new(cfg.socket.as_deref());
         let pong = client.handshake().map_err(|e| {
@@ -157,6 +160,7 @@ impl HerdrPool {
             in_flight: HashMap::new(),
             ledger: None,
             unreachable_ticks: 0,
+            key_prefix,
         };
         pool.adopt()?;
         Ok(pool)
@@ -178,7 +182,9 @@ impl HerdrPool {
             let Some(key) = agent.tokens.get("trellis_key").cloned() else {
                 continue;
             };
-            if agent.tokens.get("trellis_root") != Some(&root) || self.in_flight.contains_key(&key)
+            if agent.tokens.get("trellis_root") != Some(&root)
+                || !key.starts_with(self.key_prefix)
+                || self.in_flight.contains_key(&key)
             {
                 continue;
             }

@@ -156,8 +156,9 @@ enum Cmd {
         #[arg(long, default_value = "founder")]
         owner: String,
     },
-    /// Run the local runtime: rituals on cadence, plan dispatch, and a
-    /// read-only board and API over this root
+    /// Serve the tree read-only: board, API, and the dispatcher's snapshot.
+    /// No clock, no sessions — dispatch and rituals are their own commands
+    /// (decision 0046)
     Serve {
         /// Listen on this port (0 asks the OS; the chosen port is printed)
         #[arg(long)]
@@ -169,24 +170,20 @@ enum Cmd {
         /// Runtime config (default: runtime.toml at the root)
         #[arg(long, value_name = "PATH")]
         config: Option<PathBuf>,
-        /// One scheduling pass, wait for the sessions it starts, exit
-        #[arg(long)]
-        once: bool,
+    },
+    /// One pass of the wall-clock work: fire the rituals the cadences owe
+    /// today, wait them out, exit. Idempotent per day — run it from cron,
+    /// launchd, or by hand, as often as you like
+    Rituals {
+        /// Runtime config (default: runtime.toml at the root)
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
         /// Report what would be spawned; spawn nothing, record nothing
         #[arg(long)]
         dry_run: bool,
-        /// Scheduler and dispatcher only, no serving surface
-        #[arg(long)]
-        no_http: bool,
-        /// Seconds between scheduling passes
-        #[arg(long, value_name = "N")]
-        tick_secs: Option<u64>,
         /// Sessions that may run at once
         #[arg(long, value_name = "N")]
         max_concurrent: Option<usize>,
-        /// Override a tier's session: tier=model:effort:budget
-        #[arg(long, value_name = "SPEC")]
-        map: Vec<String>,
     },
 }
 
@@ -281,6 +278,28 @@ enum InboxCmd {
 #[derive(Subcommand)]
 enum DispatchCmd {
     Scan {
+        /// Override a tier's session: tier=model:effort:budget
+        #[arg(long, value_name = "SPEC")]
+        map: Vec<String>,
+    },
+    /// The pull loop (decision 0046): poll the tree every tick, spawn an act
+    /// for everything dispatchable, no calendar gate
+    Run {
+        /// Runtime config (default: runtime.toml at the root)
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
+        /// One pass, wait for the sessions it starts, exit
+        #[arg(long)]
+        once: bool,
+        /// Report what would be spawned; spawn nothing, record nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Seconds between passes
+        #[arg(long, value_name = "N")]
+        tick_secs: Option<u64>,
+        /// Sessions that may run at once
+        #[arg(long, value_name = "N")]
+        max_concurrent: Option<usize>,
         /// Override a tier's session: tier=model:effort:budget
         #[arg(long, value_name = "SPEC")]
         map: Vec<String>,
@@ -795,6 +814,27 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
 
         Cmd::Dispatch {
+            cmd:
+                DispatchCmd::Run {
+                    config,
+                    once,
+                    dry_run,
+                    tick_secs,
+                    max_concurrent,
+                    map,
+                },
+        } => daemon::run_dispatch(daemon::DispatchOpts {
+            root: cli.root,
+            plugin_root: cli.plugin_root,
+            config,
+            tick_secs,
+            max_concurrent,
+            map,
+            once,
+            dry_run,
+        }),
+
+        Cmd::Dispatch {
             cmd: DispatchCmd::Scan { map },
         } => {
             let (tree, _git) = load(cli.root.as_deref())?;
@@ -927,24 +967,23 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             port,
             bind,
             config,
-            once,
-            dry_run,
-            no_http,
-            tick_secs,
-            max_concurrent,
-            map,
-        } => daemon::run(daemon::ServeOpts {
+        } => daemon::run_serve(daemon::ServeOpts {
             root: cli.root,
-            plugin_root: cli.plugin_root,
             config,
             bind,
             port,
-            tick_secs,
-            max_concurrent,
-            map,
-            once,
+        }),
+
+        Cmd::Rituals {
+            config,
             dry_run,
-            no_http,
+            max_concurrent,
+        } => daemon::run_rituals(daemon::RitualsOpts {
+            root: cli.root,
+            plugin_root: cli.plugin_root,
+            config,
+            max_concurrent,
+            dry_run,
         }),
     }
 }

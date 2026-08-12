@@ -29,14 +29,23 @@ const POLL: Duration = Duration::from_secs(1);
 
 /// Where the daemon said it is listening.
 fn endpoint(root: &Path) -> anyhow::Result<String> {
-    let path = RuntimeConfig::runtime_dir(root).join(super::ADDRFILE);
-    let addr = std::fs::read_to_string(&path).map_err(|_| {
-        anyhow::anyhow!(
-            "no daemon is serving this root — start one with `trellis serve`, \
-             or point at another with --addr"
-        )
-    })?;
-    Ok(addr.trim().to_string())
+    // The sessions live where they were spawned (decision 0046): the
+    // dispatcher first, a rituals pass next, the read-only server last —
+    // it answers /api/status but holds no inbox of its own.
+    for file in [
+        super::DISPATCH_ADDRFILE,
+        super::RITUALS_ADDRFILE,
+        super::SERVE_ADDRFILE,
+    ] {
+        let path = RuntimeConfig::runtime_dir(root).join(file);
+        if let Ok(addr) = std::fs::read_to_string(&path) {
+            return Ok(addr.trim().to_string());
+        }
+    }
+    anyhow::bail!(
+        "no daemon is running on this root — start `trellis dispatch run`, \
+         or point at another with --addr"
+    )
 }
 
 fn request(addr: &str, method: &str, path: &str, body: Option<&str>) -> anyhow::Result<String> {

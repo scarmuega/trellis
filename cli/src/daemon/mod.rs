@@ -35,7 +35,6 @@ use serde::Serialize;
 
 use self::backend::{Backend, Launch};
 use self::config::RuntimeConfig;
-use self::sched::Task;
 use self::spawn::InFlightView;
 use self::state::State;
 use crate::dates::{self, Date};
@@ -49,42 +48,62 @@ use crate::tree::Tree;
 #[derive(Debug, Default)]
 pub struct ServeOpts {
     pub root: Option<PathBuf>,
-    pub plugin_root: Option<PathBuf>,
     pub config: Option<PathBuf>,
     pub bind: Option<String>,
     pub port: Option<u16>,
+}
+
+#[derive(Debug, Default)]
+pub struct DispatchOpts {
+    pub root: Option<PathBuf>,
+    pub plugin_root: Option<PathBuf>,
+    pub config: Option<PathBuf>,
     pub tick_secs: Option<u64>,
     pub max_concurrent: Option<usize>,
     pub map: Vec<String>,
-    /// One pass, wait for the sessions it started, exit. What a cron entry
-    /// or a test invokes.
+    /// One pass, wait for the sessions it started, exit.
     pub once: bool,
     /// Report what would be spawned; spawn nothing, remember nothing.
     pub dry_run: bool,
-    pub no_http: bool,
 }
 
-/// What `/api/status` reports: the daemon's own facts, as distinct from the
-/// tree's. Everything else the server returns is computed per request from
-/// the tree itself.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default)]
+pub struct RitualsOpts {
+    pub root: Option<PathBuf>,
+    pub plugin_root: Option<PathBuf>,
+    pub config: Option<PathBuf>,
+    pub max_concurrent: Option<usize>,
+    pub dry_run: bool,
+}
+
+/// The dispatcher's own facts, snapshotted to `status.json` every pass so the
+/// read-only server can show them without sharing a process (decision 0046).
+#[derive(Debug, Default, Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Status {
     pub pid: u32,
+    /// Which process wrote this: "serve" | "dispatch" | "rituals".
+    pub process: String,
     pub started: String,
     pub root: String,
     pub port: Option<u16>,
     pub dry_run: bool,
-    /// The date of the last tick.
+    /// The date of the last pass.
     pub last_pass: Option<String>,
     pub in_flight: Vec<InFlightView>,
     pub runs: BTreeMap<String, state::Run>,
     /// Dispatch-scan warnings from the last pass.
     pub warnings: Vec<String>,
-    /// Plans held by `awaits:` at the last pass — still ready, not blocked.
+    /// Plans held at the last pass — still ready, not blocked.
     pub held: Vec<String>,
+    /// Ready plans whose owner is human-held: no session, a handoff.
+    pub handoffs: Vec<String>,
     /// `rituals.md` rows whose cadence has no day count: never auto-fired.
     pub unscheduled: Vec<String>,
 }
+
+/// The dispatcher's status snapshot on disk, for the read-only server.
+pub const STATUS_FILE: &str = "status.json";
 
 pub struct Shared {
     pub status: Mutex<Status>,
@@ -97,15 +116,18 @@ pub struct Shared {
     /// before the next one — a tick interval of latency is a board's budget,
     /// not an interaction's (decision 0041).
     pub inbox: mcp::Inbox,
+    /// The read-only server overlays the dispatcher's `status.json` — it has
+    /// no pass of its own to report (decision 0046).
+    pub overlay_status: bool,
 }
 
-/// Everything a tick needs that does not change between ticks.
+/// Everything a pass needs that does not change between passes.
 struct Runtime {
     root: PathBuf,
     cfg: RuntimeConfig,
     plugin_dir: Option<String>,
-    /// The port the back-channel is reachable on, once bound. `None` when the
-    /// daemon is not serving, which is also when `{mcp}` is refused.
+    /// The port the back-channel is reachable on, once bound. `None` under
+    /// `--dry-run`, which spawns nothing that could call back.
     port: Option<u16>,
     dry_run: bool,
     channels: channels::Channels,
@@ -115,7 +137,20 @@ struct Runtime {
     shared: Arc<Shared>,
 }
 
-pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
+/// What the dispatcher has already said, so a tight loop reports transitions
+/// instead of repeating every standing fact once per tick.
+#[derive(Default)]
+struct Reported {
+    held: std::collections::HashSet<String>,
+    handoffs: std::collections::HashSet<String>,
+    warnings: std::collections::HashSet<String>,
+    cooling: std::collections::HashSet<String>,
+}
+
+/// `trellis serve` — the read-only surface, and nothing else (decision
+/// 0046): the tree, the views, the board, and the dispatcher's snapshot.
+/// No clock, no spawning, no writes; safe to kill, safe to not run.
+pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     let root = open_root(opts.root.as_deref())?;
     let mut cfg = RuntimeConfig::load(&root, opts.config.as_deref())?;
     if let Some(b) = &opts.bind {
@@ -124,6 +159,49 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     if let Some(p) = opts.port {
         cfg.server.port = p;
     }
+    // No full validate(): serve spawns nothing and announces nothing, so a
+    // harness or channel problem is the dispatcher's to refuse, not the
+    // viewer's.
+    let sessions = cfg.session_map()?;
+    let shared = Arc::new(Shared {
+        status: Mutex::new(Status {
+            pid: std::process::id(),
+            process: "serve".into(),
+            started: dates::today().to_string(),
+            root: root.display().to_string(),
+            ..Status::default()
+        }),
+        root: root.clone(),
+        sessions,
+        inbox: mcp::Inbox::default(),
+        overlay_status: true,
+    });
+    let _pidfile = Pidfile::claim(&root, "serve.pid", "trellis serve")?;
+    let port = server::start(Arc::clone(&shared), &cfg.server)?;
+    shared.status.lock().unwrap().port = Some(port);
+    println!("listening on {}:{port}", cfg.server.bind);
+    let _addrfile = Addrfile::write(&root, SERVE_ADDRFILE, &cfg.server.bind, port)?;
+    note(&format!(
+        "serving {} read-only — dispatch and rituals are their own processes (decision 0046)",
+        root.display()
+    ));
+    signals::install();
+    loop {
+        if signals::stopping() {
+            note("stopped");
+            return Ok(ExitCode::SUCCESS);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+/// `trellis dispatch run` — the pull loop (decision 0046): poll the tree
+/// every tick, spawn an act for everything dispatchable, no calendar gate.
+/// Idempotency is the taker's claim; the only throttle a tight loop needs is
+/// the retry cooldown, or a session that dies unclaiming respawns per tick.
+pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
+    let root = open_root(opts.root.as_deref())?;
+    let mut cfg = RuntimeConfig::load(&root, opts.config.as_deref())?;
     if let Some(t) = opts.tick_secs {
         cfg.scheduler.tick_secs = t;
     }
@@ -131,34 +209,22 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         cfg.scheduler.max_concurrent = m;
     }
     cfg.validate()?;
-
+    if cfg.scheduler.dispatch_cadence.is_some() {
+        note(
+            "scheduler.dispatch_cadence is obsolete — dispatch polls every tick \
+             (decision 0046); drop it from runtime.toml",
+        );
+    }
     let mut sessions = cfg.session_map()?;
     for spec in &opts.map {
         sessions.apply(spec)?;
     }
+    let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
 
-    let plugin_dir = opts
-        .plugin_root
-        .as_ref()
-        .map(|p| p.display().to_string())
-        .or_else(|| std::env::var("CLAUDE_PLUGIN_ROOT").ok());
-    if plugin_dir.is_none() && names(&cfg, "{plugin_dir}") {
-        anyhow::bail!(
-            "the harness templates name {{plugin_dir}} but no plugin checkout is known — \
-             pass --plugin-root, set CLAUDE_PLUGIN_ROOT, or drop it from {}",
-            config::FILE
-        );
-    }
-
-    // `--once` still does not serve. It is a cron-style pass with no operator
-    // watching, so the back-channel would have nobody to answer it — and
-    // binding the configured port would collide with the daemon a cron entry
-    // most likely runs beside.
-    let serve_http = !opts.no_http && !opts.once;
-    let channel_off = !serve_http && names(&cfg, "{mcp}");
     let shared = Arc::new(Shared {
         status: Mutex::new(Status {
             pid: std::process::id(),
+            process: "dispatch".into(),
             started: dates::today().to_string(),
             root: root.display().to_string(),
             dry_run: opts.dry_run,
@@ -167,14 +233,13 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         root: root.clone(),
         sessions,
         inbox: mcp::Inbox::default(),
+        overlay_status: false,
     });
-
     let _pidfile = if opts.once {
         None
     } else {
-        Some(Pidfile::claim(&root)?)
+        Some(Pidfile::claim(&root, "dispatch.pid", "trellis dispatch")?)
     };
-
     let channels = open_channels(&cfg)?;
     let mut rt = Runtime {
         root: root.clone(),
@@ -187,30 +252,34 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         shared: Arc::clone(&shared),
     };
 
+    // The back-channel binds loopback on an OS-assigned port, `--once`
+    // included: a dispatcher always has somebody to answer it — the
+    // operator's inbox. Only a dry run, which spawns nothing that could
+    // call back, goes without.
     let mut _addrfile = None;
-    if serve_http {
-        let port = server::start(Arc::clone(&shared), &rt.cfg.server)?;
+    if !rt.dry_run {
+        let channel = config::Server {
+            bind: "127.0.0.1".into(),
+            port: 0,
+        };
+        let port = server::start(Arc::clone(&shared), &channel)?;
         rt.port = Some(port);
         shared.status.lock().unwrap().port = Some(port);
-        // The handshake line: a caller that asked for port 0 learns which
-        // port it got, and anything scripting the daemon knows the socket is
-        // accepting.
-        println!("listening on {}:{port}", rt.cfg.server.bind);
-        // And the same fact on disk, because `trellis inbox` has to find this
-        // daemon from a second terminal and `port = 0` is not discoverable
-        // from the config it was configured with.
-        _addrfile = Some(Addrfile::write(&root, &rt.cfg.server.bind, port)?);
+        // The handshake line: scripts learn the channel port the same way
+        // serve announces its listener.
+        println!("channel on 127.0.0.1:{port}");
+        _addrfile = Some(Addrfile::write(&root, DISPATCH_ADDRFILE, "127.0.0.1", port)?);
     }
 
-    let mut state = State::load(&root);
-    let mut backend = Backend::connect(&root, &rt.cfg, opts.once)?;
+    let mut state = State::load_dispatch(&root);
+    let mut backend = Backend::connect(&root, &rt.cfg, opts.once, "plan:")?;
 
     // A crash removed no marker lines and adopted sessions should keep
     // theirs: reconcile `.trellis/acting-role` against what is actually in
-    // flight before the first tick can spawn anything.
+    // flight before the first pass can spawn anything.
     if !rt.dry_run {
         let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
-        if let Err(e) = marker::reconcile(&root, &live) {
+        if let Err(e) = marker::reconcile(&root, "plan:", &live) {
             note(&format!("acting-role marker reconcile failed: {e}"));
         }
     }
@@ -218,26 +287,21 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
     if !opts.once {
         signals::install();
     }
-
-    note(&format!("serving {}", root.display()));
-    if channel_off {
-        // Not fatal: a session that cannot ask behaves exactly as it did
-        // before the channel existed. Said out loud so the loss is not silent.
-        note(&format!(
-            "{} leaves no socket for a session to call back on — sessions run, \
-             but cannot ask questions or report progress",
-            if opts.once { "--once" } else { "--no-http" }
-        ));
-    }
+    note(&format!(
+        "dispatching {} — every {}s, no calendar gate (decision 0046)",
+        root.display(),
+        rt.cfg.scheduler.tick_secs
+    ));
     if rt.dry_run {
         note("dry run — nothing will be spawned and no state is written");
     }
 
+    let mut reported = Reported::default();
     loop {
-        let outcome = match tick(&rt, &mut state, &mut backend) {
+        let outcome = match dispatch_pass(&rt, &mut state, &mut backend, &mut reported) {
             Ok(outcome) => outcome,
             Err(e) => {
-                note(&format!("tick failed: {e:#}"));
+                note(&format!("pass failed: {e:#}"));
                 Pass::default()
             }
         };
@@ -264,6 +328,109 @@ pub fn run(opts: ServeOpts) -> anyhow::Result<ExitCode> {
             return shutdown(&rt, &mut state, &mut backend);
         }
     }
+}
+
+/// `trellis rituals` — one pass of the wall-clock work (decision 0046):
+/// fire what the cadences owe today, wait it out, record, exit. Idempotent
+/// per day, so the OS may invoke it as often as it likes — cron and launchd
+/// are better wall clocks than a sleeping daemon ever was.
+pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
+    let root = open_root(opts.root.as_deref())?;
+    let mut cfg = RuntimeConfig::load(&root, opts.config.as_deref())?;
+    if let Some(m) = opts.max_concurrent {
+        cfg.scheduler.max_concurrent = m;
+    }
+    cfg.validate()?;
+    let sessions = cfg.session_map()?;
+    let plugin_dir = resolve_plugin_dir(&opts.plugin_root, &cfg)?;
+
+    let shared = Arc::new(Shared {
+        status: Mutex::new(Status {
+            pid: std::process::id(),
+            process: "rituals".into(),
+            started: dates::today().to_string(),
+            root: root.display().to_string(),
+            dry_run: opts.dry_run,
+            ..Status::default()
+        }),
+        root: root.clone(),
+        sessions,
+        inbox: mcp::Inbox::default(),
+        overlay_status: false,
+    });
+    // No channels: announcing newly-open records is the dispatcher's watch.
+    let mut rt = Runtime {
+        root: root.clone(),
+        cfg,
+        plugin_dir,
+        port: None,
+        dry_run: opts.dry_run,
+        channels: channels::Channels::new(),
+        announced_tickets: Mutex::new(std::collections::HashSet::new()),
+        shared: Arc::clone(&shared),
+    };
+
+    let mut _addrfile = None;
+    if !rt.dry_run {
+        let channel = config::Server {
+            bind: "127.0.0.1".into(),
+            port: 0,
+        };
+        let port = server::start(Arc::clone(&shared), &channel)?;
+        rt.port = Some(port);
+        _addrfile = Some(Addrfile::write(&root, RITUALS_ADDRFILE, "127.0.0.1", port)?);
+    }
+
+    let mut state = State::load_rituals(&root);
+    let mut backend = Backend::connect(&root, &rt.cfg, true, "ritual:")?;
+    if !rt.dry_run {
+        let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
+        if let Err(e) = marker::reconcile(&root, "ritual:", &live) {
+            note(&format!("acting-role marker reconcile failed: {e}"));
+        }
+    }
+    note(&format!("rituals pass for {}", root.display()));
+    if rt.dry_run {
+        note("dry run — nothing will be spawned and no state is written");
+    }
+
+    let mut first = true;
+    loop {
+        let outcome = rituals_pass(&rt, &mut state, &mut backend, first)?;
+        first = false;
+        for done in backend.drain() {
+            report_exit(&done);
+            state.finished(&done.key, done.exit);
+            retire(&rt, &done);
+        }
+        if outcome.deferred > 0 && outcome.started > 0 {
+            continue;
+        }
+        if !rt.dry_run {
+            state.save(&root)?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+}
+
+/// `--plugin-root`, `$CLAUDE_PLUGIN_ROOT`, or a refusal when a template
+/// names `{plugin_dir}` and neither is set.
+fn resolve_plugin_dir(
+    explicit: &Option<PathBuf>,
+    cfg: &RuntimeConfig,
+) -> anyhow::Result<Option<String>> {
+    let plugin_dir = explicit
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .or_else(|| std::env::var("CLAUDE_PLUGIN_ROOT").ok());
+    if plugin_dir.is_none() && names(cfg, "{plugin_dir}") {
+        anyhow::bail!(
+            "the harness templates name {{plugin_dir}} but no plugin checkout is known — \
+             pass --plugin-root, set CLAUDE_PLUGIN_ROOT, or drop it from {}",
+            config::FILE
+        );
+    }
+    Ok(plugin_dir)
 }
 
 /// The escalation transports this run announces on, built from config. The
@@ -354,7 +521,16 @@ enum Outcome {
     AlreadyRan,
 }
 
-fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Result<Pass> {
+/// One dispatcher pass: reap, scan, fire, announce, snapshot. No calendar —
+/// the scan is the cheap deterministic read the spec always said it was, and
+/// running it every tick is what lets an `awaits:` release dispatch within a
+/// minute instead of a day (decision 0046).
+fn dispatch_pass(
+    rt: &Runtime,
+    state: &mut State,
+    backend: &mut Backend,
+    reported: &mut Reported,
+) -> anyhow::Result<Pass> {
     for done in backend.reap() {
         report_exit(&done);
         state.finished(&done.key, done.exit);
@@ -364,109 +540,94 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
     let tree = Tree::load(Root {
         path: rt.root.clone(),
     })?;
-    let reg = registries::load(&tree);
     let today = dates::today();
-    let pass = sched::due(&reg, &rt.cfg, state, today);
+    let derived = graph::derive(&tree);
+    let report = dispatch::scan(&tree, &derived, &rt.shared.sessions);
 
-    let mut warnings = Vec::new();
-    let mut held = Vec::new();
-    let mut outcome = Pass::default();
-
-    for due in pass.due {
-        if due.skipped {
+    // Transitions, not standing facts: a tight loop that repeated every hold
+    // once per tick would bury its own log.
+    for w in &report.warnings {
+        if reported.warnings.insert(w.clone()) {
+            note(&format!("dispatch: {w}"));
+        }
+    }
+    let held_now: std::collections::HashSet<String> = report
+        .held
+        .iter()
+        .map(|h| format!("{} — {}", h.plan, h.describe()))
+        .collect();
+    for h in &report.held {
+        let line = format!("{} — {}", h.plan, h.describe());
+        if reported.held.insert(line.clone()) {
+            note(&format!("holding {line}; it stays ready and re-enters the scan"));
+        }
+    }
+    for gone in reported.held.difference(&held_now).cloned().collect::<Vec<_>>() {
+        reported.held.remove(&gone);
+        note(&format!("hold cleared: {gone}"));
+    }
+    for h in &report.handoffs {
+        if reported.handoffs.insert(h.plan.clone()) {
             note(&format!(
-                "{}: window missed while the daemon was down — recorded, not run (catchup = skip)",
-                due.task.label()
+                "handoff: {} → {} is human-held{} — no session; the work awaits its holder",
+                h.plan,
+                h.owner,
+                h.holder_ref
+                    .as_deref()
+                    .map(|r| format!(" ({r})"))
+                    .unwrap_or_default()
             ));
-            if !rt.dry_run {
-                state.fired(&due.task.key(), today, None);
-            }
-            continue;
         }
-        match &due.task {
-            Task::Ritual { name, executor } => {
-                let vars = tmpl::Vars::new()
-                    .set("ritual", name.clone())
-                    .set("escalate_to", crate::dispatch::escalate_to(&tree, executor))
-                    .set("automation", "");
-                outcome.record(fire(
-                    rt,
-                    state,
-                    backend,
-                    &due.task.key(),
-                    &format!("ritual {name} ({executor})"),
-                    executor,
-                    &rt.cfg.prompts.ritual,
-                    &rt.cfg.harness.ritual_cmd,
-                    &rt.cfg.harness.herdr.ritual_args,
-                    vars,
-                    today,
-                ));
-            }
-            Task::DispatchScan => {
-                let derived = crate::graph::derive(&tree);
-                let report = dispatch::scan(&tree, &derived, &rt.shared.sessions);
-                for w in &report.warnings {
-                    note(&format!("dispatch: {w}"));
-                }
-                for h in &report.held {
-                    note(&format!(
-                        "holding {} — {}; it stays ready and re-enters the scan next tick",
-                        h.plan,
-                        h.describe()
-                    ));
-                    held.push(h.plan.clone());
-                }
-                for h in &report.handoffs {
-                    note(&format!(
-                        "handoff: {} → {} is human-held{} — no session; the work awaits its holder",
-                        h.plan,
-                        h.owner,
-                        h.holder_ref
-                            .as_deref()
-                            .map(|r| format!(" ({r})"))
-                            .unwrap_or_default()
-                    ));
-                }
-                warnings = report.warnings.clone();
+    }
+    reported
+        .handoffs
+        .retain(|p| report.handoffs.iter().any(|h| &h.plan == p));
 
-                let mut all_started = true;
-                for item in &report.dispatch {
-                    let vars = tmpl::Vars::new()
-                        .set("plan", item.plan.clone())
-                        .set("owner", item.owner_short.clone())
-                        .set("escalate_to", item.escalate_to.clone())
-                        .set("automation", item.automation.clone())
-                        .set("complexity", item.complexity.clone())
-                        .set("model", item.model.clone())
-                        .set("effort", item.effort.clone())
-                        .set("budget", item.budget_usd.to_string());
-                    let started = fire(
-                        rt,
-                        state,
-                        backend,
-                        &state::key_plan(&item.plan),
-                        &format!("act {} → {}", item.plan, item.owner),
-                        &item.owner,
-                        &rt.cfg.prompts.act,
-                        &rt.cfg.harness.act_cmd,
-                        &rt.cfg.harness.herdr.act_args,
-                        vars,
-                        today,
-                    );
-                    all_started &= !matches!(started, Outcome::Deferred);
-                    outcome.record(started);
-                }
-                // The cadence says how often to scan, never how many plans
-                // may start in a day. So a scan that could not start
-                // everything it found is not recorded as done: it stays due
-                // and re-runs as soon as a slot frees, rather than leaving
-                // the overflow to wait a full cadence.
-                if !rt.dry_run && all_started {
-                    state.fired(state::DISPATCH, today, None);
+    let mut outcome = Pass::default();
+    for item in &report.dispatch {
+        let key = state::key_plan(&item.plan);
+        // The cooldown is the tight loop's backstop: a session that ended
+        // without claiming leaves its plan `ready`, and without this it
+        // would respawn every tick.
+        if !backend.is_busy(&key) {
+            if let Some(at) = state.last_attempt_secs(&key) {
+                let elapsed = state::now_secs().saturating_sub(at);
+                if elapsed < rt.cfg.scheduler.retry_cooldown_secs {
+                    if reported.cooling.insert(key.clone()) {
+                        note(&format!(
+                            "{}: last session ended without claiming — cooling down {}s before retrying",
+                            item.plan,
+                            rt.cfg.scheduler.retry_cooldown_secs - elapsed
+                        ));
+                    }
+                    continue;
                 }
             }
         }
+        reported.cooling.remove(&key);
+        let vars = tmpl::Vars::new()
+            .set("plan", item.plan.clone())
+            .set("owner", item.owner_short.clone())
+            .set("escalate_to", item.escalate_to.clone())
+            .set("automation", item.automation.clone())
+            .set("complexity", item.complexity.clone())
+            .set("model", item.model.clone())
+            .set("effort", item.effort.clone())
+            .set("budget", item.budget_usd.to_string());
+        let started = fire(
+            rt,
+            state,
+            backend,
+            &key,
+            &format!("act {} → {}", item.plan, item.owner),
+            &item.owner,
+            &rt.cfg.prompts.act,
+            &rt.cfg.harness.act_cmd,
+            &rt.cfg.harness.herdr.act_args,
+            vars,
+            today,
+        );
+        outcome.record(started);
     }
 
     if !rt.dry_run {
@@ -510,15 +671,102 @@ fn tick(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Resul
         status.last_pass = Some(today.to_string());
         status.in_flight = backend.in_flight();
         status.runs = state.runs.clone();
-        status.warnings = warnings;
-        status.held = held;
-        status.unscheduled = pass.unscheduled;
+        status.warnings = report.warnings.clone();
+        status.held = report.held.iter().map(|h| h.plan.clone()).collect();
+        status.handoffs = report.handoffs.iter().map(|h| h.plan.clone()).collect();
+        if !rt.dry_run {
+            if let Err(e) = write_status(&rt.root, &status) {
+                note(&format!("status snapshot failed: {e:#}"));
+            }
+        }
     }
 
     if !rt.dry_run {
         state.save(&rt.root)?;
     }
     Ok(outcome)
+}
+
+/// One rituals pass: everything the cadences owe today. `first` gates the
+/// facts worth saying once, since the drain loop may pass again.
+fn rituals_pass(
+    rt: &Runtime,
+    state: &mut State,
+    backend: &mut Backend,
+    first: bool,
+) -> anyhow::Result<Pass> {
+    for done in backend.reap() {
+        report_exit(&done);
+        state.finished(&done.key, done.exit);
+        retire(rt, &done);
+    }
+
+    let tree = Tree::load(Root {
+        path: rt.root.clone(),
+    })?;
+    let reg = registries::load(&tree);
+    let today = dates::today();
+    let pass = sched::due(&reg, &rt.cfg, state, today);
+
+    if first {
+        for row in &pass.unscheduled {
+            note(&format!(
+                "{row}: cadence has no day count — never fired automatically"
+            ));
+        }
+    }
+
+    let mut outcome = Pass::default();
+    for due in pass.due {
+        if due.skipped {
+            note(&format!(
+                "{}: window missed while nothing was running — recorded, not run (catchup = skip)",
+                due.task.label()
+            ));
+            if !rt.dry_run {
+                state.fired(&due.task.key(), today, None);
+            }
+            continue;
+        }
+        let vars = tmpl::Vars::new()
+            .set("ritual", due.task.name.clone())
+            .set(
+                "escalate_to",
+                crate::dispatch::escalate_to(&tree, &due.task.executor),
+            )
+            .set("automation", "");
+        let started = fire(
+            rt,
+            state,
+            backend,
+            &due.task.key(),
+            &format!("ritual {} ({})", due.task.name, due.task.executor),
+            &due.task.executor,
+            &rt.cfg.prompts.ritual,
+            &rt.cfg.harness.ritual_cmd,
+            &rt.cfg.harness.herdr.ritual_args,
+            vars,
+            today,
+        );
+        outcome.record(started);
+    }
+
+    if !rt.dry_run {
+        state.save(&rt.root)?;
+    }
+    Ok(outcome)
+}
+
+/// The dispatcher's snapshot, atomically: the read-only server serves this
+/// file instead of sharing the process.
+fn write_status(root: &Path, status: &Status) -> anyhow::Result<()> {
+    let dir = RuntimeConfig::runtime_dir(root);
+    std::fs::create_dir_all(&dir)?;
+    let tmp = tempfile::NamedTempFile::new_in(&dir)?;
+    std::fs::write(tmp.path(), serde_json::to_string_pretty(status)?)?;
+    tmp.persist(dir.join(STATUS_FILE))
+        .map_err(|e| anyhow::anyhow!("atomic rename failed: {e}"))?;
+    Ok(())
 }
 
 impl Pass {
@@ -578,7 +826,7 @@ fn fire(
     match rt.port {
         Some(port) => {
             let handle = rt.shared.inbox.register(key, label);
-            vars = vars.set("mcp", mcp::config_json(&rt.cfg.server.bind, port, &handle));
+            vars = vars.set("mcp", mcp::config_json("127.0.0.1", port, &handle));
             token = Some(handle);
         }
         // No listener, so no channel — but the template still has to render.
@@ -739,15 +987,15 @@ fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
 struct Pidfile(PathBuf);
 
 impl Pidfile {
-    fn claim(root: &Path) -> anyhow::Result<Pidfile> {
+    fn claim(root: &Path, file: &str, what: &str) -> anyhow::Result<Pidfile> {
         let dir = RuntimeConfig::runtime_dir(root);
         std::fs::create_dir_all(&dir)?;
-        let path = dir.join("serve.pid");
+        let path = dir.join(file);
         if let Ok(text) = std::fs::read_to_string(&path) {
             let pid = text.trim().to_string();
             if alive(&pid) {
                 anyhow::bail!(
-                    "another trellis serve is already running on this root (pid {pid}); \
+                    "another {what} is already running on this root (pid {pid}); \
                      stop it, or remove {} if it is stale",
                     path.display()
                 );
@@ -764,16 +1012,19 @@ impl Drop for Pidfile {
     }
 }
 
-/// Where this daemon is listening, for the commands that talk to it.
-pub const ADDRFILE: &str = "serve.addr";
+/// Where each process is listening, for the commands that talk to them.
+/// `trellis inbox` tries the dispatcher first — the sessions live there.
+pub const SERVE_ADDRFILE: &str = "serve.addr";
+pub const DISPATCH_ADDRFILE: &str = "dispatch.addr";
+pub const RITUALS_ADDRFILE: &str = "rituals.addr";
 
 struct Addrfile(PathBuf);
 
 impl Addrfile {
-    fn write(root: &Path, bind: &str, port: u16) -> anyhow::Result<Addrfile> {
+    fn write(root: &Path, file: &str, bind: &str, port: u16) -> anyhow::Result<Addrfile> {
         let dir = RuntimeConfig::runtime_dir(root);
         std::fs::create_dir_all(&dir)?;
-        let path = dir.join(ADDRFILE);
+        let path = dir.join(file);
         // A wildcard bind is dialled back on loopback, the same substitution
         // the sessions' own endpoint makes.
         let host = match bind {

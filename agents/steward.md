@@ -101,7 +101,8 @@ artifact already carries an open record saying the same thing.
   Never file `decisions/`: append-only shared memory is superseded, not
   retired.
 - **Plan dispatch** — where the binding runs the scan itself (the
-  `trellis serve` daemon does) you are not invoked for this at all. Invoked by
+  `trellis dispatch run` loop does, continuously — decision 0046) you are not
+  invoked for this at all. Invoked by
   hand: run `trellis dispatch scan` — its holds, handoffs, and readiness
   verdicts are the scan's output, never yours to recompute — and start one
   *separate* `/trellis:act {owner} advance {plan}` per dispatch row, so the

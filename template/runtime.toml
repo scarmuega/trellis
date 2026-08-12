@@ -1,8 +1,11 @@
-# <trellis runtime binding> Runtime config for `trellis serve` — the clock,
-# the harness, and the serving surface for this domain (decisions 0038, 0039).
-# The daemon is the domain's only clock: run it wherever this repository is
-# checked out, under whatever supervises long-running processes there
-# (launchd, systemd, a terminal).
+# <trellis runtime binding> Runtime config for the three runtime processes
+# (decisions 0038, 0039, 0046): `trellis dispatch run` — the continuous pull
+# loop that spawns act sessions the moment plans become dispatchable;
+# `trellis rituals` — one idempotent pass of the wall-clock work, invoked by
+# cron, launchd, or a hand, as often as you like; `trellis serve` — the
+# read-only board and API, no clock, safe to not run. Run the dispatcher
+# wherever this repository is checked out, under whatever supervises
+# long-running processes there; give rituals to the OS scheduler.
 #
 # Secrets never live here. The daemon's own environment carries them
 # (ANTHROPIC_API_KEY and anything else the harness needs) and every spawned
@@ -18,18 +21,23 @@ bind = "127.0.0.1"
 port = 7357
 
 [scheduler]
-# Seconds between passes. A pass is cheap — it reads the tree and compares
-# dates — so this is latency, not load.
+# Seconds between the dispatcher's passes. A pass is cheap — it reads the
+# tree — so this is reaction latency, not load. There is no dispatch cadence
+# (decision 0046): the loop reacts to the tree, and an `awaits:` release
+# dispatches within one tick, not one day.
 tick_secs = 60
-# Sessions that may run at once. A task that finds no slot stays due and
-# starts on the next pass; nothing is dropped.
+# Sessions one process may run at once — dispatch and rituals each get their
+# own allowance, so a ritual batch cannot starve dispatch. A task that finds
+# no slot stays due and starts as slots free; nothing is dropped.
 max_concurrent = 2
-# "once": a cadence missed while the machine slept fires once on waking.
-# "skip": the missed window is recorded and never run, so the next fire lands
-# a full period out. Either way, never once per missed window.
+# Seconds a plan is skipped after a session ended without claiming it — the
+# tight loop's crash-loop backstop. Claims and blocks clear it naturally.
+retry_cooldown_secs = 900
+# Rituals only. "once": a window missed while nothing was running fires once
+# on the next `trellis rituals` invocation. "skip": the missed window is
+# recorded and never run, so the next fire lands a full period out. Either
+# way, never once per missed window.
 catchup = "once"
-# Overrides the `plan dispatch` row's cadence in rituals.md.
-# dispatch_cadence = "daily"
 
 [harness]
 # Who carries a running session (decision 0043). "process" — the daemon
@@ -52,9 +60,9 @@ backend = "process"
 # rather than blocking its plan for a cadence, and report progress you can watch
 # without opening a log (decision 0041). Answer with `trellis inbox`, or on the
 # board. Every harness speaks MCP natively, so this costs no adapter — and a
-# harness that does not can drop the two arguments and lose nothing else. Under
-# --no-http there is no socket to call back on, so {mcp} renders empty and the
-# daemon says so once at startup.
+# harness that does not can drop the two arguments and lose nothing else. The
+# channel lives with the process that spawned the session (dispatch or
+# rituals — decision 0046); only --dry-run runs without one.
 #
 # No --plugin-dir below: the daemon runs where the plugin is installed in the
 # harness, which is the premise of operating locally. Against a checkout that
@@ -114,8 +122,8 @@ ritual = "/trellis:ritual {ritual}"
 # never size); this is where this binding turns them into a model, an effort
 # level, and a budget. Retune here, never in a plan (decision 0032). Absent
 # complexity means standard; an illegal tier dispatches as standard with a
-# warning (conventions-lint item 4). `trellis serve --map` overrides a tier for
-# one run without editing this file.
+# warning (conventions-lint item 4). `trellis dispatch run --map` overrides a
+# tier for one run without editing this file.
 [sessions]
 mechanical = "opus:medium:5"
 standard = "opus:high:10"

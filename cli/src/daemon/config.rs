@@ -69,11 +69,23 @@ pub enum Catchup {
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Scheduler {
+    /// Seconds between the dispatcher's passes.
     pub tick_secs: u64,
+    /// Sessions one process may run at once — dispatch and rituals each get
+    /// their own allowance (decision 0046), so a ritual batch cannot starve
+    /// dispatch.
     pub max_concurrent: usize,
-    /// Overrides the `plan dispatch` row's cadence in `rituals.md`.
+    /// Pre-0046: overrode the `plan dispatch` row's cadence. Dispatch has no
+    /// cadence anymore — the loop polls every tick — so the field is parsed
+    /// for compatibility and noted as obsolete at startup.
     pub dispatch_cadence: Option<String>,
+    /// Rituals only: what a cadence missed while nothing was running does.
     pub catchup: Catchup,
+    /// Dispatch only: seconds a plan is skipped after a session ended
+    /// without claiming it. The daily cadence used to be this backstop by
+    /// accident; a tight loop needs it on purpose, or a crash-looping act
+    /// respawns every tick.
+    pub retry_cooldown_secs: u64,
 }
 
 impl Default for Scheduler {
@@ -83,6 +95,7 @@ impl Default for Scheduler {
             max_concurrent: 2,
             dispatch_cadence: None,
             catchup: Catchup::Once,
+            retry_cooldown_secs: 900,
         }
     }
 }

@@ -1,56 +1,50 @@
-//! Which tasks are due, computed from declared cadences and last-fired dates
-//! alone. Pure: no clock, no filesystem, no spawning — the tick loop supplies
-//! today and acts on the answer, which is what makes cadence behaviour
-//! testable without waiting for one.
+//! Which rituals are due, computed from declared cadences and last-fired
+//! dates alone. Pure: no clock, no filesystem, no spawning — the caller
+//! supplies today and acts on the answer, which is what makes cadence
+//! behaviour testable without waiting for one.
 //!
 //! Granularity is a day, matching `rituals.md`'s vocabulary. A daily ritual
-//! fires when the daemon first notices a new day, not at a wall-clock hour:
+//! fires when the runner first notices a new day, not at a wall-clock hour:
 //! the forge binding's crons carry an hour because cron demands one, and the
 //! cadence never did.
+//!
+//! Plan dispatch is not here (decision 0046). A ritual's time gap is part of
+//! its meaning — the metric sweep's cadence *is* the freshness window — but
+//! dispatch's daily cadence was a fossil of the forge cron it was ported
+//! from: nothing about "daily" means anything to a scan whose idempotency
+//! comes from claims. The dispatcher polls every tick; this module schedules
+//! only the sessions whose gaps are semantic.
 
 use super::config::{Catchup, RuntimeConfig};
 use super::state::{self, State};
 use crate::dates::{self, Date};
 use crate::registries::{cadence_days, Registries};
 
-/// The `rituals.md` row whose standing behaviour is the scan itself. It is
-/// never spawned as a ritual session: the scan carries no judgment, so the
-/// daemon runs it in-process (spec/runtime.md, "Plan dispatch").
+/// The `rituals.md` row whose standing behaviour is the dispatcher's loop.
+/// It stays in the table as the operator-of-record declaration, and the
+/// scheduler skips it: the loop is continuous, not cadenced.
 pub const DISPATCH_ROW: &str = "plan dispatch";
 
-/// The cadence used when neither config nor `rituals.md` names one.
-pub const DEFAULT_DISPATCH_CADENCE: &str = "daily";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Task {
-    Ritual {
-        name: String,
-        executor: String,
-    },
-    /// Enumerate `ready` plans and act on each — run in-process.
-    DispatchScan,
+pub struct Task {
+    pub name: String,
+    pub executor: String,
 }
 
 impl Task {
     pub fn key(&self) -> String {
-        match self {
-            Task::Ritual { name, .. } => state::key_ritual(name),
-            Task::DispatchScan => state::DISPATCH.to_string(),
-        }
+        state::key_ritual(&self.name)
     }
 
     pub fn label(&self) -> &str {
-        match self {
-            Task::Ritual { name, .. } => name,
-            Task::DispatchScan => DISPATCH_ROW,
-        }
+        &self.name
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Due {
     pub task: Task,
-    /// A window missed while the daemon was down, under `catchup = "skip"`:
+    /// A window missed while nothing was running, under `catchup = "skip"`:
     /// the run is recorded and nothing is spawned, so the next fire lands a
     /// full period from now instead of immediately.
     pub skipped: bool,
@@ -65,15 +59,15 @@ pub struct Pass {
     pub unscheduled: Vec<String>,
 }
 
-/// Everything due as of `today`.
+/// Every ritual due as of `today`.
 pub fn due(reg: &Registries, cfg: &RuntimeConfig, state: &State, today: Date) -> Pass {
     let mut pass = Pass::default();
 
     for row in &reg.rituals {
         if row.name.eq_ignore_ascii_case(DISPATCH_ROW) {
-            continue; // the scan, handled below
+            continue; // the dispatcher's loop, never a ritual session
         }
-        let task = Task::Ritual {
+        let task = Task {
             name: row.name.clone(),
             executor: row.executor.clone(),
         };
@@ -81,22 +75,6 @@ pub fn due(reg: &Registries, cfg: &RuntimeConfig, state: &State, today: Date) ->
             None => pass.unscheduled.push(row.name.clone()),
             Some(days) => consider(&mut pass, task, days, cfg, state, today),
         }
-    }
-
-    let cadence = cfg
-        .scheduler
-        .dispatch_cadence
-        .clone()
-        .or_else(|| {
-            reg.rituals
-                .iter()
-                .find(|r| r.name.eq_ignore_ascii_case(DISPATCH_ROW))
-                .map(|r| r.cadence.clone())
-        })
-        .unwrap_or_else(|| DEFAULT_DISPATCH_CADENCE.to_string());
-    match cadence_days(&cadence) {
-        None => pass.unscheduled.push(DISPATCH_ROW.to_string()),
-        Some(days) => consider(&mut pass, Task::DispatchScan, days, cfg, state, today),
     }
 
     pass
@@ -165,7 +143,7 @@ mod tests {
             &State::default(),
             day("2026-08-03"),
         );
-        assert_eq!(labels(&pass), vec!["conventions lint", DISPATCH_ROW]);
+        assert_eq!(labels(&pass), vec!["conventions lint"]);
         assert!(pass.due.iter().all(|d| !d.skipped));
     }
 
@@ -178,7 +156,6 @@ mod tests {
             day("2026-08-03"),
             None,
         );
-        state.fired(state::DISPATCH, day("2026-08-03"), None);
         let pass = due(&reg, &RuntimeConfig::default(), &state, day("2026-08-03"));
         assert!(pass.due.is_empty(), "{:?}", labels(&pass));
     }
@@ -188,12 +165,11 @@ mod tests {
         let reg = reg(&[("focus", "weekly")]);
         let mut state = State::default();
         state.fired(&state::key_ritual("focus"), day("2026-08-03"), None);
-        state.fired(state::DISPATCH, day("2026-08-03"), None);
         let cfg = RuntimeConfig::default();
 
-        // Day 6: the weekly row waits, the daily scan has already returned.
+        // Day 6: the weekly row waits.
         let pass = due(&reg, &cfg, &state, day("2026-08-09"));
-        assert_eq!(labels(&pass), vec![DISPATCH_ROW]);
+        assert!(labels(&pass).is_empty());
 
         // Day 7: exactly on cadence.
         let pass = due(&reg, &cfg, &state, day("2026-08-10"));
@@ -246,35 +222,18 @@ mod tests {
             day("2026-08-03"),
         );
         assert_eq!(pass.unscheduled, vec!["incident review"]);
-        assert_eq!(labels(&pass), vec![DISPATCH_ROW]);
+        assert!(labels(&pass).is_empty());
     }
 
     #[test]
-    fn the_dispatch_row_is_the_scan_never_a_ritual_session() {
+    fn the_dispatch_row_is_the_dispatchers_loop_never_a_ritual_session() {
         let pass = due(
             &reg(&[("plan dispatch", "daily")]),
             &RuntimeConfig::default(),
             &State::default(),
             day("2026-08-03"),
         );
-        assert_eq!(pass.due.len(), 1);
-        assert_eq!(pass.due[0].task, Task::DispatchScan);
-    }
-
-    #[test]
-    fn config_overrides_the_declared_dispatch_cadence() {
-        let reg = reg(&[("plan dispatch", "weekly")]);
-        let mut state = State::default();
-        state.fired(state::DISPATCH, day("2026-08-02"), None);
-        let cfg = RuntimeConfig {
-            scheduler: super::super::config::Scheduler {
-                dispatch_cadence: Some("daily".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let pass = due(&reg, &cfg, &state, day("2026-08-03"));
-        assert_eq!(pass.due.len(), 1);
-        assert_eq!(pass.due[0].task, Task::DispatchScan);
+        assert!(pass.due.is_empty());
+        assert!(pass.unscheduled.is_empty());
     }
 }

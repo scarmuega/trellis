@@ -75,7 +75,7 @@ fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
         "plans/think-hard.md",
         &format!("{FM}status: ready\ntype: initiative\ncomplexity: deep\n---\n# Think\n"),
     );
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
 
     assert_eq!(
         dispatched(&f),
@@ -111,7 +111,7 @@ fn the_daemon_stamps_the_acting_role_marker_around_each_session() {
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
 
     let seen: Vec<_> = std::fs::read_dir(f.root().join(".trellis/runtime"))
         .unwrap()
@@ -139,7 +139,7 @@ fn the_session_map_is_the_bindings_tuning_point() {
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\ncomplexity: mechanical\n---\n# Ship\n"),
     );
-    f.serve_once(ANCHOR, &["--map", "mechanical=haiku:low:1"]);
+    f.dispatch_once(ANCHOR, &["--map", "mechanical=haiku:low:1"]);
     assert_eq!(&f.invocations()[0][3..], ["haiku", "low", "1"]);
 }
 
@@ -160,7 +160,7 @@ fn sessions_configured_in_runtime_toml_override_the_defaults() {
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
     assert_eq!(&f.invocations()[0][1..], ["sonnet", "medium", "2"]);
 }
 
@@ -173,7 +173,7 @@ fn a_held_plan_stays_ready_and_is_never_dispatched() {
             "{FM}status: ready\ntype: initiative\nawaits: [plans/seasonal-recipe-line.md]\n---\n# Waits\n"
         ),
     );
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
 
     assert!(dispatched(&f).is_empty());
     assert!(out.contains("holding plans/waits.md"), "{out}");
@@ -190,11 +190,11 @@ fn a_claimed_plan_leaves_the_queue_which_is_what_makes_dispatch_idempotent() {
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
     assert!(f.read("plans/ship-it.md").contains("status: active"));
 
     // A new day, so the scan is due again — and finds nothing to do.
-    f.serve_once("2026-08-04", &[]);
+    f.dispatch_once("2026-08-04", &[]);
     assert_eq!(dispatched(&f).len(), 1, "not dispatched twice");
 }
 
@@ -205,7 +205,7 @@ fn a_ready_plan_with_no_owner_is_skipped_with_a_warning() {
         "plans/ownerless.md",
         "---\nprovenance: authored\nstatus: ready\ntype: initiative\n---\n# Ownerless\n",
     );
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
 
     assert!(dispatched(&f).is_empty());
     assert!(out.contains("declares no owner"), "{out}");
@@ -220,7 +220,7 @@ fn the_concurrency_cap_defers_work_and_one_pass_drains_it() {
             &format!("{FM}status: ready\ntype: initiative\n---\n# {slug}\n"),
         );
     }
-    let out = f.serve_once(ANCHOR, &[]);
+    let out = f.dispatch_once(ANCHOR, &[]);
 
     assert!(
         out.contains("session slots busy"),
@@ -259,7 +259,7 @@ fn a_drained_pass_never_exceeds_the_cap_at_once() {
             &format!("{FM}status: ready\ntype: initiative\n---\n# {slug}\n"),
         );
     }
-    f.serve_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
 
     assert_eq!(dispatched(&f).len(), 3, "every plan ran");
     assert!(
@@ -275,7 +275,7 @@ fn a_dry_run_reports_the_dispatch_without_starting_it() {
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
-    let out = f.serve_once(ANCHOR, &["--dry-run"]);
+    let out = f.dispatch_once(ANCHOR, &["--dry-run"]);
 
     assert!(
         out.contains("would run act plans/ship-it.md → org/founder"),
@@ -283,4 +283,50 @@ fn a_dry_run_reports_the_dispatch_without_starting_it() {
     );
     assert!(f.invocations().is_empty());
     assert!(f.read("plans/ship-it.md").contains("status: ready"));
+}
+
+/// The tight loop's backstop (decision 0046): a session that ends without
+/// claiming leaves its plan `ready`, and without a cooldown it would respawn
+/// every tick, forever, at session prices.
+#[test]
+fn an_unclaimed_plan_cools_down_instead_of_respawning() {
+    let f = passive_fixture(); // never claims
+    f.write(
+        "plans/loopy.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Loopy\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+    assert_eq!(dispatched(&f).len(), 1);
+
+    // Same day, moments later: the plan is still ready and its session is
+    // gone — the cooldown, not the calendar, is what stops the respawn.
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert_eq!(dispatched(&f).len(), 1, "no respawn inside the cooldown");
+    assert!(out.contains("cooling down"), "{out}");
+}
+
+#[test]
+fn the_cooldown_is_the_bindings_knob() {
+    let f = Fixture::healthy();
+    let harness = f.fake_harness();
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[scheduler]\nretry_cooldown_secs = 0\n\n\
+             [harness]\n\
+             act_cmd = [\"{harness}\", \"{{owner}}\", \"{{plan}}\"]\n\
+             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+        ),
+    );
+    f.write(
+        "plans/loopy.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Loopy\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
+    assert_eq!(
+        dispatched(&f).len(),
+        2,
+        "cooldown zero: every pass may retry an unclaimed plan"
+    );
 }

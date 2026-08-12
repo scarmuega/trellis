@@ -14,6 +14,35 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **The runtime splits by what its time means (decision 0046):** `trellis
+  serve` was one process owning three unlike things, and the seam showed the
+  day 0045 landed — an `awaits:` chain released its next plan minutes after
+  the daily dispatch pass and the plan sat dispatchable for a day, because
+  dispatch's cadence was never semantic, just the fossil of the forge cron
+  the scan was ported from. Now: **`trellis dispatch run`** is the pull loop
+  — every tick it polls the tree and spawns an act for everything
+  dispatchable, no calendar gate; the backstop the cadence provided by
+  accident it provides on purpose (`retry_cooldown_secs`, default 900,
+  skipping a plan whose session ended without claiming); holds and handoffs
+  are announced on transition, never once per tick; and it hosts the
+  sessions' MCP back-channel on its own loopback socket, because the channel
+  belongs to the process that owns the session lifecycle.
+  **`trellis rituals`** is one idempotent pass of the wall-clock work — fire
+  what the cadences owe today, drain, record, exit — safe under cron or
+  launchd at any frequency, `catchup` keeping its meaning; a ritual's gap is
+  part of its meaning (the metric sweep's cadence *is* the freshness window)
+  and stays scheduled. **`trellis serve`** is the read-only window: tree,
+  views, board, and the dispatcher's `status.json` overlaid on `/api/status`
+  with an honest liveness flag — no clock, no spawning, down without
+  consequence. State splits along the keyspace
+  (`dispatch-state.json` / `rituals-state.json`, legacy `state.json` read
+  once), herdr adoption filters by key prefix so the two spawners never
+  fight over a session, the acting-role marker gains a lockfile for its two
+  writers, and `trellis inbox` finds the dispatcher first. Gone: `serve
+  --once/--no-http/--tick-secs/--map/--dry-run` (their homes are `dispatch
+  run` and `rituals`) and `scheduler.dispatch_cadence` (parsed, ignored,
+  noted obsolete).
+
 - **The act ceremony's deterministic share runs in the runtime (spec v19;
   decision 0045):** a measured dispatched act spent ~10–15% of its tokens and
   ~25 turns on ceremony no judgment touches — and whole sessions on plans

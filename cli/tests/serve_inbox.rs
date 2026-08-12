@@ -18,8 +18,9 @@ use common::{Fixture, ANCHOR};
 const FM: &str =
     "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
-/// A live daemon that actually spawns, unlike `serve_api.rs`'s — the whole
-/// subject here is what a running session does.
+/// A live dispatcher that actually spawns (decision 0046) — the whole
+/// subject here is what a running session does, and the back-channel lives
+/// with the process that owns the session.
 struct Daemon {
     child: Child,
     port: u16,
@@ -28,7 +29,7 @@ struct Daemon {
 impl Daemon {
     fn start(f: &Fixture) -> Daemon {
         let mut child = Command::new(Fixture::bin_path())
-            .args(["serve", "--port", "0", "--tick-secs", "3600"])
+            .args(["dispatch", "run", "--tick-secs", "3600"])
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
@@ -42,7 +43,7 @@ impl Daemon {
         let port = loop {
             match lines.next() {
                 Some(Ok(line)) => {
-                    if let Some(addr) = line.strip_prefix("listening on ") {
+                    if let Some(addr) = line.strip_prefix("channel on ") {
                         break addr.rsplit(':').next().unwrap().parse().unwrap();
                     }
                 }
@@ -197,8 +198,22 @@ fn a_ritual_session_can_ask_too_which_is_why_the_board_is_not_the_contract() {
              ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"--mcp-config\", \"{{mcp}}\"]\n"
         ),
     );
-    let _daemon = Daemon::start(&f);
+    // Rituals are their own one-shot process now (decision 0046): it opens
+    // its own ephemeral channel, drains its sessions, and `trellis inbox`
+    // finds it through rituals.addr while it runs.
+    let mut child = Command::new(Fixture::bin_path())
+        .args(["rituals"])
+        .current_dir(f.root())
+        .env("TRELLIS_TODAY", ANCHOR)
+        .env_remove("CLAUDE_PLUGIN_ROOT")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
 
+    until("the rituals channel to open", || {
+        std::fs::read_to_string(f.root().join(".trellis/runtime/rituals.addr")).ok()
+    });
     let question = until("a ritual to ask", || {
         inbox(&f, &[])
             .as_array()?
@@ -210,6 +225,7 @@ fn a_ritual_session_can_ask_too_which_is_why_the_board_is_not_the_contract() {
     inbox(&f, &["answer", ticket, "stays in core"]);
     let got = until("the ritual to receive the answer", || f.answer_received());
     assert_eq!(got, "stays in core");
+    let _ = child.wait();
 }
 
 #[test]

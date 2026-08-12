@@ -135,6 +135,29 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
             let status = shared.status.lock().unwrap();
             let mut value = serde_json::to_value(&*status).unwrap_or(serde_json::Value::Null);
             drop(status);
+            // The read-only server has no pass of its own: it overlays the
+            // dispatcher's snapshot from disk, labelled with whether the
+            // process behind it is still alive (decision 0046).
+            if shared.overlay_status {
+                if let Some(obj) = value.as_object_mut() {
+                    let snapshot = std::fs::read_to_string(
+                        crate::daemon::config::RuntimeConfig::runtime_dir(&shared.root)
+                            .join(crate::daemon::STATUS_FILE),
+                    )
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+                    let dispatch_alive = std::fs::read_to_string(
+                        crate::daemon::config::RuntimeConfig::runtime_dir(&shared.root)
+                            .join("dispatch.pid"),
+                    )
+                    .is_ok();
+                    obj.insert(
+                        "dispatch".into(),
+                        snapshot.unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert("dispatch_running".into(), dispatch_alive.into());
+                }
+            }
             // Merged live rather than served from `status`, which only the
             // tick refreshes: a question raised between ticks has to be
             // answerable before the next one.
