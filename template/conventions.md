@@ -305,11 +305,19 @@ choices:
   calls, so a role that writes code can build and test what it implements; what
   bounds it is the role's mandate, the automation class, the provenance gate, and
   the approval gate below — not a tool allowlist.
+- Plan refinement: `/trellis:refine <plan> [instruction]` interactively —
+  `act(owner, refinement)` over the plan's content, never its execution. An
+  operator may request it of the running dispatcher headlessly (`trellis
+  dispatch refine <plan> "<instruction>"`, or the board's Act menu through
+  serve's relay); the loop stays the only spawner and every gate act carries
+  still applies (decision 0048).
 - Ingress: **unbound**. This instance has no event-driven plane: an outside
   event (email, ticket, webhook) reaches the domain when a human brings it into
   an interactive session. The daemon's HTTP surface is read-only by
   construction and is deliberately not a trigger door — a call that could
-  invoke a role would be a plane with no mandate behind it. Bind one when a
+  invoke a role would be a plane with no mandate behind it. The refine request
+  is not ingress: it names a plan already in the domain, under the mandate its
+  `owner:` already declares (decisions 0029, 0048). Bind a real ingress when a
   real event needs it, and record the choice here.
 - Escalation channel: escalation records in the repo, per "Escalation records"
   above — the artifact that carries the problem carries the escalation, so a

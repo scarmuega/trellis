@@ -154,10 +154,10 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 
 | service | binding |
 |---|---|
-| session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`) |
+| session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`); plan refinement via `/trellis:refine` (`commands/refine.md`) — `act(owner, refinement)` over a plan's content, never its execution (decision 0048) |
 | act | `/trellis:act <role> [input]` (`commands/act.md`); headless: `claude -p "/trellis:act …"`, which is the default argv template the dispatcher spawns — against an *installed* plugin, since the daemon runs where the operator's harness already has one. A domain operating from an uninstalled checkout adds `--plugin-dir` to the template in `runtime.toml`. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
 | schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
-| ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. An instance that needs one binds it and records the choice |
+| ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting refinement of a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048). An instance that needs a real ingress binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
 | escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
 | ledger | git history; the acting role is recorded in the session marker and named in commits. Per-session logs under `.trellis/runtime/logs/` are the daemon's trail — gitignored, single-machine, never the ledger |
@@ -185,6 +185,20 @@ the daily cadence used to be that backstop by accident, the loop needs it on
 purpose. Reports are transitions, not standing facts: a hold is announced
 when it appears and when it clears, never once per tick.
 
+**Plan refinement (`/trellis:refine`, decision 0048).** Reshaping a plan's
+content — simplify, split, refactor — is `act(owner, refinement)`: the command
+resolves the plan's `owner:` and delegates to the act procedure with a
+contract whose write target is the plan artifact (plus split-off drafts) and
+nothing else. Interactively it is plane 1. Headlessly, an operator requests it
+of the running dispatcher — `trellis dispatch refine <plan> "<instruction>"`,
+or `POST /api/plans/{slug}/refine` on the dispatcher's own socket, which serve
+answers only as a relay — and the loop, still the only spawner, validates
+against a fresh tree and fires one session through the same seam as dispatch,
+in the same per-plan keyspace so a refine and an advance never overlap. The
+instruction rides verbatim into the prompt; on a non-loopback bind that is an
+unauthenticated prompt door, which is why the loopback default is
+load-bearing.
+
 **Rituals (`trellis rituals`).** One pass of the wall-clock work: compute the
 due set from `rituals.md` cadences and the last-fired dates, fire one session
 per due row, drain them, record, exit. Idempotent per day, so the OS may
@@ -200,8 +214,11 @@ escalation records, an embedded plan board, and the dispatcher's `status.json`
 snapshot overlaid on `/api/status` — labelled with whether that process is
 still alive. Read-only is structural: there is no write path, so every change
 still enters through a session bound by its mandate, the gate, and the
-artifact's automation class. It binds loopback by default, carries no
-authentication, and may be down without stopping anything.
+artifact's automation class. The one non-read it answers besides 0041's
+answer route is the refine request (decision 0048), and only as a relay to
+the dispatcher's socket — serve itself spawns nothing, and answers 503 when
+no dispatcher runs. It binds loopback by default, carries no authentication,
+and may be down without stopping anything.
 
 **Implementation holders.** A plan whose `contexts:` land in code needs a holder
 that can write it, and that holder is domain-local (decision 0047, superseding
@@ -355,5 +372,7 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
 - **Rejected until evidence demands otherwise:** a hosted cloud runtime
   (premise 5: infrastructure ahead of evidence); push transports beyond the
   adapter seam; any write path on the serving surface *beyond* the single answer
-  route 0041 buys, which relays a reply to a session already running under a
-  mandate and touches no artifact.
+  route 0041 buys — which relays a reply to a session already running under a
+  mandate and touches no artifact — and the refine request 0048 buys, which
+  names a plan already in the domain (0029) to the dispatch loop, the only
+  spawner, and serve merely relays.
