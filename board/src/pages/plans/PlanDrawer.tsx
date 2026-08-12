@@ -1,0 +1,258 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { api } from "../../lib/api";
+
+// Preset refinement instructions — UI sugar over the framework command,
+// which accepts any instruction (commands/refine.md carries the contract).
+const ACTIONS = [
+  {
+    label: "Simplify scope",
+    instruction:
+      "Simplify this plan's scope: cut what is not essential to the objective, and tighten the objective itself.",
+  },
+  {
+    label: "Split scope",
+    instruction:
+      "Split this plan: carve its scope into smaller sequenced plans (filed as drafts with awaits: between them), leaving this plan as the first coherent increment.",
+  },
+  {
+    label: "Refactor scope",
+    instruction:
+      "Refactor this plan's structure: reorganize objective, approach, and scope for clarity and readiness, without changing what it commits to.",
+  },
+];
+
+/// The Act menu: canned refinements plus a custom instruction, POSTing to the
+/// refine route through serve's relay (decision 0048).
+function ActMenu({ rel }: { rel: string }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [text, setText] = useState("");
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const clearTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const { data: status } = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    refetchInterval: 10_000,
+  });
+  const dispatcherUp = status?.dispatch_running === true;
+  const inFlight = (status?.dispatch?.in_flight ?? []).some(
+    (s) => s.key === `plan:${rel}`,
+  );
+
+  const mutation = useMutation({
+    mutationFn: (instruction: string) => api.refine(rel, instruction),
+    onSuccess: (outcome) => {
+      show(true, `refinement session requested — ${outcome.owner} (${outcome.model}/${outcome.effort})`);
+      queryClient.invalidateQueries({ queryKey: ["status"] });
+      queryClient.invalidateQueries({ queryKey: ["artifact", rel] });
+    },
+    onError: (e: Error) => show(false, e.message),
+  });
+
+  const show = (ok: boolean, message: string) => {
+    setResult({ ok, message });
+    clearTimeout(clearTimer.current);
+    clearTimer.current = setTimeout(() => setResult(null), 6000);
+  };
+  useEffect(() => () => clearTimeout(clearTimer.current), []);
+
+  const run = (instruction: string) => {
+    setOpen(false);
+    setCustom(false);
+    mutation.mutate(instruction);
+  };
+
+  const disabled = !dispatcherUp || inFlight || mutation.isPending;
+  const disabledReason = !dispatcherUp
+    ? "dispatcher not running — start `trellis dispatch run`"
+    : inFlight
+      ? "a session is already running on this plan"
+      : undefined;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title={disabledReason}
+        className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium hover:border-neutral-500 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        Act ▾
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-1 w-64 rounded-md border border-neutral-200 bg-white p-1 shadow-lg">
+          {ACTIONS.map((a) => (
+            <button
+              key={a.label}
+              onClick={() => run(a.instruction)}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100"
+              title={a.instruction}
+            >
+              {a.label}
+            </button>
+          ))}
+          {!custom ? (
+            <button
+              onClick={() => setCustom(true)}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-100"
+            >
+              Custom…
+            </button>
+          ) : (
+            <div className="p-1.5">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                rows={3}
+                autoFocus
+                placeholder="what should the owner do to this plan?"
+                className="w-full rounded border border-neutral-200 p-1.5 text-xs focus:border-neutral-400 focus:outline-none"
+              />
+              <button
+                onClick={() => text.trim() && run(text.trim())}
+                disabled={!text.trim()}
+                className="mt-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white disabled:opacity-40"
+              >
+                Request
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      {result && (
+        <p
+          className={`absolute top-full right-0 mt-1.5 w-72 text-right text-xs ${
+            result.ok ? "text-emerald-600" : "text-red-600"
+          }`}
+        >
+          {result.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// The drawer is addressed by the `plan` search param, so it overlays either
+// view (/plans or /plans/graph) without changing the route, and a URL with a
+// drawer open restores as one.
+export function usePlanDrawer() {
+  const [params, setParams] = useSearchParams();
+  const open = useCallback(
+    (rel: string) =>
+      setParams((p) => {
+        p.set("plan", rel);
+        return p;
+      }),
+    [setParams],
+  );
+  const close = useCallback(
+    () =>
+      setParams((p) => {
+        p.delete("plan");
+        return p;
+      }),
+    [setParams],
+  );
+  return { rel: params.get("plan"), open, close };
+}
+
+function Chip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
+      <span className="text-neutral-400">{label}</span> {value}
+    </span>
+  );
+}
+
+export default function PlanDrawer() {
+  const { rel, open, close } = usePlanDrawer();
+
+  useEffect(() => {
+    if (!rel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rel, close]);
+
+  const { data, error, isPending } = useQuery({
+    queryKey: ["artifact", rel],
+    queryFn: () => api.artifact(rel!),
+    enabled: !!rel,
+  });
+
+  if (!rel) return null;
+  const facts = (data?.facts ?? {}) as Record<string, unknown>;
+  const awaits = Array.isArray(facts.awaits) ? (facts.awaits as string[]) : [];
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20" onClick={close} />
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-neutral-200 bg-white shadow-xl">
+        <header className="flex items-start justify-between gap-4 border-b border-neutral-100 px-5 py-4">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-xs text-neutral-400">{rel}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {["status", "owner", "type", "complexity", "effective_class"].map(
+                (k) =>
+                  typeof facts[k] === "string" ? (
+                    <Chip key={k} label={k.replace("_", " ")} value={String(facts[k])} />
+                  ) : null,
+              )}
+              {typeof facts.held === "string" ? (
+                <Chip label="held" value={String(facts.held)} />
+              ) : null}
+            </div>
+            {awaits.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
+                <span>awaits</span>
+                {awaits.map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => open(t)}
+                    className="rounded bg-sky-50 px-2 py-0.5 font-mono text-sky-700 hover:bg-sky-100"
+                  >
+                    {t.replace(/^plans\//, "").replace(/\.md$/, "")}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-3">
+            {facts.status !== "retired" && <ActMenu rel={rel} />}
+            <Link
+              to={`/artifacts/${rel}`}
+              className="text-xs text-neutral-400 hover:text-neutral-900"
+              title="Open as full page"
+            >
+              full page ↗
+            </Link>
+            <button
+              onClick={close}
+              className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+        </header>
+        <div className="grow overflow-y-auto px-5 py-4">
+          {isPending && <p className="text-sm text-neutral-500">Loading {rel}…</p>}
+          {error && <p className="text-sm text-red-600">{String(error)}</p>}
+          {data && (
+            <div className="prose prose-sm prose-neutral max-w-none">
+              <Markdown remarkPlugins={[remarkGfm]}>{data.text}</Markdown>
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
