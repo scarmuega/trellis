@@ -153,6 +153,67 @@ fn a_mechanically_unready_plan_holds_instead_of_dispatching() {
     assert!(items.contains(&4) && items.contains(&7), "{h:#}");
 }
 
+/// Item 7 reads the plan's instructions, not its trail. A plan that escalated
+/// about an unset done criterion, got an answer, and resolved the record still
+/// carries the words the record quotes — records are verbatim and never
+/// deleted, so no edit the conventions permit could remove them. Scanning the
+/// trail held such a plan forever, for having reported the defect it then
+/// fixed. Observed live on two plans in one domain.
+#[test]
+fn a_resolved_escalation_quoting_its_deferral_does_not_hold_the_plan() {
+    let f = Fixture::healthy();
+    f.write(
+        "plans/answered.md",
+        &format!(
+            "{FM}status: ready\ntype: initiative\n---\n# Answered\n\n\
+             ## Done criterion\n\n\
+             The exporter reports every layer it moves, and the count matches the manifest.\n\n\
+             ## Escalations\n\n\
+             ```yaml\nraised: 2026-08-13\nby: org/coder\nto: org/founder\nstatus: resolved\n\
+             asks: set this plan's done criterion, which still reads \"TBD\" — the release-time placeholder\n\
+             ```\n\n\
+             **Resolved by `org/founder`: the criterion is set**, replacing what the record quotes.\n"
+        ),
+    );
+    let report = scan(&f, &[]);
+    assert!(
+        report["held"].as_array().unwrap().is_empty(),
+        "a resolved trail must not hold the plan: {report:#}"
+    );
+    let dispatched: Vec<&str> = report["dispatch"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["plan"].as_str().unwrap())
+        .collect();
+    assert!(dispatched.contains(&"plans/answered.md"), "{report:#}");
+}
+
+/// The exclusion is scoped, not a hole: a deferral in the body above the trail
+/// still holds the plan, even with an escalation section below it.
+#[test]
+fn a_deferral_above_the_escalation_trail_still_holds() {
+    let f = Fixture::healthy();
+    f.write(
+        "plans/still-vague.md",
+        &format!(
+            "{FM}status: ready\ntype: initiative\n---\n# Still vague\n\n\
+             ## Done criterion\n\nTBD — decide later.\n\n\
+             ## Escalations\n\nNothing open.\n"
+        ),
+    );
+    let report = scan(&f, &[]);
+    let h = &report["held"][0];
+    assert_eq!(h["plan"], "plans/still-vague.md");
+    let items: Vec<u64> = h["failed_items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i.as_u64().unwrap())
+        .collect();
+    assert!(items.contains(&7), "{h:#}");
+}
+
 /// A holder ref declaring `kind: human` short-circuits into a handoff: the
 /// scan reads one declared field and spawns nothing. Undeclared kinds keep
 /// dispatching (the other tests' fixtures have no `kind:` and still spawn).

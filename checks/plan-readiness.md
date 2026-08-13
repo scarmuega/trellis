@@ -46,7 +46,10 @@ mechanical half.
    blocker by construction.
 7. **No unresolved deferrals.** No "TBD", "decide later", "pick one of", open
    question, or unfilled placeholder in the body. A deferral inside a released
-   plan is a question mailed to someone who cannot answer it.
+   plan is a question mailed to someone who cannot answer it. Read over the body
+   *above* `## Escalations`: a record quotes the deferral it was raised about,
+   and records are kept verbatim and never deleted, so scanning the trail would
+   fail a plan for having reported the very defect it then resolved.
 8. **Decisions it rests on are recorded.** Choices the work depends on resolve to
    `decisions/` refs or are stated in the body. A taker must never have to
    re-derive a decision the domain already made elsewhere.

@@ -195,11 +195,31 @@ pub fn check(tree: &Tree, derived: &Derived, plan_rel: &str) -> anyhow::Result<R
         "judgment — compare the plan's moves against the mandate",
     ));
 
-    // 7. No unresolved deferrals.
+    // 7. No unresolved deferrals — read over the body *above* `## Escalations`.
+    //
+    // An escalation record quotes the deferral it was raised about; that is
+    // what raising one means. Records are kept verbatim and never deleted
+    // (`conventions.md`, "Escalation records"), so a domain that escalates
+    // about an unset done criterion can never clear this item by any edit the
+    // conventions permit: resolving the escalation answers the question and
+    // leaves its quotation behind, and since decision 0045 the same scan gates
+    // dispatch — so the plan is held forever for having reported the defect it
+    // then fixed. Item 7 reads the plan's instructions to a taker. The trail is
+    // not instructions.
     {
         let mut hits = Vec::new();
         let tbd_word = regex::Regex::new(r"\btbd\b").unwrap();
-        for (i, line) in plan.body().lines().enumerate() {
+        let escalations = regex::Regex::new(r"(?i)^#{1,6}\s+escalations\s*$").unwrap();
+        let body = plan.body();
+        let total = body.lines().count();
+        let scanned = body
+            .lines()
+            .enumerate()
+            .take_while(|(_, line)| !escalations.is_match(line));
+        let mut read = 0usize;
+
+        for (i, line) in scanned {
+            read += 1;
             let lower = line.to_lowercase();
             for token in DEFERRAL_TOKENS {
                 if lower.contains(token) {
@@ -212,6 +232,7 @@ pub fn check(tree: &Tree, derived: &Derived, plan_rel: &str) -> anyhow::Result<R
                 }
             }
         }
+
         items.push(ReadinessItem {
             item: 7,
             title: "no unresolved deferrals",
@@ -220,10 +241,12 @@ pub fn check(tree: &Tree, derived: &Derived, plan_rel: &str) -> anyhow::Result<R
             } else {
                 ItemStatus::Fail
             },
-            detail: if hits.is_empty() {
-                "no deferral tokens found".into()
-            } else {
+            detail: if !hits.is_empty() {
                 hits.join("; ")
+            } else if read < total {
+                "no deferral tokens found above ## Escalations".into()
+            } else {
+                "no deferral tokens found".into()
             },
         });
     }

@@ -161,6 +161,18 @@ here and a matching `vx.y.z` git tag.
 
 ### Fixed
 
+- **Readiness item 7 reads the plan above `## Escalations`, not the trail below
+  it.** The deferral scan matched its tokens across the whole body, escalation
+  records included — and a record raised about an unset done criterion
+  necessarily quotes the deferral it reports. `conventions.md` keeps records
+  verbatim and never deletes them, so answering the escalation could not clear
+  the item: the quotation stayed, the scan kept failing, and since decision 0045
+  that is a permanent dispatch hold. The plan was held for having reported the
+  defect it then fixed (observed live: two plans in one domain, one of them the
+  plan whose own escalation is quoted). The scan now stops at the
+  `## Escalations` heading; a deferral anywhere above it still fails the item,
+  and the passing detail says when a trail was excluded.
+
 - **A `#anchor` ref resolves to a first-column table row, not only a
   heading.** The kernel's own template defines metrics as rows of the
   definitions table and the plan schema points `metrics:` refs at them, but
