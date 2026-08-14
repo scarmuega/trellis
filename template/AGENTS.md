@@ -8,9 +8,11 @@ This repo is a Trellis domain: one business operated as a versioned filesystem o
 markdown artifacts. The repo is the organization — agents load artifacts as
 instructions, humans review diffs as governance.
 
-**Read `conventions.md` first.** It is this domain's authoritative copy of the
-schemas, registries, and policies, and overrides any general knowledge. The full
-placement guide and procedures live there.
+**Read `trellis.toml` and `domain.md` first.** `trellis.toml` is the domain's
+machine-read config — spec pin, plan-type/tag/decision registries, carried
+paths, retention. `domain.md` carries the instance prose: boundary
+guarantees, secrets policy, runtime binding. The spec of the pinned version
+is authoritative for schemas and rules, and overrides any general knowledge.
 
 ## Routing — where each kind lives
 
@@ -24,7 +26,7 @@ placement guide and procedures live there.
                   governing artifact, a successor's supersedes: replaces
     org/          roles: mandate.md (authority) + holder/ (identity)
     archive/      the same tree, holding what is finished — terminal only
-    also: conventions.md · rituals.md · glossary.md · brand.md · economics.md
+    also: trellis.toml · domain.md · rituals.md · glossary.md · brand.md · economics.md
 
 ## Finding the live work
 
@@ -44,7 +46,7 @@ decision register in `metrics/actuals/` — a superseded decision stays in
   your role owns; never hand-edit `provenance: generated` — fix the generator.
 - Decisions are append-only: supersede, never edit — the successor's
   `supersedes:` names what it replaces, and standing guidance lands in the
-  governing artifact, citing the decision (`conventions.md` → "Decisions").
+  governing artifact, citing the decision (spec rule 6).
 - Act under a role — `org/{role}/mandate.md` bounds your authority and spend.
 - No secrets in the repo, ever — reference credentials by name.
 

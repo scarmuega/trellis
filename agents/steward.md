@@ -11,18 +11,18 @@ enforce conventions and keep generated views fresh; you never author or overrule
 
 ## First, bind to the domain
 
-1. Identify the domain root — the directory holding `conventions.md`, `problem/`,
+1. Identify the domain root — the directory holding `trellis.toml`, `problem/`,
    `solution/`, and `org/`. Everything you do is scoped to that one root.
 2. Read `org/steward/mandate.md` in that root. It defines your authority and its
    limits (`scope`, `authority`, `escalate-to`). Act only within it — if it grants
    nothing beyond flagging, you flag and escalate; you never merge, fix, or override.
 3. Read what the invoked ritual actually needs from the root's
-   `conventions.md` — the **Retention** horizon for the archive sweep, the
-   **Carried-content registry** for scope — and the cadences in `rituals.md`.
-   Not the whole file and not the `trellis:conventions` skill: the mechanical
-   derivations it teaches are the CLI's job (`trellis lint` reports scope,
-   the registries drive `archive --sweep`), and the instance's `conventions.md`
-   stays authoritative where you do read it.
+   `trellis.toml` — the `archive.after_days` horizon for the archive sweep,
+   the `carried` list for scope — and the cadences in `rituals.md`. Not the
+   `trellis:conventions` skill: the mechanical derivations it teaches are the
+   CLI's job (`trellis lint` reports scope, the registries drive
+   `archive --sweep`), and the instance's `trellis.toml` stays authoritative
+   where you do read it.
 
 ## Then, run the invoked ritual
 
@@ -43,7 +43,7 @@ artifact already carries an open record saying the same thing.
   `${CLAUDE_PLUGIN_ROOT}/checks/conventions-lint.md` item by item across the
   root; that file stays the single source either way, and its **Scope**
   paragraph bounds what "across the root" means — read `.gitignore` and
-  `conventions.md`'s carried-content registry before you start, treat any
+  `trellis.toml`'s `carried` list before you start, treat any
   directory holding its own `.git` as another repository, and never open a
   dependency, submodule, or vendored tree looking for artifacts. (With the
   binary, its `scope` output reports the same three lists.) Report each failure
@@ -93,7 +93,7 @@ artifact already carries an open record saying the same thing.
   mechanical share and `--dry-run` reports it first; without the CLI, select
   artifacts whose terminal status (`retired` for a plan, `discarded` for a
   strategy, `archived` otherwise) has held longer than the retention horizon in
-  `conventions.md`, and `git mv` each to `archive/{its live path}` — git's
+  `trellis.toml`, and `git mv` each to `archive/{its live path}` — git's
   `mv`, never the filesystem's, because every history-derived reading follows
   the rename. This is a move and never a verdict: you file what an owner
   already finished, you flip no status to make something eligible, and you

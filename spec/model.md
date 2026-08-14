@@ -1,4 +1,4 @@
-# Trellis — specification (v20)
+# Trellis — specification (v21)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -32,7 +32,11 @@ a domain is operated day to day.
 
 ```
 /                                   => repo root = the domain
-├── conventions.md                  => provenance classes, frontmatter schemas, secrets policy
+├── trellis.toml                    => machine-read config and the root marker: spec pin,
+│                                      plan-type/tag/decision registries, carried paths,
+│                                      retention horizon
+├── domain.md                       => optional instance prose: boundary guarantees,
+│                                      secrets policy, runtime-binding choices
 ├── rituals.md                      => heartbeat: reviews, metric sweeps, standing processes,
 │                                      escalation SLAs — executed by mandated agents
 ├── glossary.md                     => ubiquitous language; agents must cite terms from here
@@ -93,7 +97,7 @@ a domain is operated day to day.
                                        (rule 13). Never decisions/ — those are append-only
 ```
 
-## Frontmatter schemas (defined in conventions.md)
+## Frontmatter schemas
 
 ### Every artifact
 ```yaml
@@ -180,7 +184,7 @@ handoff: <ref>
     # owner's, the same argument awaits: makes for retirement. Claiming clears
     # it — a fresh claim is a fresh attempt, and a spent handoff would park the
     # next one.
-type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
+type: initiative | campaign | experiment | ...   # open set, registered in trellis.toml
 complexity: mechanical | standard | deep
     # optional; the reasoning depth the work demands of its taker — never its
     # size (a large migration can still be mechanical). mechanical = the plan
@@ -271,8 +275,9 @@ session apply the never-impersonate rule).
    decision supersedes it — and the superseded file never changes; partial influence
    is prose, never an edge. And a decision is memory, not a manual: the standing
    guidance it establishes lands, in the same change, in the artifact that governs
-   the behavior — conventions, a mandate, a context's README or contracts, a ritual
-   row — citing the decision, so operating never requires reading the trail.
+   the behavior — `domain.md` or a `trellis.toml` registry, a mandate, a context's
+   README or contracts, a ritual row — citing the decision, so operating never
+   requires reading the trail.
 7. **Directories hold kinds; groupings are tags.** A branch earns a directory only by
    introducing a new artifact kind — something needing its own frontmatter: its own
    lifecycle, owner, and provenance distinct from any parent document. Everything else

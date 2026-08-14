@@ -565,7 +565,7 @@ pub fn tags(tree: &Tree) -> String {
     let mut out = fm_header("tags", today);
     out.push_str("# Tag index\n");
     if reg.tags.is_empty() {
-        out.push_str("\n(no tags registered in conventions.md)\n");
+        out.push_str("\n(no tags registered in trellis.toml)\n");
         return out;
     }
     let mut sorted = reg.tags.clone();

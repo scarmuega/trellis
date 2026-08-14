@@ -1,8 +1,7 @@
 //! Line-oriented markdown scanning for the constrained shapes Trellis uses:
 //! ATX headings (anchor targets), fenced code blocks (escalation and finding
-//! records), pipe tables (rituals, context map), and registry bullet lists.
-//! The domain's markdown is convention-bound; a full CommonMark AST buys
-//! nothing here.
+//! records), and pipe tables (rituals, context map). The domain's markdown is
+//! convention-bound; a full CommonMark AST buys nothing here.
 
 #[derive(Debug, Clone)]
 pub struct Heading {
@@ -166,42 +165,6 @@ pub fn tables(text: &str, skip_through: u32) -> Vec<Table> {
     out
 }
 
-/// Bullet items under the section headed by `section_slug` (until the next
-/// heading of the same-or-higher level). Returns the backticked token when
-/// present, else the full item text. `(none…)` placeholder entries are
-/// dropped.
-pub fn registry_items(text: &str, headings: &[Heading], section_slug: &str) -> Vec<String> {
-    let Some(pos) = headings.iter().position(|h| h.slug == section_slug) else {
-        return vec![];
-    };
-    let start = headings[pos].line;
-    let end = headings
-        .iter()
-        .skip(pos + 1)
-        .find(|h| h.level <= headings[pos].level)
-        .map(|h| h.line)
-        .unwrap_or(u32::MAX);
-    let mut out = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        let line_no = i as u32 + 1;
-        if line_no <= start || line_no >= end {
-            continue;
-        }
-        let t = line.trim_start();
-        if let Some(item) = t.strip_prefix("- ") {
-            let name = if let Some(rest) = item.trim().strip_prefix('`') {
-                rest.split('`').next().unwrap_or("").to_string()
-            } else {
-                item.split('—').next().unwrap_or(item).trim().to_string()
-            };
-            if !name.is_empty() && !name.starts_with("(none") {
-                out.push(name);
-            }
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,14 +199,4 @@ mod tests {
         assert_eq!(t[0].rows[0].0, vec!["lint", "weekly"]);
     }
 
-    #[test]
-    fn registries() {
-        let text = "# Conventions\n\n## Plan-type registry\n\n- `initiative` — general\n- `experiment` — hypothesis\n\n## Tag registry\n\n- (none yet)\n";
-        let (h, _) = scan(text, 0);
-        assert_eq!(
-            registry_items(text, &h, "plan-type-registry"),
-            vec!["initiative", "experiment"]
-        );
-        assert!(registry_items(text, &h, "tag-registry").is_empty());
-    }
 }

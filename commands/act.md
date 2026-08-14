@@ -19,10 +19,10 @@ await instruction.
 ## Procedure
 
 1. **Bind to the domain root**: the nearest directory at or above the working
-   directory holding `conventions.md`, `problem/`, `solution/`, and `org/`. Not
-   in a Trellis root → say so and stop. Read the root's `conventions.md`
-   (authoritative over this procedure where they differ) — especially its
-   "Runtime binding" and secrets-policy sections.
+   directory holding `trellis.toml`, `problem/`, `solution/`, and `org/`. Not
+   in a Trellis root → say so and stop. Read the root's `trellis.toml` and
+   `domain.md` (authoritative over this procedure where they differ) —
+   especially domain.md's "Runtime binding" and secrets-policy sections.
 
 2. **Resolve the mandate**: read `org/{role}/mandate.md`. If the role does not
    exist, list the roles under `org/` and stop. Note `purpose`, `scope`,
@@ -74,7 +74,7 @@ await instruction.
    mandate does not permit becomes an escalation to `escalate-to:` through the
    instance's escalation channel (default binding: an escalation record — a
    fenced `yaml` block under `## Escalations` in the artifact the escalation
-   concerns, per `conventions.md`), describing what was attempted, why it
+   concerns, per the spec's escalation-record schema), describing what was attempted, why it
    exceeds authority, and a proposed resolution. Write the record with
    `trellis escalate add <artifact> --by <role> --asks …` — the CLI owns the
    schema, derives `to:` from your mandate, and refuses targets you must not

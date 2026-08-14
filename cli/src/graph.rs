@@ -354,7 +354,7 @@ fn cycles_in(graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
 }
 
 /// How each accepted decision is reached from the operative record (item 26,
-/// Decision hatching pattern). `registry` is `conventions.md`'s decision
+/// Decision hatching pattern). `registry` is `trellis.toml`'s decision
 /// registry — passed in because instance registries are not the graph's to
 /// read. Sorted by rel; drafts stay out (an unaccepted decision is still
 /// being authored).

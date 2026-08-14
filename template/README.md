@@ -16,10 +16,12 @@ Then:
    with an `induced-by:` edge back to the strategy, `class:` on the edge.
 4. Fill `brand.md` and `economics.md`.
 5. Replace every `<owner>` placeholder with a real `org/{role}` ref.
-6. Review `conventions.md` — it is YOUR instance's authoritative copy; adjust the
-   tag registry, plan types, and boundary guarantees to your tooling.
-7. Record `decisions/0000-adopt-trellis.md` (pre-written; pin your spec version).
-8. Wire the runtime (see `conventions.md` → Runtime binding): review
+6. Review `trellis.toml` — registries, retention horizon, and the spec pin —
+   and `domain.md` — boundary guarantees and secrets vault; they are YOUR
+   instance's declarations.
+7. Record `decisions/0000-adopt-trellis.md` (pre-written; the spec pin lives
+   in `trellis.toml`).
+8. Wire the runtime (see `domain.md` → Runtime binding): review
    `runtime.toml`, then run `trellis serve` at the root — it is the domain's
    clock, and its board and API are on `http://127.0.0.1:7357`.
    `ANTHROPIC_API_KEY` lives in the daemon's environment, never in this root.

@@ -133,7 +133,11 @@ mod tests {
     fn root_with(escalations: &str) -> (tempfile::TempDir, String) {
         let dir = tempfile::TempDir::new().unwrap();
         let p = dir.path();
-        std::fs::write(p.join("conventions.md"), "# conventions\n").unwrap();
+        std::fs::write(
+            p.join("trellis.toml"),
+            format!("spec = {}\n", crate::spec_version()),
+        )
+        .unwrap();
         for d in ["problem", "solution", "org", "plans"] {
             std::fs::create_dir_all(p.join(d)).unwrap();
         }

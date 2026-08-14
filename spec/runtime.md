@@ -3,7 +3,7 @@
 > How a Trellis domain is *operated* day to day. Non-normative companion to
 > `spec/model.md`: the operating model's contract ends at the root (rules 1–2);
 > everything here is consumer tooling. An instance declares which binding it uses
-> in its `conventions.md` ("Runtime binding" section); deviations need no spec
+> in its `domain.md` ("Runtime binding" section); deviations need no spec
 > change, only a decision record in the instance.
 
 A runtime is whatever executes the operating model: loads artifacts as
@@ -160,8 +160,36 @@ A binding names, for its harness and forge of choice:
 - where credentials live (never in the root — secrets policy),
 - how actions are attributed in the ledger.
 
-An instance records its binding choices in `conventions.md` under "Runtime
+An instance records its binding choices in `domain.md` under "Runtime
 binding".
+
+## Escalation records
+
+An escalation is body content in the artifact it concerns, under an
+`## Escalations` heading — one fenced `yaml` block per escalation:
+
+```yaml
+raised: YYYY-MM-DD
+by: org/{role}      # the acting role that raised it
+to: org/{role}      # the raiser's escalate-to:, or the artifact's owner
+status: open | resolved
+asks: one line — the question a human must answer
+attempted: one line — what was tried
+blocked: one line — what stopped
+```
+
+Only the artifact's `owner:` writes a record: an escalation is authored content,
+so a role whose mandate does not reach the artifact reports its finding instead
+and the owner transcribes it. An agent acting *as* the owner (an implementation
+holder under dispatch) writes its own. Resolution is the owner's edit — answer
+in prose beneath the record and flip `status: resolved`; whatever act it
+unblocks (a plan `blocked → ready`) is a separate change. Records stay in the
+artifact as the trail; nothing is deleted. Lint item 24 checks the shape.
+
+An escalation with no artifact to sit in — a role exceeding its authority on
+free-text input, a ritual deviation — stays in the acting session's report,
+addressed to its owner. A `generated` artifact is never annotated: the
+escalation goes to its generator's source.
 
 ## Reference binding: Claude Code + the `trellis` runtime
 
@@ -177,7 +205,7 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting an errand over a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048, 0051). An instance that needs a real ingress binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
-| escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema in `template/conventions.md`); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
+| escalation | escalation records in the root: a fenced `yaml` block under `## Escalations` in the artifact the escalation concerns, written by that artifact's owner (schema: the "Escalation records" section above); read from the daemon's board and `/api/escalations`, or the root itself; approvals are PRs. One push adapter ships: `[[channels]] kind = "herdr"` turns a record that newly reads `open` into a toast in the operator's herdr session (decision 0043) |
 | ledger | git history; the acting role is recorded in the session marker and named in commits. Per-session logs under `.trellis/runtime/logs/` are the daemon's trail — gitignored, single-machine, never the ledger |
 
 **Plan dispatch (`trellis dispatch run`).** The dispatcher polls the tree

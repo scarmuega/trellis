@@ -266,7 +266,7 @@ impl Default for Harness {
 /// The bridge every default template ends on, ahead of `{procedure}`.
 const PROCEDURE_BRIDGE: &str = "The procedure below is the trellis framework's \
      commands/act.md, rendered into this prompt so no installed plugin is \
-     required; the domain root's conventions.md is authoritative over it where \
+     required; the domain root's trellis.toml and domain.md are authoritative over it where \
      they differ.";
 
 /// The errand table (decision 0051): every spawn prompt is a template in this

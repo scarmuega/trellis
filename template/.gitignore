@@ -1,2 +1,2 @@
-# Ephemeral runtime state — never committed (see conventions.md, Runtime binding)
+# Ephemeral runtime state — never committed (see domain.md, Runtime binding)
 .trellis/

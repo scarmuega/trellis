@@ -13,7 +13,7 @@ The harness is cross-cutting; the graded substance is per-suite:
 - `run.sh`, `prepare.mjs`, `grade.mjs` — the shared machinery: compose, date
   substitution, headless run, deterministic grading.
 - `skeleton/` — the universal Trellis-root boilerplate every fixture composes
-  on: `conventions.md`, the `org/founder` owner role, `decisions/0000`,
+  on: `trellis.toml`, a minimal `domain.md`, the `org/founder` owner role, `decisions/0000`,
   `.gitignore`. Edit a convention once, every fixture follows.
 - `fixtures/` — shared fixtures meaningful to any suite. Today: `healthy`, a
   clean root (trailmix, hiking meal kits) on which any member's eval can

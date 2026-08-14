@@ -199,7 +199,7 @@ pub fn check(tree: &Tree, derived: &Derived, plan_rel: &str) -> anyhow::Result<R
     //
     // An escalation record quotes the deferral it was raised about; that is
     // what raising one means. Records are kept verbatim and never deleted
-    // (`conventions.md`, "Escalation records"), so a domain that escalates
+    // (spec/runtime.md, "Escalation records"), so a domain that escalates
     // about an unset done criterion can never clear this item by any edit the
     // conventions permit: resolving the escalation answers the question and
     // leaves its quotation behind, and since decision 0045 the same scan gates

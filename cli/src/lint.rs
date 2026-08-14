@@ -377,8 +377,8 @@ fn item04(ctx: &Ctx, sink: &mut Sink) {
             _ => {}
         }
         match fm.get_str("type") {
-            None => sink.violation(ctx, 4, &a.rel, Some(1), "plan declares no type: — register one in conventions.md's plan-type registry first".into()),
-            Some(t) if !ctx.reg.plan_types.contains(&t) => sink.violation(ctx, 4, &a.rel, fm.line_of("type"), format!("type: {t} is not registered in conventions.md's plan-type registry")),
+            None => sink.violation(ctx, 4, &a.rel, Some(1), "plan declares no type: — register one in trellis.toml's [plan_types] table first".into()),
+            Some(t) if !ctx.reg.plan_types.contains(&t) => sink.violation(ctx, 4, &a.rel, fm.line_of("type"), format!("type: {t} is not registered in trellis.toml's [plan_types] table")),
             _ => {}
         }
         if let Some(c) = fm.get_str("complexity") {
@@ -539,13 +539,13 @@ fn item07(_ctx: &Ctx, sink: &mut Sink) {
     );
 }
 
-// 8. Tags in use are registered in conventions.md.
+// 8. Tags in use are registered in trellis.toml.
 fn item08(ctx: &Ctx, sink: &mut Sink) {
     for a in &ctx.tree.artifacts {
         let Some(fm) = &a.fm else { continue };
         for tag in fm.get_list("tags").unwrap_or_default() {
             if !ctx.reg.tags.contains(&tag) {
-                sink.violation(ctx, 8, &a.rel, fm.line_of("tags"), format!("tag {tag} is not registered in conventions.md's tag registry — register before use"));
+                sink.violation(ctx, 8, &a.rel, fm.line_of("tags"), format!("tag {tag} is not registered in trellis.toml's [tags] table — register before use"));
             }
         }
     }
@@ -805,35 +805,13 @@ fn item17(ctx: &Ctx, sink: &mut Sink) {
     }
 }
 
-// 18. Spec version pinned in decisions/0000-adopt-trellis.md matches the
-// kernel's embedded spec version.
+// 18. The spec version pinned in trellis.toml matches the kernel's embedded
+// spec version. A root that pins none never reaches this item: the pin is a
+// required key, so the load already refused.
 fn item18(ctx: &Ctx, sink: &mut Sink) {
-    let rel = "decisions/0000-adopt-trellis.md";
-    let Some(a) = ctx.tree.get(rel) else {
-        sink.violation(
-            ctx,
-            18,
-            "decisions",
-            None,
-            "no decisions/0000-adopt-trellis.md — the root pins no spec version".into(),
-        );
-        return;
-    };
-    let re = regex::Regex::new(r"(?i)spec(?:ification)?[,]?\s+v(\d+)").unwrap();
-    match re.captures(&a.text) {
-        None => sink.violation(
-            ctx,
-            18,
-            rel,
-            None,
-            "adopt decision pins no spec version (expected `specification vN`)".into(),
-        ),
-        Some(cap) => {
-            let pinned: u32 = cap[1].parse().unwrap_or(0);
-            if pinned != ctx.spec_version {
-                sink.violation(ctx, 18, rel, None, format!("root is pinned to spec v{pinned}, current is v{} — review the intervening changes and re-pin, or record a deviation decision", ctx.spec_version));
-            }
-        }
+    let pinned = ctx.tree.domain.spec;
+    if pinned != ctx.spec_version {
+        sink.violation(ctx, 18, crate::domain::FILE, None, format!("root is pinned to spec v{pinned}, current is v{} — review the intervening changes and re-pin, or record a deviation decision", ctx.spec_version));
     }
 }
 
@@ -994,7 +972,7 @@ fn item24(ctx: &Ctx, sink: &mut Sink) {
                     .unwrap_or(false)
                     && !fence.lang.eq_ignore_ascii_case("yaml")
                 {
-                    sink.violation(ctx, 24, &a.rel, Some(fence.open_line), "block under ## Escalations is not fenced yaml — records follow the schema in conventions.md".into());
+                    sink.violation(ctx, 24, &a.rel, Some(fence.open_line), "block under ## Escalations is not fenced yaml — records follow the escalation schema (spec/runtime.md)".into());
                 }
             }
         }

@@ -114,30 +114,37 @@ fn embedded_spec_version_matches_every_instance_pin() {
     // A spec bump must re-pin every shipped instance, or lint item 18 fires in
     // every new root. This has bitten before: the v14 bump left all three pins
     // stale at v13 (see CHANGELOG, decision 0032's entry).
-    let pinned = regex::Regex::new(r"(?i)spec(?:ification)?[,]?\s+v(\d+)").unwrap();
-    for rel in [
-        "template/decisions/0000-adopt-trellis.md",
-        "evals/skeleton/decisions/0000-adopt-trellis.md",
-        "README.md",
-    ] {
+    let toml_pin = regex::Regex::new(r"(?m)^spec\s*=\s*(\d+)").unwrap();
+    for rel in ["template/trellis.toml", "evals/skeleton/trellis.toml"] {
         let text = read(rel);
-        let pin: u32 = pinned
+        let pin: u32 = toml_pin
             .captures(&text)
             .and_then(|c| c[1].parse().ok())
-            .unwrap_or_else(|| panic!("{rel} pins no spec version"));
+            .unwrap_or_else(|| panic!("{rel} pins no spec version (`spec = N`)"));
         assert_eq!(
             pin, spec,
             "{rel} pins spec v{pin} but the spec is v{spec} — re-pin it in the bump commit \
              (conventions-lint item 18 fires on every root scaffolded from a stale pin)"
         );
     }
+    let prose_pin = regex::Regex::new(r"(?i)spec(?:ification)?[,]?\s+v(\d+)").unwrap();
+    let readme = read("README.md");
+    let pin: u32 = prose_pin
+        .captures(&readme)
+        .and_then(|c| c[1].parse().ok())
+        .unwrap_or_else(|| panic!("README.md pins no spec version"));
+    assert_eq!(
+        pin, spec,
+        "README.md's status line says spec v{pin} but the spec is v{spec} — re-pin it in the bump commit"
+    );
 }
 
 #[test]
 fn closed_enums_match_the_schema_prose() {
     // The spec's closed vocabularies are duplicated in model.rs. Each must
-    // still appear verbatim in the schema block that defines it.
-    let conventions = read("template/conventions.md");
+    // still appear verbatim in the schema block that defines it — which since
+    // decision 0054 is the spec itself, not a per-instance copy.
+    let schemas = read("spec/model.md");
     for (field, values) in [
         (
             "status",
@@ -160,8 +167,8 @@ fn closed_enums_match_the_schema_prose() {
     ] {
         for value in values {
             assert!(
-                conventions.contains(value),
-                "template/conventions.md no longer mentions `{value}` for {field} — \
+                schemas.contains(value),
+                "spec/model.md no longer mentions `{value}` for {field} — \
                  the kernel's model.rs still parses it; translate the schema change (decision 0037)"
             );
         }

@@ -17,11 +17,11 @@ root: every `ready`, `active`, and `blocked` plan plus the full coverage walk.
 ## Procedure
 
 1. **Bind to the domain root**: the nearest directory at or above the working
-   directory holding `conventions.md`, `problem/`, `solution/`, and `org/`. Not
-   in a Trellis root → say so and stop. Read the root's `conventions.md`
-   (authoritative over this command where they differ) — especially its plan
-   schema, its "Escalation records" schema, and its "Runtime binding" section
-   (the escalation channel).
+   directory holding `trellis.toml`, `problem/`, `solution/`, and `org/`. Not
+   in a Trellis root → say so and stop. Read the root's `trellis.toml` and
+   `domain.md` (authoritative over this command where they differ) —
+   especially domain.md's "Runtime binding" section (the escalation channel);
+   the plan and escalation-record schemas are the spec's.
 
 2. **Fix the scope**: match `$ARGUMENTS` against plan slugs, `problem/`
    subdomains, `strategy/` files, and metric anchors. Ambiguous → ask, showing

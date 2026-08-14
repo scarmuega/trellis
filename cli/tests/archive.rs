@@ -248,10 +248,10 @@ fn the_sweep_needs_a_declared_horizon_and_honours_it() {
     );
 
     // Retired on 2026-08-01, anchor is 2026-08-03 — two days cold.
-    let conventions = f.read("conventions.md");
+    let config = f.read("trellis.toml");
     f.write(
-        "conventions.md",
-        &format!("{conventions}\n\n## Retention\n\nThe sweep files terminal artifacts that have archive after 30 days.\n"),
+        "trellis.toml",
+        &format!("{config}\n[archive]\nafter_days = 30\n"),
     );
     f.commit_at("2026-08-01", "declare a 30-day horizon");
     let warm = f
@@ -265,10 +265,10 @@ fn the_sweep_needs_a_declared_horizon_and_honours_it() {
         String::from_utf8_lossy(&warm.stdout)
     );
 
-    let conventions = f.read("conventions.md");
+    let config = f.read("trellis.toml");
     f.write(
-        "conventions.md",
-        &conventions.replace("archive after 30 days", "archive after 1 days"),
+        "trellis.toml",
+        &config.replace("after_days = 30", "after_days = 1"),
     );
     f.commit_at("2026-08-01", "shorten the horizon");
     let cold = f

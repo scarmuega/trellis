@@ -20,14 +20,14 @@ imported material. Three things bound the sweep (decision 0040).
   item 10 included. Nothing declares this: a submodule enters the parent's index
   as a single gitlink, never as its contents, so no ignore list will ever name
   one.
-- **`conventions.md`'s carried-content registry** — the path is committed here
-  but authored elsewhere. Its markdown is not an artifact, so items 1, 2, 8, and
+- **`trellis.toml`'s `carried` list** — the path is committed here but
+  authored elsewhere. Its markdown is not an artifact, so items 1, 2, 8, and
   24 stay silent over it, but item 10 still sweeps it because it *is* in this
   repo.
 
 Everything else under the root is in scope, dot-directories excepted (runtime and
 VCS state, never artifacts). `trellis lint` reports all three lists in its output;
-a hand-walked pass reads `.gitignore` and `conventions.md` before starting, and
+a hand-walked pass reads `.gitignore` and `trellis.toml` before starting, and
 treats any directory with a `.git` in it as somebody else's.
 
 1. Every artifact has frontmatter with valid `provenance:` and `owner:`.
@@ -46,7 +46,7 @@ treats any directory with a `.git` in it as somebody else's.
    holder (package or ref).
 6. Every agent holder *package* has at least one eval (a `ref.md` holder is exempt).
 7. Terms of art used in artifacts exist in `glossary.md` (or a BC-local glossary).
-8. Tags in use are registered in `conventions.md`.
+8. Tags in use are registered in `trellis.toml`'s `[tags]` table.
 9. `decisions/` is append-only: no accepted decision has been edited; supersedence
    is a new numbered file.
 10. No secrets anywhere in the root (keys, tokens, credentials, account numbers).
@@ -82,12 +82,14 @@ treats any directory with a `.git` in it as somebody else's.
     is incomplete — the root is operating nothing it can attribute. Escalate to
     the discarded strategy's owner: commit a successor or archive the induced
     subdomains.
-18. The spec version pinned in `decisions/0000-adopt-trellis.md` matches the
+18. The spec version pinned in `trellis.toml` (`spec = N`) matches the
     current Trellis spec version (the `vN` in the title of
-    `${CLAUDE_PLUGIN_ROOT}/spec/model.md`). If the pin is behind, the root is
-    operating against superseded conventions — escalate to the adopt-decision's
-    owner to review the intervening spec changes and either re-pin (adopt the
-    current version) or record a deviation decision for what it declines.
+    `${CLAUDE_PLUGIN_ROOT}/spec/model.md`). A root that pins none never
+    reaches this item — the pin is a required key, so the kernel refuses the
+    load itself. If the pin is behind, the root is operating against
+    superseded conventions — escalate to the root's owner to review the
+    intervening spec changes and either re-pin (adopt the current version) or
+    record a deviation decision for what it declines.
 19. Every `funded-by:` edge is legal: `strategy:` is `self`, a resolving
     `strategy/{strategy}.md` ref, or a declared external ref (spec rule 2);
     `relation:` (if present) is `current` or `intended` — absent means
@@ -157,7 +159,7 @@ treats any directory with a `.git` in it as somebody else's.
     at least one live authored artifact outside `decisions/` (a path ref, a
     `decision NNNN` mention, or a plan's `decisions:` list), declared inert in
     its own Consequences (`Standing guidance: none`), or listed in
-    `conventions.md`'s decision registry. The kernel computes the unreachable
+    `trellis.toml`'s `[decisions]` table. The kernel computes the unreachable
     set; whether each member carries guidance that never landed — escalate to
     its owner to hatch it into the governing artifact — or is merely a record
     whose effect was discharged is a judgment call.

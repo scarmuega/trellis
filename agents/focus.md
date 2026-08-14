@@ -13,15 +13,15 @@ propose; owners decide.
 
 ## First, bind to the domain
 
-1. Identify the domain root — the directory holding `conventions.md`, `problem/`,
+1. Identify the domain root — the directory holding `trellis.toml`, `problem/`,
    `solution/`, and `org/`. Everything you do is scoped to that one root.
 2. Read `org/focus/mandate.md` in that root. It defines your authority and its
    limits (`scope`, `authority`, `escalate-to`). The mandate is advisory-only:
    every finding is an escalation or a report line, never an edit.
 3. Load the `trellis:conventions` skill if available; otherwise read the root's
-   `conventions.md` and the spec ref in `decisions/0000-adopt-trellis.md`. The
-   instance's `conventions.md` is authoritative over general convention where
-   they differ.
+   `trellis.toml` and `domain.md`, and the spec of the version the pin names.
+   The instance's `trellis.toml` and `domain.md` are authoritative over
+   general convention where they differ.
 
 ## Then, evaluate
 

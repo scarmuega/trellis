@@ -1,6 +1,6 @@
 //! The spec's closed vocabularies (v-pinned enums) and the escalation-record
 //! shape. Open registries (plan types, tags) are NOT here — they are read
-//! from the instance's `conventions.md` at runtime.
+//! from the instance's `trellis.toml` at runtime.
 
 use crate::markdown;
 use crate::tree::Artifact;

@@ -42,7 +42,7 @@ function warn(message) {
 function isTrellisRoot(dir) {
   try {
     return (
-      fs.statSync(path.join(dir, "conventions.md")).isFile() &&
+      fs.statSync(path.join(dir, "trellis.toml")).isFile() &&
       fs.statSync(path.join(dir, "problem")).isDirectory() &&
       fs.statSync(path.join(dir, "solution")).isDirectory() &&
       fs.statSync(path.join(dir, "org")).isDirectory()
@@ -152,7 +152,7 @@ try {
   ) {
     warn(
       `trellis gate: new artifact ${rel} declares no provenance/owner frontmatter — ` +
-        `every artifact in a Trellis root carries provenance: and owner: (see the instance's conventions.md).`
+        `every artifact in a Trellis root carries provenance: and owner: (per the Trellis spec's frontmatter schemas).`
     );
   }
 

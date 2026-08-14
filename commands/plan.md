@@ -15,10 +15,10 @@ the existing plans (name, status, type) and ask what to plan.
 ## Procedure
 
 1. **Bind to the domain root**: the nearest directory at or above the working
-   directory holding `conventions.md`, `problem/`, `solution/`, and `org/`. Not
-   in a Trellis root → say so and stop. Read the root's `conventions.md`
-   (authoritative over this command where they differ) — especially its plan
-   schema, plan-type registry, and tag registry.
+   directory holding `trellis.toml`, `problem/`, `solution/`, and `org/`. Not
+   in a Trellis root → say so and stop. Read the root's `trellis.toml`
+   (authoritative over this command where they differ) — especially its
+   `[plan_types]` and `[tags]` registries — and the spec's plan schema.
 
 2. **Determine the type**: match the topic against the plan-type registry.
    Ambiguous → ask, showing the registry. Not yet registered → agree the name
@@ -80,7 +80,7 @@ the existing plans (name, status, type) and ask what to plan.
    re-present.
 
 7. **Persist on approval**: first land any registry additions (plan type, new
-   tags) in `conventions.md`; then write `plans/{slug}.md` — the slug per
+   tags) in `trellis.toml`; then write `plans/{slug}.md` — the slug per
    rule 10, a distinctive retrieval key naming the move, never a date or
    "q3-plan" — with frontmatter `provenance: authored`, the confirmed `owner:`,
    `status: draft`, the registered `type:`, the `complexity:` tier if the draft
@@ -111,7 +111,7 @@ the existing plans (name, status, type) and ask what to plan.
    before reporting.
 
 9. **Report**: the artifact path, status, type, owner, the refs it carries, any
-   registry additions to `conventions.md` (flag them to its owner when
+   registry additions to `trellis.toml` (flag them to its owner when
    different), and — if left `draft` — the reminder that nothing reviews a
    draft: flip to `ready` to release it for agent dispatch, or `active` when the
    owner drives it.

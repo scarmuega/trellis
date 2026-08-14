@@ -8,6 +8,7 @@
 pub mod daemon;
 pub mod dates;
 pub mod dispatch;
+pub mod domain;
 pub mod escalate;
 pub mod facts;
 pub mod fmedit;

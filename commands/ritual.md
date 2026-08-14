@@ -18,7 +18,7 @@ resolved executor.
 ## Procedure
 
 1. **Bind to the domain root** (nearest directory at or above the working
-   directory holding `conventions.md`, `problem/`, `solution/`, and `org/`; not
+   directory holding `trellis.toml`, `problem/`, `solution/`, and `org/`; not
    found → say so and stop) and read its `rituals.md`.
 
 2. **Find the row** matching the ritual name. No match, or no name → list the
@@ -37,7 +37,7 @@ resolved executor.
    agent, telling it which ritual to run; collect its escalations.
 
 4. **Deliver escalations** through the instance's escalation channel (see
-   `conventions.md` → "Runtime binding"; default: escalation records in the
+   `domain.md` → "Runtime binding"; default: escalation records in the
    artifact each finding concerns). The steward and the focus own no authored
    artifact, so a ritual they execute delivers its findings as report content,
    one per finding, addressed to the owner who transcribes it into that

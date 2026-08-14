@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::domain::DomainConfig;
 use crate::frontmatter::{self, Frontmatter};
 use crate::gitio::Git;
 use crate::markdown::{self, FencedBlock, Heading};
@@ -26,7 +27,7 @@ pub enum Kind {
     Decision,
     MetricsDefinitions,
     MetricsActual,
-    Conventions,
+    Domain,
     Rituals,
     Market,
     Glossary,
@@ -85,9 +86,9 @@ impl Artifact {
 
 /// What the walk did not take in. Two declarations and one structural fact.
 ///
-/// The declarations: `.gitignore` says "not in this repo"; the
-/// carried-content registry in `conventions.md` says "in the repo, but the
-/// domain carries it rather than authors it".
+/// The declarations: `.gitignore` says "not in this repo"; the `carried`
+/// list in `trellis.toml` says "in the repo, but the domain carries it
+/// rather than authors it".
 ///
 /// The structural fact: a directory holding its own `.git` is a *different
 /// repository* — a submodule (a `.git` file), a nested clone or worktree (a
@@ -108,7 +109,7 @@ impl Artifact {
 pub struct Scope {
     /// Root-relative prefixes git excludes; empty outside a repo.
     pub git_ignored: Vec<String>,
-    /// Root-relative prefixes `conventions.md` declares carried.
+    /// Root-relative prefixes `trellis.toml` declares carried.
     pub carried: Vec<String>,
     /// Root-relative directories holding their own `.git`. Unlike the two
     /// above this is discovered by the walk, not declared before it.
@@ -116,21 +117,12 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn discover(root: &Root) -> Scope {
+    pub fn discover(root: &Root, carried: &[String]) -> Scope {
         let git_ignored = Git::new(root.path.clone()).ignored_paths();
-
-        // Read conventions.md straight off disk: the tree it would normally
-        // come from is what this scope is about to build.
-        let text = std::fs::read_to_string(root.path.join("conventions.md")).unwrap_or_default();
-        let skip = frontmatter::extract(&text)
-            .map(|fm| fm.close_line)
-            .unwrap_or(0);
-        let (headings, _) = markdown::scan(&text, skip);
-        let carried = markdown::registry_items(&text, &headings, "carried-content-registry");
 
         Scope {
             git_ignored: minimal(git_ignored),
-            carried: minimal(carried),
+            carried: minimal(carried.to_vec()),
             nested_repos: vec![], // filled by the walk
         }
     }
@@ -185,6 +177,9 @@ fn minimal(mut prefixes: Vec<String>) -> Vec<String> {
 
 pub struct Tree {
     pub root: Root,
+    /// The root's `trellis.toml`, parsed before the walk — a tree cannot
+    /// exist without it, so no consumer ever sees half a config.
+    pub domain: DomainConfig,
     pub artifacts: Vec<Artifact>,
     /// Every non-dot directory, root-relative.
     pub dirs: Vec<String>,
@@ -233,7 +228,7 @@ pub fn classify(rel: &str) -> Kind {
     let rel = live_path(rel);
     let parts: Vec<&str> = rel.split('/').collect();
     match parts.as_slice() {
-        ["conventions.md"] => Kind::Conventions,
+        ["domain.md"] => Kind::Domain,
         ["rituals.md"] => Kind::Rituals,
         ["market.md"] => Kind::Market,
         ["glossary.md"] => Kind::Glossary,
@@ -255,11 +250,12 @@ pub fn classify(rel: &str) -> Kind {
 
 impl Tree {
     pub fn load(root: Root) -> anyhow::Result<Tree> {
-        let scope = Scope::discover(&root);
-        Tree::load_scoped(root, scope)
+        let domain = DomainConfig::load(&root.path)?;
+        let scope = Scope::discover(&root, &domain.carried);
+        Tree::load_scoped(root, domain, scope)
     }
 
-    pub fn load_scoped(root: Root, mut scope: Scope) -> anyhow::Result<Tree> {
+    pub fn load_scoped(root: Root, domain: DomainConfig, mut scope: Scope) -> anyhow::Result<Tree> {
         let mut artifacts = Vec::new();
         let mut dirs = Vec::new();
         let mut other_files = Vec::new();
@@ -341,6 +337,7 @@ impl Tree {
             .collect();
         Ok(Tree {
             root,
+            domain,
             artifacts,
             dirs,
             other_files,

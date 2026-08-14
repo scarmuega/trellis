@@ -151,7 +151,7 @@ act = """{plan} — dispatched act as {owner} (trellis runtime).
 
 Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. Claim with `trellis plan claim {plan}`; on an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail.
 
-The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's trellis.toml and domain.md are authoritative over it where they differ.
 
 {procedure}"""
 
@@ -159,7 +159,7 @@ ritual = """ritual {ritual} — executed by {executor} (trellis runtime).
 
 Execute the ritual "{ritual}" from rituals.md as {executor}: read its row and take the procedure (a skill ref or inline steps) and the cadence — the freshness window for any metrics involved. The runtime resolved the executor and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. Deliver findings through the instance's escalation channel; an executor that owns no artifact reports each finding verbatim, addressed to the owner who transcribes it.
 
-The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's trellis.toml and domain.md are authoritative over it where they differ.
 
 {procedure}"""
 
@@ -174,7 +174,7 @@ The runtime has already resolved you as the plan's owner and verified the plan i
 
 The refinement contract: the write target is the plan artifact itself, plus any new plans a split produces — nothing else; never claim the plan, never advance its contexts:, never touch the solution or the problem space. New plans from a split are filed status: draft with this plan's owner:, sequenced with awaits:. Keep frontmatter valid; preserve status: unless the instruction says otherwise. The plan's automation class still decides how the edit lands; anything beyond the owner's authority is an escalation, not an improvisation. Report what changed, plans created by a split, and escalations raised.
 
-The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's conventions.md is authoritative over it where they differ.
+The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's trellis.toml and domain.md are authoritative over it where they differ.
 
 {procedure}"""
 

@@ -33,8 +33,9 @@ the trail only grows — append-only, never archived (spec rule 13) — so nothi
 an operator needs day to day may require crossing it. What keeps the pile from
 becoming required reading is where the guidance lives. Standing guidance a
 decision establishes hatches, in the same change that accepts it, into the
-artifact that governs the behavior: a convention deviation or schema choice
-into `conventions.md`; a bounded context's commitment — a runtime, a vendor, an
+artifact that governs the behavior: a registry entry into `trellis.toml`, an
+instance-policy choice into `domain.md`; a bounded context's commitment — a
+runtime, a vendor, an
 architecture — into that context's README or, once machine-checkable, its
 `contracts/` (see Requirements: prose is the larval form); a change of
 authority into the mandate it changes; a standing process into a `rituals.md`
@@ -50,7 +51,7 @@ every decision it fully replaces (spec schema), so the live set is computable
 while the superseded file never changes; partial influence stays prose. The
 lint computes the rest (checklist item 26): an accepted, unsuperseded decision
 unreachable from the operative record — cited by no live authored artifact,
-not declared inert, absent from the decision registry in `conventions.md` — is
+not declared inert, absent from the decision registry in `trellis.toml` — is
 the finding, and the derivation sweep escalates it to its owner as orphaned
 operative content: hatch it, supersede it, or declare it inert. A domain
 arriving with a pile compacts once: the owner walks it newest to oldest,
@@ -75,8 +76,8 @@ an agent holder — never a business procedure, which must survive holder swaps.
 There is no third, root-level home: a root `skills/` is a grouping, not a kind
 (spec rule 7), and sits outside the derivation that gives every procedure its
 automation class. A procedure that seems to belong to no context is a modeling
-signal, and it resolves within the existing shape: a convention
-(`conventions.md`), a standing process (a `rituals.md` row pointing at a
+signal, and it resolves within the existing shape: an instance policy
+(`domain.md`/`trellis.toml`), a standing process (a `rituals.md` row pointing at a
 context's skill), a runtime concern (binding skills live outside the root,
 spec rules 1–2), or — most often — a bounded context waiting to be named: a domain
 accumulating "general" runbooks has an operations context it hasn't admitted

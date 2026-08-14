@@ -324,22 +324,23 @@ fn scaffold_produces_a_pinned_owned_instance() {
         .args(["scaffold", dest.to_str().unwrap(), "--owner", "founder"])
         .assert()
         .success();
-    let conv = std::fs::read_to_string(dest.join("conventions.md")).unwrap();
+    let dom = std::fs::read_to_string(dest.join("domain.md")).unwrap();
     assert!(
-        conv.contains("owner: org/founder"),
+        dom.contains("owner: org/founder"),
         "owner placeholder substituted"
     );
-    assert!(!conv.contains("<owner>"));
+    assert!(!dom.contains("<owner>"));
     let adopt = std::fs::read_to_string(dest.join("decisions/0000-adopt-trellis.md")).unwrap();
     assert!(
         adopt.contains("date: 2026-08-03"),
         "adopt decision dated today:\n{adopt}"
     );
     // Derived, so a spec bump re-pins the template rather than this test.
-    let pin = format!("specification v{}", trellis::spec_version());
+    let config = std::fs::read_to_string(dest.join("trellis.toml")).unwrap();
+    let pin = format!("spec = {}", trellis::spec_version());
     assert!(
-        adopt.contains(&pin),
-        "scaffolded instance pins {pin}:\n{adopt}"
+        config.contains(&pin),
+        "scaffolded instance pins {pin}:\n{config}"
     );
     assert!(
         !dest.join("README.md").exists(),
@@ -369,7 +370,7 @@ fn tree_censuses_the_artifacts_and_names_what_it_skipped() {
         "the text form draws a tree:\n{text}"
     );
     assert!(
-        text.contains("conventions.md") && text.contains("conventions"),
+        text.contains("domain.md") && text.contains("domain"),
         "artifacts carry their kind:\n{text}"
     );
     assert!(
@@ -390,7 +391,7 @@ fn tree_censuses_the_artifacts_and_names_what_it_skipped() {
         .iter()
         .map(|a| a["path"].as_str().unwrap())
         .collect();
-    assert!(paths.contains(&"conventions.md"), "{paths:?}");
+    assert!(paths.contains(&"domain.md"), "{paths:?}");
     assert!(!paths.iter().any(|p| p.contains("left-pad")), "{paths:?}");
     assert!(
         paths.windows(2).all(|w| w[0] <= w[1]),
@@ -482,9 +483,9 @@ fn decision_register_reads_the_supersession_edges() {
         "a draft is in neither table:\n{text}"
     );
     assert!(text.contains("- not yet accepted: 1"), "{text}");
-    // The skeleton's 0000 stays live, cited from conventions.md.
+    // The skeleton's 0000 stays live, cited from domain.md.
     assert!(
-        text.contains("| decisions/0000-adopt-trellis.md | cited by conventions.md |"),
+        text.contains("| decisions/0000-adopt-trellis.md | cited by domain.md |"),
         "{text}"
     );
 }

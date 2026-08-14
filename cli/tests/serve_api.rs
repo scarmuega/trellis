@@ -266,11 +266,15 @@ fn nothing_outside_the_tree_is_reachable() {
         "/api/artifacts/../../../etc/passwd",
         "/api/artifacts/.trellis/runtime/state.json",
         "/api/artifacts/runtime.toml",
+        "/api/artifacts/trellis.toml",
         "/api/plans/nonesuch",
         "/etc/passwd",
     ] {
         assert_eq!(d.get(path).0, 404, "{path} must not resolve");
     }
+    // The prose half of the split is an ordinary artifact and serves.
+    let artifact = d.json("/api/artifacts/domain.md");
+    assert_eq!(artifact["kind"], "domain");
 }
 
 #[test]

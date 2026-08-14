@@ -1,0 +1,11 @@
+# The fixture root's machine-read config and root marker.
+spec = 21
+
+carried = []
+
+[plan_types]
+initiative = "general time-bounded execution"
+campaign = "marketing/GTM push through a channel"
+experiment = "hypothesis + measurement + decision criterion"
+
+[tags]

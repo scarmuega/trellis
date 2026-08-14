@@ -1,6 +1,6 @@
 ---
 name: conventions
-description: Operating conventions for Trellis domain repos — a domain-driven structure for businesses run by humans and AI agents. Use when working inside a Trellis root (markers at root: conventions.md, problem/, solution/, org/), when scaffolding a new domain, deciding where business content belongs, editing artifacts with Trellis frontmatter, adding subdomains/bounded-contexts/roles, recording decisions, or linting a domain for convention compliance.
+description: Operating conventions for Trellis domain repos — a domain-driven structure for businesses run by humans and AI agents. Use when working inside a Trellis root (markers at root: trellis.toml, problem/, solution/, org/), when scaffolding a new domain, deciding where business content belongs, editing artifacts with Trellis frontmatter, adding subdomains/bounded-contexts/roles, recording decisions, or linting a domain for convention compliance.
 ---
 
 # Trellis
@@ -14,15 +14,17 @@ knowledge, state-refs, and org. Full spec: `${CLAUDE_PLUGIN_ROOT}/spec/model.md`
 
 ## Detecting a Trellis root
 
-A directory whose root holds `conventions.md`, `problem/`, `solution/`, and `org/`.
-Always read the instance's `conventions.md` before writing anything — it is
-authoritative over this skill where they differ.
+A directory whose root holds `trellis.toml`, `problem/`, `solution/`, and `org/`.
+Always read the instance's `trellis.toml` (and `domain.md` if present) before
+writing anything — they are authoritative over this skill where they differ.
 
 ## The map
 
 ```
-conventions.md    schemas, registries, escalation records, boundary guarantees,
-                  secrets policy
+trellis.toml      machine-read config and root marker: spec pin, plan-type/tag/
+                  decision registries, carried paths, retention horizon
+domain.md         optional instance prose: boundary guarantees, secrets policy,
+                  runtime-binding choices
 rituals.md        heartbeat: cadenced processes, executor roles, escalations
 glossary.md       ubiquitous language — cite terms from here
 market.md         founding map: the invariant layer — needs as ## N-{slug}
@@ -72,11 +74,11 @@ archive/          the terminal tier: this same hierarchy at archive/{live path},
 | Ordering between plans — advance B only after A finishes | `awaits:` in B's frontmatter — dispatch holds B (still `ready`) until A retires; never umbrella prose alone, never `status: blocked` |
 | A blocker, or anything needing a human's decision | an escalation record — fenced `yaml` under `## Escalations` in the artifact it concerns, written by that artifact's owner; never a forge issue, never a separate kind |
 | "Why we chose X" | `decisions/NNNN-{slug}.md` — the why stays here; what X obliges goes to the artifact that governs it |
-| Standing guidance a decision established | the artifact that governs the behavior — `conventions.md`, a mandate, a BC README or `contracts/`, a `rituals.md` row — citing `(decision NNNN)`; never left only in `decisions/` (Decision hatching pattern) |
+| Standing guidance a decision established | the artifact that governs the behavior — a `trellis.toml` registry, `domain.md`, a mandate, a BC README or `contracts/`, a `rituals.md` row — citing `(decision NNNN)`; never left only in `decisions/` (Decision hatching pattern) |
 | "Which decisions are current?" | `trellis view decisions` or the register in `metrics/actuals/` — a reading over `supersedes:` edges, never a read of all of `decisions/` |
 | A language boundary (business or technical function's solution) | `solution/{bc}/` |
 | Procedure, playbook, runbook | `solution/{bc}/skills/{skill}/` |
-| "Context-free" procedure | it isn't: a convention (`conventions.md`), a ritual (`rituals.md`), a runtime concern, or a missing BC |
+| "Context-free" procedure | it isn't: an instance policy (`domain.md`/`trellis.toml`), a ritual (`rituals.md`), a runtime concern, or a missing BC |
 | API, IDL, tx3, brand guideline | `solution/{bc}/contracts/` |
 | Responsibility + authority (human, agent, or labor vendor) | `org/{role}/mandate.md` |
 | Agent prompt, tools, evals | `org/{role}/holder/` |
@@ -143,8 +145,8 @@ browse by (spec rule 13, decision 0042).
 **Scaffold a domain**: `trellis scaffold <dir> --owner <role>` — it copies the
 template, substitutes the `<owner>` placeholders, and dates
 `decisions/0000-adopt-trellis.md`. Then the judgment half: fill `market.md`,
-`brand.md`, `economics.md` first; adjust `conventions.md` registries and
-boundary guarantees. Without the binary: copy
+`brand.md`, `economics.md` first; adjust `trellis.toml` registries and
+`domain.md` boundary guarantees. Without the binary: copy
 `${CLAUDE_PLUGIN_ROOT}/template/` and do the substitutions by hand; delete
 `template/README.md`.
 
@@ -190,8 +192,8 @@ consumers per `context-map.md`.
 **Create a plan**: `/trellis:plan {topic}` where the binding offers it — the
 harness's plan mode gathers research and approval, then the artifact persists to
 `plans/{slug}.md` with a registered `type:`, resolving refs, and `status: draft`.
-Without the command: draft manually per the instance's plan schema, registering
-new types and tags in `conventions.md` first.
+Without the command: draft manually per the spec's plan schema, registering
+new types and tags in `trellis.toml` first.
 
 **Advance a plan's lifecycle**: the CLI owns the transitions and refuses
 illegal ones — `trellis plan release` (draft → ready, gated on the mechanical
@@ -236,7 +238,7 @@ targets the raiser must not write; `trellis escalate resolve` closes one, and
 `trellis plan block` bundles the record with the status flip a blocked plan
 owes. Without the binary, the record is a fenced `yaml` block under
 `## Escalations` in the artifact that carries the problem (schema in the
-instance's `conventions.md`). Only that artifact's `owner:` writes one, so a
+spec's `runtime.md`). Only that artifact's `owner:` writes one, so a
 role whose mandate does not reach the artifact reports the finding and the
 owner transcribes it — this is why `org/focus` and `org/steward` escalate by
 reporting. Resolution is the owner's edit: answer beneath the record, flip
@@ -254,7 +256,7 @@ replaces (partial influence stays prose in its Consequences).
 the owner walks `decisions/` newest→oldest classifying each — still-operative,
 superseded-in-prose, or inert. Hatch still-operative guidance into its
 governing artifact with a citation; record prose-era supersessions and inert
-classifications in `conventions.md`'s decision registry (judgment made once —
+classifications in `trellis.toml`'s `[decisions]` table (judgment made once —
 the frozen files carry no marks); record the codification as one new decision.
 `trellis lint --items 26` names the unreachable set before and after.
 

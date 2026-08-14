@@ -24,8 +24,8 @@ would close) and await one.
 ## Procedure
 
 1. **Bind to the domain root** (nearest directory at or above the working
-   directory holding `conventions.md`, `problem/`, `solution/`, and `org/`; not
-   found → say so and stop). Read the root's `conventions.md` — authoritative
+   directory holding `trellis.toml`, `problem/`, `solution/`, and `org/`; not
+   found → say so and stop). Read the root's `trellis.toml` and `domain.md` — authoritative
    over this procedure where they differ.
 
 2. **Resolve the plan**: normalize the argument to `plans/{name}.md` and read
@@ -50,7 +50,7 @@ would close) and await one.
      (`checks/plan-readiness.md` is the bar its release will be judged by).
    - New plans from a split are filed `status: draft` with this plan's
      `owner:`, and sequencing between the pieces is declared with `awaits:`.
-   - Keep frontmatter valid per the conventions; preserve `status:` unless the
+   - Keep frontmatter valid per the spec's plan schema; preserve `status:` unless the
      instruction says otherwise.
    - The plan's automation class still decides how the edit lands (act step
      5); anything the instruction requires beyond the owner's authority is an

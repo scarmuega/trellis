@@ -162,7 +162,7 @@ pub fn process(input: &str) -> Option<String> {
             if !has_fm {
                 return warn(&format!(
                     "trellis gate: new artifact {rel} declares no provenance/owner frontmatter — \
-                     every artifact in a Trellis root carries provenance: and owner: (see the instance's conventions.md)."
+                     every artifact in a Trellis root carries provenance: and owner: (per the Trellis spec's frontmatter schemas)."
                 ));
             }
         }

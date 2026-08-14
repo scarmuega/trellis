@@ -1,0 +1,38 @@
+# trellis.toml — this domain's machine-read configuration, and the root
+# marker. The kernel refuses to load a root whose trellis.toml does not parse
+# (unknown keys included); the spec of the pinned version is authoritative
+# for schemas and rules, and `domain.md` carries this instance's prose.
+
+# The spec version this root operates against (required; lint item 18
+# compares it to the kernel's).
+spec = 21
+
+# Carried-content registry: root-relative path prefixes this root carries but
+# does not author — a deployment unit's own docs, a vendored tree, an
+# imported corpus (decision 0040). An entry keeps its subtree in the secrets
+# sweep but out of every artifact check.
+carried = []
+
+# Plan-type registry: open set, name = the one-line definition an agent reads
+# when choosing a type. Register before use (lint item 4).
+[plan_types]
+initiative = "general time-bounded execution"
+campaign = "marketing/GTM push through a channel"
+experiment = "hypothesis + measurement + decision criterion"
+journey = "a to-be user journey crossing bounded contexts"
+
+# Tag registry: groupings are tags; views over tags are generated. Register
+# before use (lint item 8).
+[tags]
+
+# Decision registry: prose-era supersessions and inert classifications the
+# frozen files cannot declare — "inert: {why}" or "superseded by
+# decisions/{new}.md". Listed decisions leave lint item 26's unreachable set.
+[decisions]
+
+# Retention horizon for the steward's archive sweep: days a terminal status
+# must hold before `trellis archive --sweep` files the artifact. Omit the key
+# and the sweep refuses — a horizon nobody declared is not one the kernel
+# invents.
+[archive]
+after_days = 90

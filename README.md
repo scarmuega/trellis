@@ -8,7 +8,7 @@ map of market needs, committed strategies and the problem space they induce,
 solution contexts, mandates with explicit authority, plans with lifecycle,
 decisions as append-only memory, and rituals as the heartbeat.
 
-**Status: pre-1.0.** Specification v20, zero production usage-hours. Expect churn;
+**Status: pre-1.0.** Specification v21, zero production usage-hours. Expect churn;
 conventions harden through dogfooding, and every change lands in `decisions/`.
 
 ## Layout
@@ -104,12 +104,12 @@ at all. Concretely, when you touch:
   that records *why* it is not mechanical), plus a fixture that fires it.
 - **`checks/plan-readiness.md`** — mirror it in `cli/src/readiness.rs`, tiered
   honestly as pass/fail, partial, or judgment.
-- **a frontmatter schema or closed enum** (`spec/model.md`,
-  `template/conventions.md`) — update `cli/src/model.rs`, and the readers in
-  `frontmatter.rs`/`graph.rs` if the shape changed.
-- **the spec version** — re-pin `template/decisions/0000-adopt-trellis.md`,
-  `evals/skeleton/decisions/0000-adopt-trellis.md`, and this README's status
-  line; the binary re-reads the title at build time.
+- **a frontmatter schema or closed enum** (`spec/model.md`) — update
+  `cli/src/model.rs`, and the readers in `frontmatter.rs`/`graph.rs` if the
+  shape changed.
+- **the spec version** — re-pin `template/trellis.toml`,
+  `evals/skeleton/trellis.toml`, and this README's status line; the binary
+  re-reads the title at build time.
 
 `cli/tests/lockstep.rs` enforces the mechanical part of this — item sets,
 version pins, enum vocabulary — and CI triggers on `spec/**` and `checks/**`,
@@ -121,4 +121,4 @@ reworded under the same number passes them. Read the diff.
 
 Cross-root composition — how domains share, import, publish, or aggregate — is
 out of scope by design (spec rule 1). Use your tooling of choice; state your
-guarantees in your instance's `conventions.md`.
+guarantees in your instance's `domain.md`.

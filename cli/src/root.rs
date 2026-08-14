@@ -1,6 +1,10 @@
 //! Trellis root discovery: the nearest directory at or above a start point
-//! holding all four markers — `conventions.md` (file), `problem/`,
+//! holding all four markers — `trellis.toml` (file), `problem/`,
 //! `solution/`, `org/` (directories). Port of `hooks/gate.mjs`.
+//!
+//! Discovery checks existence only, never content: a corrupt `trellis.toml`
+//! still marks a root, so the write gate keeps working while the first real
+//! command explains what is wrong with the file.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +15,7 @@ pub struct Root {
 
 impl Root {
     pub fn is_root(dir: &Path) -> bool {
-        dir.join("conventions.md").is_file()
+        dir.join(crate::domain::FILE).is_file()
             && dir.join("problem").is_dir()
             && dir.join("solution").is_dir()
             && dir.join("org").is_dir()
@@ -43,7 +47,7 @@ impl Root {
         };
         Root::discover_from(&start).ok_or_else(|| {
             anyhow::anyhow!(
-                "no Trellis root at or above {} (markers: conventions.md, problem/, solution/, org/)",
+                "no Trellis root at or above {} (markers: trellis.toml, problem/, solution/, org/)",
                 start.display()
             )
         })

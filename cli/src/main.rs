@@ -1007,7 +1007,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
             } else if write {
                 let dest = dest.ok_or_else(|| {
-                    anyhow::anyhow!("view {name} has no canonical path — pass --out (register one in conventions.md)")
+                    anyhow::anyhow!("view {name} has no canonical path — pass --out")
                 })?;
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -1122,7 +1122,7 @@ fn archive_cmd(
     } else if sweep {
         let Some(horizon) = reg.archive_after_days else {
             anyhow::bail!(
-                "no retention horizon declared — add an \"archive after N days\" statement to conventions.md, or name an artifact explicitly"
+                "no retention horizon declared — set archive.after_days in trellis.toml, or name an artifact explicitly"
             );
         };
         for a in &tree.artifacts {

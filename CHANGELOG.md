@@ -12,6 +12,48 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Changed
+
+- **Machine config splits out of conventions.md (spec v20 → v21, Breaking;
+  decision 0054):** the per-instance `conventions.md` — a hand-copied fork of
+  the spec's normative text — is gone. Dogfooding across eight roots showed
+  the copies drift apart and rot: one root's copy taught a plan lifecycle
+  several spec versions stale, with the full authority every session grants
+  the instance's own file. What the file actually held splits three ways.
+  Machine-read config — the required `spec` pin, the plan-type / tag /
+  decision registries, the `carried` prefixes, and the `archive.after_days`
+  retention horizon — moves to a new **`trellis.toml`**, which replaces
+  `conventions.md` as the root marker: schema-validated at load
+  (`cli/src/domain.rs`, unknown keys refused, mirroring `runtime.toml`), so
+  the `archive after N days` prose regex and the heading-slug registry
+  scraper (`markdown::registry_items`) are deleted. A file that does not
+  parse refuses the whole load with a hard error naming it — never a lint
+  pass over empty registries — while root *discovery* stays existence-only,
+  so a corrupt file cannot brick the write gate. Instance prose — boundary
+  guarantees, secrets policy, runtime-binding choices — stays markdown in an
+  optional, much smaller **`domain.md`** (`Kind::Conventions` →
+  `Kind::Domain`), whose runtime-binding line keeps `decisions/0000`
+  reachable for item 26. The restated spec text is deleted: the spec is
+  authoritative — the escalation-record schema's home moves to
+  `spec/runtime.md`, the frontmatter schemas' to `spec/model.md` — and lint
+  item 18 reads the pin from `trellis.toml` (owning exactly the mismatch
+  case; a root that pins nothing fails to load at all). No lint item added,
+  removed, or renumbered. **Migration is a hard cutover**: an old-style root
+  fails discovery with "markers: trellis.toml, problem/, solution/, org/" —
+  extract its registries and horizon into `trellis.toml`, `git mv
+  conventions.md domain.md`, delete the restated sections, and re-pin after
+  reviewing the intervening spec changes; there is deliberately no `trellis
+  migrate` command. The `PROCEDURE_BRIDGE` sentence in the default prompts
+  changed with the template's copy — the two are kept identical by hand.
+  Updated: `spec/model.md`, `spec/runtime.md`, `spec/patterns.md`,
+  `checks/conventions-lint.md`, `template/` (new `trellis.toml`,
+  `domain.md`, README, AGENTS, rituals, steward mandate, `.gitignore`,
+  `runtime.toml`, `decisions/0000`), `hooks/gate.mjs`, `commands/act.md`,
+  `commands/plan.md`, `commands/refine.md`, `commands/focus.md`,
+  `commands/ritual.md`, `agents/steward.md`, `agents/focus.md`,
+  `skills/conventions/SKILL.md`, `evals/skeleton/`, `evals/README.md`,
+  `README.md`, and the spec pins.
+
 ### Fixed
 
 - **One dispatcher per root, one claim per plan (decision 0053):** dogfooding

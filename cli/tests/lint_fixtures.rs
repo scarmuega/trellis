@@ -128,14 +128,14 @@ fn spec_version_pin_mismatch_fires_item_18() {
     let f = Fixture::healthy();
     // Derived from the embedded version rather than spelled out, so a spec
     // bump does not quietly turn this into a no-op that asserts nothing.
-    let current = format!("v{}", trellis::spec_version());
-    let original = f.read("decisions/0000-adopt-trellis.md");
-    let text = original.replace(&current, "v1");
+    let current = format!("spec = {}", trellis::spec_version());
+    let original = f.read("trellis.toml");
+    let text = original.replace(&current, "spec = 1");
     assert_ne!(
         text, original,
-        "fixture pin did not change — expected {current} in the skeleton"
+        "fixture pin did not change — expected `{current}` in the skeleton"
     );
-    f.write("decisions/0000-adopt-trellis.md", &text);
+    f.write("trellis.toml", &text);
     let report = f.lint_json(&["--items", "18"]);
     let messages: Vec<String> = report["findings"]
         .as_array()
@@ -213,7 +213,7 @@ fn git_ignored_trees_are_not_artifacts() {
 fn a_nested_repository_is_never_this_domains_markdown() {
     let f = Fixture::healthy();
 
-    // A submodule as `conventions.md`'s boundary guarantees sanction it: a
+    // A submodule as `domain.md`'s boundary guarantees sanction it: a
     // gitlink in the index, so no ignore query will ever name it, and a
     // `.git` *file* on disk.
     let src = tempfile::TempDir::new().unwrap();
@@ -321,12 +321,12 @@ fn carried_content_is_not_an_artifact_but_is_still_swept() {
     );
 
     // Declare it carried.
-    let conv = f.read("conventions.md");
+    let config = f.read("trellis.toml");
     f.write(
-        "conventions.md",
-        &format!(
-            "{conv}\n## Carried-content registry\n\n\
-             - `solution/kit-kitchen/storefront/` — the storefront app's own tree\n"
+        "trellis.toml",
+        &config.replace(
+            "carried = []",
+            "carried = [\"solution/kit-kitchen/storefront/\"]",
         ),
     );
 
@@ -390,7 +390,7 @@ fn item26_judgment(report: &serde_json::Value) -> Option<Vec<String>> {
 
 #[test]
 fn healthy_root_has_no_unreachable_decisions() {
-    // The skeleton's 0000 is cited from conventions.md's runtime binding —
+    // The skeleton's 0000 is cited from domain.md's runtime binding —
     // a fresh root starts with its whole trail reachable, zero day-one noise.
     let f = Fixture::healthy();
     let report = f.lint_json(&["--items", "26"]);
@@ -519,10 +519,10 @@ fn reachability_counts_citations_inertness_and_the_registry() {
         "decisions/0003-legacy-call.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: accepted\ndate: 2026-07-03\n---\n# 0003 — Legacy call\n",
     );
-    let conv = f.read("conventions.md");
+    let config = f.read("trellis.toml");
     f.write(
-        "conventions.md",
-        &format!("{conv}\n## Decision registry\n\n- decisions/0003-legacy-call.md — inert: scaffolding era\n"),
+        "trellis.toml",
+        &format!("{config}\n[decisions]\n\"decisions/0003-legacy-call.md\" = \"inert: scaffolding era\"\n"),
     );
     // Reachable from nothing.
     f.write(

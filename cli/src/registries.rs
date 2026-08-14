@@ -1,5 +1,5 @@
 //! Instance registries, read at runtime and never hardcoded: plan types and
-//! tags from `conventions.md`, ritual cadences (and the actuals freshness
+//! tags from `trellis.toml`, ritual cadences (and the actuals freshness
 //! window) from `rituals.md`.
 
 use crate::markdown;
@@ -19,17 +19,17 @@ pub struct Registries {
     pub tags: Vec<String>,
     /// Decisions the registry carries a disposition for — prose-era
     /// supersessions and inert classifications the frozen files cannot
-    /// declare (conventions.md → "Decision registry"). Entries are the
-    /// decision paths; the disposition prose stays in the registry line.
+    /// declare (trellis.toml → `[decisions]`). Entries are the decision
+    /// paths; the disposition prose stays in the table's value.
     pub decision_registry: Vec<String>,
     pub rituals: Vec<Ritual>,
     /// Days, when derivable (metric-sweep cadence, or an explicit
     /// "freshness window … N days" statement in `rituals.md`).
     pub freshness_window_days: Option<i64>,
     /// Days a terminal artifact waits before the sweep files it into the
-    /// tier, from an "archive after … N days" statement in `conventions.md`.
-    /// Absent means the sweep moves nothing on its own: a retention horizon
-    /// nobody declared is not one the kernel invents.
+    /// tier, from `archive.after_days` in `trellis.toml`. Absent means the
+    /// sweep moves nothing on its own: a retention horizon nobody declared
+    /// is not one the kernel invents.
     pub archive_after_days: Option<i64>,
 }
 
@@ -61,18 +61,15 @@ pub fn cadence_days(cadence: &str) -> Option<i64> {
 }
 
 pub fn load(tree: &Tree) -> Registries {
-    let mut reg = Registries::default();
-
-    if let Some(conv) = tree.get("conventions.md") {
-        reg.plan_types = markdown::registry_items(&conv.text, &conv.headings, "plan-type-registry");
-        reg.tags = markdown::registry_items(&conv.text, &conv.headings, "tag-registry");
-        reg.decision_registry =
-            markdown::registry_items(&conv.text, &conv.headings, "decision-registry");
-        let re = regex::Regex::new(r"archive after[^.\n]*?(\d+)\s*days").unwrap();
-        if let Some(cap) = re.captures(&conv.text) {
-            reg.archive_after_days = cap[1].parse().ok();
-        }
-    }
+    // The machine-read half of the domain's config: parsed and validated
+    // before the tree existed, copied here so every consumer keeps one type.
+    let mut reg = Registries {
+        plan_types: tree.domain.plan_types.keys().cloned().collect(),
+        tags: tree.domain.tags.keys().cloned().collect(),
+        decision_registry: tree.domain.decisions.keys().cloned().collect(),
+        archive_after_days: tree.domain.archive.after_days,
+        ..Registries::default()
+    };
 
     if let Some(rituals) = tree.get("rituals.md") {
         let skip = rituals.fm.as_ref().map(|f| f.close_line).unwrap_or(0);
