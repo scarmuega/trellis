@@ -230,6 +230,16 @@ enum PlanCmd {
         #[arg(long)]
         by: Option<String>,
     },
+    /// Record what an active plan awaits — a PR, or any ref a human must move
+    Handoff {
+        plan: String,
+        /// The PR or other ref the work now sits behind
+        #[arg(required_unless_present = "clear")]
+        reference: Option<String>,
+        /// Drop the handoff instead — the plan is nobody's to wait on
+        #[arg(long, conflicts_with = "reference")]
+        clear: bool,
+    },
     /// blocked → ready (warns if open records remain)
     Unblock { plan: String },
     /// → retired — the owner's verdict; releases awaits: dependents
@@ -1278,6 +1288,25 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
                 PlanStatus::Blocked,
             )?;
             println!("{rel}: → blocked, open escalation recorded (to: {to})");
+            Ok(ok)
+        }
+
+        PlanCmd::Handoff {
+            plan,
+            reference,
+            clear,
+        } => {
+            let rel = to_rel(&tree.root, &plan);
+            let abs = tree.root.path.join(&rel);
+            let reference = if clear { None } else { reference };
+            plan_ops::set_handoff(&abs, reference.as_deref())?;
+            match &reference {
+                Some(r) => println!(
+                    "{rel}: parked on {r} — it stays active and out of the dispatch queue until \
+                     its owner moves it (claiming again clears the handoff)"
+                ),
+                None => println!("{rel}: handoff cleared"),
+            }
             Ok(ok)
         }
 

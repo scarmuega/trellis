@@ -10,6 +10,11 @@ use anyhow::bail;
 use crate::fmedit;
 use crate::model::PlanStatus;
 
+/// What an `active` plan is parked on, if anything — a PR awaiting its
+/// owner's verdict, or any other ref a human must act on before the work can
+/// move (schema in `spec/model.md`).
+pub const HANDOFF: &str = "handoff";
+
 pub fn current_status(path: &Path) -> anyhow::Result<PlanStatus> {
     let raw = fmedit::get(path, "status")?
         .ok_or_else(|| anyhow::anyhow!("{} declares no status:", path.display()))?;
@@ -35,5 +40,150 @@ pub fn flip(path: &Path, from: &[PlanStatus], to: PlanStatus) -> anyhow::Result<
         );
     }
     fmedit::set_scalar(path, "status", to.as_str(), false)?;
+    // A claim is a fresh attempt: whatever the last taker parked the plan on
+    // is spent, and a stale handoff would park it again the moment this
+    // session ends. Absent is the common case and costs one read.
+    if to == PlanStatus::Active {
+        fmedit::remove(path, HANDOFF)?;
+    }
     Ok(current)
+}
+
+/// Record (or clear) what an active plan is parked on. Guarded to `active`
+/// for the same reason the flips are guarded: a handoff on a plan nobody
+/// holds is a claim about work that is not happening.
+pub fn set_handoff(path: &Path, reference: Option<&str>) -> anyhow::Result<()> {
+    let current = current_status(path)?;
+    if current != PlanStatus::Active {
+        bail!(
+            "{} is {} — a handoff records what an active plan awaits",
+            path.display(),
+            current.as_str()
+        );
+    }
+    match reference {
+        Some(reference) if !reference.trim().is_empty() => {
+            fmedit::set_scalar(path, HANDOFF, reference.trim(), true)
+        }
+        _ => fmedit::remove(path, HANDOFF).map(|_| ()),
+    }
+}
+
+/// What a plan was left in when the session dispatched to advance it ended.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Relinquished {
+    /// `active` with nobody working it and nothing declared to await: flipped
+    /// back to `ready`, so the scan picks it up again next tick.
+    Released,
+    /// `active` and parked on a declared handoff — the PR is the taker's
+    /// event and the verdict is the owner's (`awaits:`, same argument), so
+    /// the plan stays out of the queue until a human moves it.
+    Parked(String),
+    /// The session left a verdict of its own, or never claimed the plan.
+    /// Nothing owed either way.
+    Untouched(PlanStatus),
+}
+
+/// Return an abandoned plan to the queue. A session that ends without
+/// flipping the status leaves `active` — claimed, and nobody holding it —
+/// which no scan reads and no tick retries: the plan strands until a human
+/// notices. `ready` is where it belongs, because `ready` is exactly the claim
+/// this makes: released, and nobody has taken it.
+///
+/// The rule lives in the kernel, not the daemon: it is a statement about the
+/// plan lifecycle, and the daemon decides nothing.
+pub fn relinquish(path: &Path) -> anyhow::Result<Relinquished> {
+    let current = current_status(path)?;
+    if current != PlanStatus::Active {
+        return Ok(Relinquished::Untouched(current));
+    }
+    if let Some(handoff) = fmedit::get(path, HANDOFF)?.filter(|h| !h.trim().is_empty()) {
+        return Ok(Relinquished::Parked(handoff));
+    }
+    fmedit::set_scalar(path, "status", PlanStatus::Ready.as_str(), false)?;
+    Ok(Relinquished::Released)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plan(dir: &Path, frontmatter: &str) -> std::path::PathBuf {
+        let path = dir.join("plan.md");
+        std::fs::write(
+            &path,
+            format!("---\nprovenance: authored\n{frontmatter}---\n# Plan\n"),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn an_abandoned_active_plan_goes_back_to_the_queue() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(dir.path(), "status: active\n");
+        assert_eq!(relinquish(&path).unwrap(), Relinquished::Released);
+        assert_eq!(current_status(&path).unwrap(), PlanStatus::Ready);
+        // Idempotent: a second reap of the same plan finds nothing to do.
+        assert_eq!(
+            relinquish(&path).unwrap(),
+            Relinquished::Untouched(PlanStatus::Ready)
+        );
+    }
+
+    #[test]
+    fn a_declared_handoff_parks_the_plan_instead() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(dir.path(), "status: active\nhandoff: https://forge/pr/7\n");
+        assert_eq!(
+            relinquish(&path).unwrap(),
+            Relinquished::Parked("https://forge/pr/7".into())
+        );
+        assert_eq!(current_status(&path).unwrap(), PlanStatus::Active);
+    }
+
+    #[test]
+    fn a_verdict_of_the_sessions_own_is_left_alone() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for status in ["blocked", "retired", "draft", "ready"] {
+            let path = plan(dir.path(), &format!("status: {status}\n"));
+            assert_eq!(
+                relinquish(&path).unwrap(),
+                Relinquished::Untouched(PlanStatus::parse(status).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn claiming_clears_the_last_takers_handoff() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(
+            dir.path(),
+            "status: ready\nhandoff: https://forge/pr/7\ntype: initiative\n",
+        );
+        flip(&path, &[PlanStatus::Ready], PlanStatus::Active).unwrap();
+        assert_eq!(fmedit::get(&path, HANDOFF).unwrap(), None);
+        assert_eq!(
+            fmedit::get(&path, "type").unwrap().as_deref(),
+            Some("initiative")
+        );
+        assert_eq!(relinquish(&path).unwrap(), Relinquished::Released);
+    }
+
+    #[test]
+    fn a_handoff_is_recorded_only_while_the_plan_is_held() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(dir.path(), "status: ready\n");
+        let err = set_handoff(&path, Some("https://forge/pr/7")).unwrap_err();
+        assert!(err.to_string().contains("is ready"), "{err}");
+
+        flip(&path, &[PlanStatus::Ready], PlanStatus::Active).unwrap();
+        set_handoff(&path, Some("https://forge/pr/7")).unwrap();
+        assert_eq!(
+            fmedit::get(&path, HANDOFF).unwrap().as_deref(),
+            Some("https://forge/pr/7")
+        );
+        set_handoff(&path, None).unwrap();
+        assert_eq!(fmedit::get(&path, HANDOFF).unwrap(), None);
+    }
 }

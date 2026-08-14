@@ -298,7 +298,11 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              Evaluate only the judgment items. Claim with `trellis plan claim \
              {{plan}}`; on an uncleared blocker `trellis plan block {{plan}} --by \
              {{owner}} --asks …` (escalations go to {{escalate_to}}); write escalation \
-             records with `trellis escalate add`; leave a trail.\n\
+             records with `trellis escalate add`; leave a trail. End with a verdict: \
+             retire it, block it, or — if you leave a proposal for its owner to rule \
+             on — record it with `trellis plan handoff {{plan}} <pr>`. A plan left \
+             active with no handoff is returned to ready when your session ends, and \
+             dispatched again.\n\
              \n\
              {PROCEDURE_BRIDGE}\n\
              \n\

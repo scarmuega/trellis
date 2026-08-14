@@ -54,6 +54,12 @@ const RESUBMIT_BEAT: Duration = Duration::from_secs(10);
 /// a turn that scrolled it past this window would read as never-started.
 const VERIFY_TAIL: u32 = 10_000;
 
+/// Lines of scrollback the harness's own status furniture occupies — the
+/// footer and the turn's closing line, where the live-background-work
+/// counters sit. Read narrowly on purpose: the same words higher up are a
+/// session's prose, not a claim about what is still running.
+const FOOTER_TAIL: u32 = 16;
+
 /// Consecutive ticks the herdr server may be unreachable before every session
 /// it was carrying is written off. The server dying kills its panes, so this
 /// is acknowledgment, not abandonment.
@@ -83,6 +89,11 @@ enum Phase {
     /// Waiting at its own UI for a human. Holds its slot: the pressure on
     /// capacity is real, and hiding it would misreport the fleet.
     Blocked,
+    /// Settled at its prompt with background monitors still armed: the turn
+    /// ended, the session did not — a monitor is a standing promise to
+    /// re-invoke it when its condition fires. Holds its slot for the same
+    /// reason `Blocked` does, and for the same reason is never retired here.
+    Waiting,
 }
 
 struct Session {
@@ -245,6 +256,7 @@ impl HerdrPool {
                 key: key.clone(),
                 label: match s.phase {
                     Phase::Blocked => format!("{} [blocked]", s.label),
+                    Phase::Waiting => format!("{} [waiting]", s.label),
                     _ => s.label.clone(),
                 },
                 log: s.log.clone(),
@@ -427,7 +439,9 @@ impl HerdrPool {
     /// Block until every session settles — what `--once` owes its caller. A
     /// session that settles `blocked` is not waited out: a drain pass has
     /// nobody to unblock it, so it is announced, detached, and left running
-    /// for an operator with a terminal.
+    /// for an operator with a terminal. One settled with background monitors
+    /// armed is detached the same way, for the mirror reason: it needs nobody,
+    /// and the clock it is waiting on is not the drain's to spend.
     pub fn drain(&mut self) -> Vec<Finished> {
         let mut done = Vec::new();
         for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
@@ -461,6 +475,23 @@ impl HerdrPool {
                         let _ = self.client.notification_show(
                             &format!("session blocked: {}", session.label),
                             Some("left running — attach in herdr to unblock it"),
+                        );
+                    }
+                    // Settled with monitors still armed: the session will
+                    // resume itself, on a clock a drain has no business
+                    // waiting out — a monitor may be minding an hour-long
+                    // download. Announced and left running, like a blocked
+                    // one; the next daemon adopts it.
+                    Ok(_) if monitors_live(&self.in_flight[&key], &self.client) => {
+                        let session = self.in_flight.remove(&key).expect("still tracked");
+                        note(&format!(
+                            "{} is idle with background monitors armed — left running; \
+                             it resumes itself when one fires",
+                            session.label
+                        ));
+                        let _ = self.client.notification_show(
+                            &format!("session waiting: {}", session.label),
+                            Some("left running — a background monitor will resume it"),
                         );
                     }
                     Ok(_) => {
@@ -559,6 +590,12 @@ impl HerdrPool {
 fn observe(session: &mut Session, agent: &AgentInfo, client: &Client) -> Option<Option<i32>> {
     match agent.agent_status.as_str() {
         "working" => {
+            if session.phase == Phase::Waiting {
+                note(&format!(
+                    "{}: a monitor fired — working again",
+                    session.label
+                ));
+            }
             session.phase = Phase::Working;
             session.submitted_ticks = 0;
             None
@@ -584,13 +621,28 @@ fn observe(session: &mut Session, agent: &AgentInfo, client: &Client) -> Option<
             }
             None
         }
+        // Idle is not done while the harness still reports armed monitors:
+        // the turn ended, the session did not. Checked before every other
+        // reading of a settle, including the prompt-echo one — a session with
+        // live monitors has taken a prompt by construction.
+        "idle" | "done" if monitors_live(session, client) => {
+            if session.phase != Phase::Waiting {
+                session.phase = Phase::Waiting;
+                note(&format!(
+                    "{}: idle with background monitors armed — waiting, not finished; \
+                     it re-invokes itself when one fires",
+                    session.label
+                ));
+            }
+            None
+        }
         "idle" | "done" => match session.phase {
             // A turn was seen, and it ended — if the settle is real.
             // Observed live: a permission dialog rendered mid-turn can read
             // `idle` for a beat before the classifier calls it `blocked`,
             // and retiring on that beat closes the workspace over a waiting
             // dialog. A settle counts only after it survives the debounce.
-            Phase::Working | Phase::Blocked | Phase::BlockedPending => {
+            Phase::Working | Phase::Blocked | Phase::BlockedPending | Phase::Waiting => {
                 if settle_survives(session, client) {
                     Some(Some(0))
                 } else {
@@ -644,6 +696,43 @@ fn settle_survives(session: &Session, client: &Client) -> bool {
         Ok(again) => matches!(again.agent_status.as_str(), "idle" | "done"),
         Err(_) => false,
     }
+}
+
+/// Whether the harness still reports armed background monitors. Claude Code
+/// carries the count in its footer ("⏵⏵ auto mode on · 2 shells, 1 monitor")
+/// and in the turn's closing line ("· 2 shells, 1 monitor still running"),
+/// which is why only the footer window is read.
+///
+/// Background *shells* are deliberately not counted. A monitor is a promise
+/// to re-invoke the session; a shell is a process that may outlive the turn
+/// that started it — a dev server left running would hold a slot forever.
+///
+/// On a read error, err toward finishing: the session is judged exactly as it
+/// was before this check existed, rather than parked on an unreadable pane.
+fn monitors_live(session: &Session, client: &Client) -> bool {
+    match client.agent_read(session.target(), FOOTER_TAIL) {
+        Ok(tail) => monitors_in(&tail) > 0,
+        Err(_) => false,
+    }
+}
+
+/// The largest `N monitor(s)` count the text reports, zero if it names none.
+/// A hand parse rather than a pattern: the phrase is two tokens, and this
+/// runs once per settled session per tick.
+fn monitors_in(text: &str) -> u32 {
+    let mut most = 0;
+    for (at, _) in text.match_indices("monitor") {
+        let before = text[..at].trim_end_matches(' ');
+        let digits = before.trim_end_matches(|c: char| c.is_ascii_digit());
+        // "1 monitor", never "the monitor" — a bare word is prose.
+        if digits.len() == before.len() {
+            continue;
+        }
+        if let Ok(n) = before[digits.len()..].parse::<u32>() {
+            most = most.max(n);
+        }
+    }
+    most
 }
 
 /// Whether the pane carries the prompt's echo — the observable difference
@@ -747,7 +836,126 @@ fn is_unreachable(e: &anyhow::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::prompt_needle;
+    use super::*;
+
+    /// A one-shot fake, the shape `client.rs` tests against: one scripted
+    /// reply per connection.
+    fn client(dir: &Path, replies: Vec<String>) -> Client {
+        use std::io::{BufRead, BufReader};
+        use std::os::unix::net::UnixListener;
+
+        let path = dir.join("herdr.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        std::thread::spawn(move || {
+            for reply in replies {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut line);
+                let id = serde_json::from_str::<serde_json::Value>(&line)
+                    .map(|r| r["id"].as_str().unwrap_or("?").to_string())
+                    .unwrap_or_default();
+                let mut writer = &stream;
+                let _ = writeln!(writer, "{}", reply.replace("{id}", &id));
+            }
+        });
+        Client::new(Some(path.to_str().unwrap()))
+    }
+
+    fn reads(text: &str) -> String {
+        format!(r#"{{"id":"{{id}}","result":{{"type":"pane_read","read":{{"text":"{text}"}}}}}}"#)
+    }
+
+    fn session() -> Session {
+        Session {
+            workspace_id: "w1".into(),
+            pane_id: "p1".into(),
+            label: "act plans/x.md → org/founder".into(),
+            log: String::new(),
+            started: "2026-08-14T0000".into(),
+            token: None,
+            phase: Phase::Working,
+            seq_at_prompt: 1,
+            submitted_ticks: 0,
+            prompt: "plans/x.md — dispatched act".into(),
+            resubmits: 0,
+        }
+    }
+
+    fn sighting(status: &str) -> AgentInfo {
+        AgentInfo {
+            pane_id: "p1".into(),
+            workspace_id: "w1".into(),
+            agent_status: status.into(),
+            state_change_seq: 9,
+            interactive_ready: true,
+            name: None,
+            tokens: Default::default(),
+        }
+    }
+
+    /// The live failure: a settled pane whose harness still reports armed
+    /// monitors. Retiring here closed a workspace over work in flight.
+    #[test]
+    fn an_idle_pane_with_armed_monitors_waits_instead_of_finishing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let client = client(
+            dir.path(),
+            vec![reads("... 2 shells, 1 monitor still running")],
+        );
+        let mut session = session();
+
+        assert!(observe(&mut session, &sighting("idle"), &client).is_none());
+        assert_eq!(session.phase, Phase::Waiting);
+
+        // The monitor fires: back to work, and no read is spent to see it.
+        assert!(observe(&mut session, &sighting("working"), &client).is_none());
+        assert_eq!(session.phase, Phase::Working);
+    }
+
+    /// The same settle with nothing armed still finishes — the check adds a
+    /// reason to wait, never a reason to hang.
+    #[test]
+    fn an_idle_pane_with_nothing_armed_still_settles() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let client = client(
+            dir.path(),
+            vec![
+                reads("⏵⏵ auto mode on · ctrl+t to hide tasks"),
+                // What the settle debounce re-reads.
+                r#"{"id":"{id}","result":{"type":"agent_info","agent":{"pane_id":"p1","workspace_id":"w1","agent_status":"idle"}}}"#.to_string(),
+            ],
+        );
+        let mut session = session();
+        assert_eq!(
+            observe(&mut session, &sighting("idle"), &client),
+            Some(Some(0))
+        );
+    }
+
+    #[test]
+    fn the_footer_counts_monitors_and_ignores_everything_else() {
+        // The live footer that started this: a settled pane, work still in
+        // motion behind it.
+        assert_eq!(
+            monitors_in("  ⏵⏵ auto mode on · 2 shells, 1 monitor · ctrl+t to hide tasks"),
+            1
+        );
+        assert_eq!(
+            monitors_in("✻ Brewed for 31m 28s · 2 shells, 1 monitor still running"),
+            1
+        );
+        assert_eq!(monitors_in("· 12 monitors still running"), 12);
+
+        // Nothing armed: a plain finish, and prose that merely says the word.
+        assert_eq!(monitors_in("⏵⏵ auto mode on · 2 shells · ctrl+t"), 0);
+        assert_eq!(
+            monitors_in("I will monitor the rollout and report back."),
+            0
+        );
+        assert_eq!(monitors_in("the monitor exited"), 0);
+    }
 
     #[test]
     fn the_needle_is_the_first_line_and_never_carries_a_newline() {

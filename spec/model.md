@@ -1,4 +1,4 @@
-# Trellis — specification (v19)
+# Trellis — specification (v20)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -166,6 +166,18 @@ status: draft | ready | active | blocked | retired
     # optional — a human driving a plan interactively goes straight to active.
     # retired is terminal, and terminal is what admits a plan to the terminal
     # tier (rule 13) — a later, separate act, never part of the flip.
+    # active is a state somebody is in: a dispatched taker that ends without a
+    # verdict (retired, blocked, or a declared handoff:) leaves the plan
+    # released and unheld, which is ready — the runtime returns it there rather
+    # than strand it in a state no queue reads (runtime companion).
+handoff: <ref>
+    # optional; what an active plan is parked on — a PR awaiting its owner's
+    # verdict, any ref a human must move before the work can continue. Declared
+    # by the taker as it hands off. While set, the plan stays active and out of
+    # dispatch: the proposal is the taker's event and the verdict is the
+    # owner's, the same argument awaits: makes for retirement. Claiming clears
+    # it — a fresh claim is a fresh attempt, and a spent handoff would park the
+    # next one.
 type: initiative | campaign | experiment | ...   # open set, defined in conventions.md
 complexity: mechanical | standard | deep
     # optional; the reasoning depth the work demands of its taker — never its

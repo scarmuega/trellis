@@ -79,7 +79,14 @@ status: draft | ready | active | blocked | retired
     # →blocked on an uncleared blocker); retired = done or abandoned, and
     # terminal — which is what later admits the plan to archive/ (see
     # Retention), never as part of this flip. ready is optional — a human
-    # driving a plan goes straight to active.
+    # driving a plan goes straight to active. A dispatched taker that ends
+    # without a verdict — retired, blocked, or a declared handoff: — has its
+    # plan returned to ready by the runtime: active means somebody is on it.
+handoff: <ref>
+    # optional; what an active plan is parked on — a PR awaiting its owner's
+    # verdict, or any ref a human must move first. Set it with `trellis plan
+    # handoff <plan> <ref>` as you hand off; while set, the plan stays active
+    # and dispatch leaves it alone. Claiming clears it.
 type: <see plan-type registry below>
 complexity: mechanical | standard | deep
     # optional; the reasoning depth the work demands of its taker — never its

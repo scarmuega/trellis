@@ -9,6 +9,8 @@ export interface PlanRow {
   owner?: string | null;
   complexity?: string | null;
   held?: string | null;
+  // What an active plan is parked on — a handoff its taker declared.
+  handoff?: string | null;
   awaits: string[];
   archived: boolean;
   [key: string]: unknown;

@@ -462,7 +462,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
             for done in backend.drain() {
                 report_exit(&done);
                 state.finished(&done.key, done.exit);
-                retire(&rt, &done);
+                retire(&rt, &state, &done);
             }
             // A single pass starts at most `max_concurrent` sessions, so a
             // due set larger than the cap would otherwise wait for a next
@@ -560,7 +560,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         for done in backend.drain() {
             report_exit(&done);
             state.finished(&done.key, done.exit);
-            retire(&rt, &done);
+            retire(&rt, &state, &done);
         }
         if outcome.deferred > 0 && outcome.started > 0 {
             continue;
@@ -665,7 +665,7 @@ fn shutdown(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::R
     for done in done {
         report_exit(&done);
         state.finished(&done.key, done.exit);
-        retire(rt, &done);
+        retire(rt, state, &done);
     }
     if !rt.dry_run {
         state.save(&rt.root)?;
@@ -705,7 +705,7 @@ fn dispatch_pass(
     for done in backend.reap() {
         report_exit(&done);
         state.finished(&done.key, done.exit);
-        retire(rt, &done);
+        retire(rt, state, &done);
     }
 
     let tree = Tree::load(Root {
@@ -799,6 +799,7 @@ fn dispatch_pass(
             state,
             backend,
             &key,
+            &req.errand,
             &format!("{} {} → {}", req.errand, req.plan, owner),
             &owner,
             prompt,
@@ -846,6 +847,7 @@ fn dispatch_pass(
             state,
             backend,
             &key,
+            "act",
             &format!("act {} → {}", item.plan, item.owner),
             &item.owner,
             &rt.cfg.prompts["act"],
@@ -925,7 +927,7 @@ fn rituals_pass(
     for done in backend.reap() {
         report_exit(&done);
         state.finished(&done.key, done.exit);
-        retire(rt, &done);
+        retire(rt, state, &done);
     }
 
     let tree = Tree::load(Root {
@@ -951,7 +953,7 @@ fn rituals_pass(
                 due.task.label()
             ));
             if !rt.dry_run {
-                state.fired(&due.task.key(), today, None);
+                state.fired(&due.task.key(), "ritual", today, None);
             }
             continue;
         }
@@ -969,6 +971,7 @@ fn rituals_pass(
             state,
             backend,
             &due.task.key(),
+            "ritual",
             &format!("ritual {} ({})", due.task.name, due.task.executor),
             &due.task.executor,
             &rt.cfg.prompts["ritual"],
@@ -1017,6 +1020,7 @@ fn fire(
     state: &mut State,
     backend: &mut Backend,
     key: &str,
+    errand: &str,
     label: &str,
     role: &str,
     prompt_template: &str,
@@ -1113,7 +1117,7 @@ fn fire(
             if let Err(e) = marker::add(&rt.root, role, &today.to_string(), key) {
                 note(&format!("{label}: acting-role marker write failed: {e}"));
             }
-            state.fired(key, today, Some(log));
+            state.fired(key, errand, today, Some(log));
             Outcome::Started
         }
         Err(e) => {
@@ -1158,7 +1162,7 @@ fn render(
 /// Close a finished session's back-channel. A question outstanding when its
 /// session exits goes with it: there is nobody left to receive the answer, and
 /// leaving it listed would invite an operator to answer into a void.
-fn retire(rt: &Runtime, done: &spawn::Finished) {
+fn retire(rt: &Runtime, state: &State, done: &spawn::Finished) {
     if let Some(token) = &done.token {
         rt.shared.inbox.retire(token);
     }
@@ -1167,6 +1171,46 @@ fn retire(rt: &Runtime, done: &spawn::Finished) {
             "{}: acting-role marker removal failed: {e}",
             done.label
         ));
+    }
+    relinquish(rt, state, done);
+}
+
+/// Hand an abandoned plan back to the queue. A session sent to advance a plan
+/// claims it `ready → active` and owes a verdict — retired, blocked, or a
+/// declared handoff. Ending with none of them leaves `active` with nobody
+/// holding it: no scan reads that, no tick retries it, and the plan strands
+/// until a human notices (observed live, 2026-08-14). `ready` is what the
+/// state actually is, so the runtime says so and the next pass picks it up.
+///
+/// Only `act` sessions: the errand was "advance this plan". A refine session
+/// never claimed anything, and demoting a plan a human is driving would be
+/// the runtime overruling its operator.
+fn relinquish(rt: &Runtime, state: &State, done: &spawn::Finished) {
+    if rt.dry_run {
+        return;
+    }
+    let Some(rel) = done.key.strip_prefix("plan:") else {
+        return;
+    };
+    if state.last_errand(&done.key) != Some("act") {
+        return;
+    }
+    let path = rt.root.join(rel);
+    if !path.exists() {
+        // Retired into the terminal tier, or renamed: either way the session
+        // left a verdict and the plan is no longer at this address.
+        return;
+    }
+    match crate::plan_ops::relinquish(&path) {
+        Ok(crate::plan_ops::Relinquished::Released) => note(&format!(
+            "{rel}: its session ended with the plan still active and nobody holding it — \
+             returned to ready; the next pass re-dispatches it"
+        )),
+        Ok(crate::plan_ops::Relinquished::Parked(handoff)) => note(&format!(
+            "{rel}: active, parked on {handoff} — left for its owner, not re-dispatched"
+        )),
+        Ok(crate::plan_ops::Relinquished::Untouched(_)) => {}
+        Err(e) => note(&format!("{rel}: could not read the plan back ({e:#})")),
     }
 }
 

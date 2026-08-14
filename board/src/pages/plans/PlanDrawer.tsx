@@ -382,6 +382,11 @@ export default function PlanDrawer() {
               {typeof facts.held === "string" ? (
                 <Chip label="held" value={String(facts.held)} />
               ) : null}
+              {/* Why an active plan can have no session on it: its taker
+                  handed off and the next move is a human's. */}
+              {typeof facts.handoff === "string" ? (
+                <Chip label="parked" value={String(facts.handoff)} />
+              ) : null}
             </div>
             {awaits.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">

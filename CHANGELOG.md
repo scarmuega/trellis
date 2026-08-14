@@ -12,6 +12,28 @@ here and a matching `vx.y.z` git tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plan can no longer strand in `active` (spec v19 → v20, additive;
+  decision 0052):** dogfooding found a plan sitting `active` for a day with no
+  session running — dispatch enumerates `ready` only, so nothing retried it,
+  while the board still showed it in flight. Two faults, both now closed.
+  Under `backend = "herdr"` the pool read a pane as settled while the harness
+  footer still reported armed background monitors (`2 shells, 1 monitor still
+  running`) — a monitor is a standing promise to re-invoke the session, so
+  that settle is now a `Waiting` phase: it holds its slot, shows as
+  `[waiting]`, is never retired there, and is detached rather than waited out
+  by `--once`. Background shells are deliberately not counted (a dev server
+  outliving its turn would hold a slot forever). And a session dispatched to
+  advance a plan now owes a verdict: ending with the plan still `active` and
+  no declared `handoff:` returns it to `ready`, which is what the state
+  already is — released, and nobody has taken it. Only `act` sessions, so a
+  refine never demotes a plan a human is driving; the retry cooldown bounds
+  the return. The rule lives in the kernel (`plan_ops::relinquish`), not the
+  daemon. Updated: `spec/model.md`, `spec/runtime.md`,
+  `template/conventions.md`, the default `act` prompt, and the three spec
+  pins.
+
 ### Removed
 
 - **`trellis:coder` (`agents/coder.md`), superseding decision 0031 (decision
@@ -31,6 +53,15 @@ here and a matching `vx.y.z` git tag.
   `skills/conventions/SKILL.md`, `commands/act.md`, `checks/plan-readiness.md`.
 
 ### Added
+
+- **`handoff:` on plans (spec v19 → v20, additive; decision 0052):** an
+  optional declared field naming what an active plan is parked on — a PR
+  awaiting its owner's verdict, or any ref a human must move. While set, the
+  plan stays `active` and out of dispatch; claiming clears it, since a fresh
+  claim is a fresh attempt. Written by the taker with `trellis plan handoff
+  <plan> <ref>` (or `--clear`), read by the runtime as one declared field —
+  never inferred from a forge, on the same argument decision 0033 made for
+  `awaits:`: a merged PR is the taker's event, the verdict is the owner's.
 
 - **Every errand is a template; the only command is act (decision 0051):**
   `[prompts]` in `runtime.toml` becomes a name → template map, and the binary

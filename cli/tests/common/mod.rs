@@ -154,29 +154,40 @@ impl Fixture {
     /// point of the command template: the reference adapter is configuration,
     /// so a hermetic one is too.
     pub fn fake_harness(&self) -> String {
-        let rel = ".trellis/bin/harness";
-        let path = self.root().join(rel);
+        self.fake_harness_leaving("harness", "")
+    }
+
+    /// `fake_harness`, plus the verdict a taker owes its plan: `verdict` is
+    /// sh run after the claim with `"$1"` naming the plan file. The bare
+    /// `fake_harness` is this with no verdict at all — a session that claims
+    /// the work and walks away, which is the case the runtime has to catch.
+    pub fn fake_harness_leaving(&self, name: &str, verdict: &str) -> String {
+        let rel = format!(".trellis/bin/{name}");
+        let path = self.root().join(&rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         // One file per invocation, named by second and pid. Sessions run
         // concurrently and a shared append log interleaves their lines —
         // shell printf is no more atomic than a sequence of echoes.
         std::fs::write(
             &path,
-            "#!/bin/sh\n\
-             dir=.trellis/runtime/argv\n\
-             mkdir -p \"$dir\"\n\
-             for a in \"$@\"; do echo \"$a\"; done > \"$dir/$(date +%s)-$$\"\n\
-             # Snapshot the runtime-stamped acting-role marker (decision\n\
-             # 0045): it exists only while sessions run, so the assertion\n\
-             # has to be taken from inside one.\n\
-             if [ -f .trellis/acting-role ]; then\n\
-             \x20 cp .trellis/acting-role \"$dir/../marker-seen-$$\"\n\
-             fi\n\
-             if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
-             \x20 sed 's/^status: ready$/status: active/' \"$1\" > \"$1.claimed\" \\\n\
-             \x20   && mv \"$1.claimed\" \"$1\"\n\
-             fi\n\
-             exit 0\n",
+            format!(
+                "#!/bin/sh\n\
+                 dir=.trellis/runtime/argv\n\
+                 mkdir -p \"$dir\"\n\
+                 for a in \"$@\"; do echo \"$a\"; done > \"$dir/$(date +%s)-$$\"\n\
+                 # Snapshot the runtime-stamped acting-role marker (decision\n\
+                 # 0045): it exists only while sessions run, so the assertion\n\
+                 # has to be taken from inside one.\n\
+                 if [ -f .trellis/acting-role ]; then\n\
+                 \x20 cp .trellis/acting-role \"$dir/../marker-seen-$$\"\n\
+                 fi\n\
+                 if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
+                 \x20 sed 's/^status: ready$/status: active/' \"$1\" > \"$1.claimed\" \\\n\
+                 \x20   && mv \"$1.claimed\" \"$1\"\n\
+                 \x20 {verdict}\n\
+                 fi\n\
+                 exit 0\n"
+            ),
         )
         .unwrap();
         #[cfg(unix)]
@@ -184,7 +195,7 @@ impl Fixture {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        rel.to_string()
+        rel
     }
 
     /// A stand-in for `claude` that uses the back-channel: it reports
@@ -389,6 +400,12 @@ impl FakeHerdr {
         Self::start_dropping(socket, statuses, agents, 0)
     }
 
+    /// Like `start`, but every `agent.read` ends with `footer` — the harness's
+    /// own status furniture, where the live-background-work counters sit.
+    pub fn start_with_footer(socket: PathBuf, statuses: &[&str], footer: &str) -> FakeHerdr {
+        Self::start_full(socket, statuses, Vec::new(), 0, footer)
+    }
+
     /// Like `start`, but the first `drops` prompts are accepted and then
     /// swallowed — never echoed into `agent.read` — the way a live Claude
     /// drops injected input while still starting up.
@@ -397,6 +414,16 @@ impl FakeHerdr {
         statuses: &[&str],
         agents: Vec<serde_json::Value>,
         drops: usize,
+    ) -> FakeHerdr {
+        Self::start_full(socket, statuses, agents, drops, "")
+    }
+
+    fn start_full(
+        socket: PathBuf,
+        statuses: &[&str],
+        agents: Vec<serde_json::Value>,
+        drops: usize,
+        footer: &str,
     ) -> FakeHerdr {
         use serde_json::json;
         use std::io::{BufRead, BufReader, Write};
@@ -408,6 +435,7 @@ impl FakeHerdr {
         let record = std::sync::Arc::clone(&requests);
         let mut statuses: std::collections::VecDeque<String> =
             statuses.iter().map(|s| s.to_string()).collect();
+        let footer = footer.to_string();
 
         std::thread::spawn(move || {
             let mut counter = 0u64;
@@ -506,7 +534,7 @@ impl FakeHerdr {
                     "agent.list" => json!({"type": "agent_list", "agents": agents}),
                     "agent.read" => json!({
                         "type": "pane_read",
-                        "read": {"text": format!("{scrollback}fake scrollback tail")},
+                        "read": {"text": format!("{scrollback}fake scrollback tail\n{footer}")},
                     }),
                     other => {
                         let mut writer = &stream;

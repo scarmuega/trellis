@@ -153,6 +153,7 @@ mod tests {
         let mut state = State::default();
         state.fired(
             &state::key_ritual("conventions lint"),
+            "ritual",
             day("2026-08-03"),
             None,
         );
@@ -164,7 +165,12 @@ mod tests {
     fn the_cadence_decides_when_it_returns() {
         let reg = reg(&[("focus", "weekly")]);
         let mut state = State::default();
-        state.fired(&state::key_ritual("focus"), day("2026-08-03"), None);
+        state.fired(
+            &state::key_ritual("focus"),
+            "ritual",
+            day("2026-08-03"),
+            None,
+        );
         let cfg = RuntimeConfig::default();
 
         // Day 6: the weekly row waits.
@@ -180,7 +186,12 @@ mod tests {
     fn an_overdue_window_fires_once_not_once_per_window() {
         let reg = reg(&[("focus", "weekly")]);
         let mut state = State::default();
-        state.fired(&state::key_ritual("focus"), day("2026-06-01"), None);
+        state.fired(
+            &state::key_ritual("focus"),
+            "ritual",
+            day("2026-06-01"),
+            None,
+        );
         // Two months late — still exactly one due entry.
         let pass = due(&reg, &RuntimeConfig::default(), &state, day("2026-08-03"));
         assert_eq!(
@@ -196,7 +207,12 @@ mod tests {
     fn catchup_skip_records_the_missed_window_without_running_it() {
         let reg = reg(&[("focus", "weekly")]);
         let mut state = State::default();
-        state.fired(&state::key_ritual("focus"), day("2026-06-01"), None);
+        state.fired(
+            &state::key_ritual("focus"),
+            "ritual",
+            day("2026-06-01"),
+            None,
+        );
         let cfg = RuntimeConfig {
             scheduler: super::super::config::Scheduler {
                 catchup: Catchup::Skip,

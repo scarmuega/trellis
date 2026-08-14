@@ -162,6 +162,49 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     assert!(text.contains("fake scrollback tail"), "{text}");
 }
 
+/// Observed live (2026-08-14): a session that parks a background monitor and
+/// ends its turn settles `idle` while its work is still in motion — the
+/// monitor is a standing promise to re-invoke it. Reaping there retired a
+/// plan mid-flight and stranded it `active`.
+#[test]
+fn a_session_idle_with_live_monitors_is_not_finished() {
+    let f = Fixture::healthy();
+    let herdr = FakeHerdr::start_with_footer(
+        f.root().join(".trellis/herdr.sock"),
+        &["idle"],
+        "  ⏵⏵ auto mode on · 2 shells, 1 monitor · ctrl+t to hide tasks",
+    );
+    herdr_backend_fixture(&f, &herdr.socket);
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert!(
+        out.contains("idle with background monitors armed — left running"),
+        "{out}"
+    );
+    assert!(
+        !herdr.calls().contains(&"workspace.close".to_string()),
+        "a session still working keeps its pane: {:?}",
+        herdr.calls()
+    );
+    let shown = herdr.params_for("notification.show");
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(
+        shown[0]["title"]
+            .as_str()
+            .unwrap()
+            .starts_with("session waiting:"),
+        "{shown:?}"
+    );
+    assert!(
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"].is_null(),
+        "no exit is reported for a session that never ended"
+    );
+}
+
 /// Observed live: herdr accepts `agent.prompt` while Claude Code is still
 /// starting up and the injected text vanishes — the pane settles `idle` over
 /// an empty input. The pool must not read that as a finished turn; it puts

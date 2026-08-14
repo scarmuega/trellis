@@ -28,6 +28,22 @@ fn claiming_fixture() -> Fixture {
     f
 }
 
+/// Records argv, claims the plan, and leaves the verdict a taker owes —
+/// `sh` run with `"$1"` naming the plan file.
+fn verdict_fixture(verdict: &str) -> Fixture {
+    let f = Fixture::healthy();
+    let harness = f.fake_harness_leaving("verdict-harness", verdict);
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[harness]\n\
+             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
+             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+        ),
+    );
+    f
+}
+
 /// Records argv and leaves every plan exactly as it found it.
 fn passive_fixture() -> Fixture {
     let f = Fixture::healthy();
@@ -185,17 +201,58 @@ fn a_held_plan_stays_ready_and_is_never_dispatched() {
 
 #[test]
 fn a_claimed_plan_leaves_the_queue_which_is_what_makes_dispatch_idempotent() {
-    let f = claiming_fixture();
+    let f = verdict_fixture(
+        "sed 's/^status: active$/status: retired/' \"$1\" > \"$1.v\" && mv \"$1.v\" \"$1\"",
+    );
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
     f.dispatch_once(ANCHOR, &[]);
-    assert!(f.read("plans/ship-it.md").contains("status: active"));
+    assert!(f.read("plans/ship-it.md").contains("status: retired"));
 
     // A new day, so the scan is due again — and finds nothing to do.
     f.dispatch_once("2026-08-04", &[]);
     assert_eq!(dispatched(&f).len(), 1, "not dispatched twice");
+}
+
+#[test]
+fn a_session_that_ends_without_a_verdict_hands_its_plan_back_to_the_queue() {
+    // The claiming harness is the failure this exists for: it takes the
+    // plan and walks away. `active` with nobody holding it is a state no
+    // scan reads and no tick retries — the plan would strand there.
+    let f = claiming_fixture();
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    let out = f.dispatch_once(ANCHOR, &[]);
+
+    assert_eq!(dispatched(&f), ["plans/ship-it.md"]);
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "abandoned active plans go back to ready, not stranded:\n{out}"
+    );
+    assert!(out.contains("returned to ready"), "{out}");
+}
+
+#[test]
+fn a_plan_parked_on_a_handoff_stays_active_and_out_of_the_queue() {
+    // The taker left a proposal for its owner to rule on: the work is real,
+    // it is simply not the runtime's to advance.
+    let f = verdict_fixture(
+        "awk '{print} /^status: active$/{print \"handoff: https://forge/pr/7\"}' \"$1\" > \"$1.v\" && mv \"$1.v\" \"$1\"",
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    let out = f.dispatch_once(ANCHOR, &[]);
+
+    let plan = f.read("plans/ship-it.md");
+    assert!(plan.contains("status: active"), "{plan}");
+    assert!(plan.contains("handoff: https://forge/pr/7"), "{plan}");
+    assert!(out.contains("parked on https://forge/pr/7"), "{out}");
 }
 
 #[test]

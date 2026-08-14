@@ -70,6 +70,18 @@ to size the taker's session — how much reasoning, which model, how much budget
 per the binding's mapping. Reading a declared field keeps the scan deterministic;
 absent means the binding's default.
 
+A taker owes its plan a verdict, and the runtime supplies the one it left out.
+A session dispatched to advance a plan claims it `ready → active`; ending
+without retiring it, blocking it, or declaring a `handoff:` leaves the plan
+claimed with nobody holding it — a state no scan reads and no tick retries, so
+the plan strands until a human notices. When such a session ends the runtime
+flips it back to **`ready`**, which is what the state already is: released, and
+nobody has taken it. The retry cooldown then bounds how fast it comes round
+again. A plan carrying a `handoff:` is left alone — parked on a human, not
+abandoned by an agent — and so is one the session moved itself. This is not the
+runtime judging the work: it reads the same declared field the scan does and
+restores the invariant that `active` means somebody is on it.
+
 A plan may declare `awaits:` (schema in `spec/model.md`): the scan **holds** a
 `ready` plan whose targets are not all `retired` — skipped, still `ready`, no
 status change, retried every tick until the last target retires. The hold is not
@@ -327,6 +339,12 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   on a runaway session is the operator's attention. Completion is a settled
   state, not an exit code: a session that settles having done nothing reads as
   finished cleanly, and the plan's own status remains the truth that matters.
+  Two settles are read as still-running rather than finished — one whose prompt
+  never echoed into the pane (it is put back in), and one whose harness still
+  reports armed background monitors, since a monitor is a standing promise to
+  re-invoke the session. The second holds its slot indefinitely and shows as
+  `[waiting]`: nothing here bounds a session's wall-clock, because the work a
+  monitor is minding legitimately takes hours.
 - Herdr's `blocked` state is heuristic screen-matching unless herdr's own
   claude integration hook is installed (`herdr integration install claude`),
   and it is session-level only: it toasts and holds the slot, and never writes

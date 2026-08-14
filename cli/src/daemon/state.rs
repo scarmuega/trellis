@@ -38,6 +38,11 @@ pub struct Run {
     pub last_exit: Option<i32>,
     /// Log path, relative to the runtime directory.
     pub last_log: Option<String>,
+    /// Which `[prompts]` errand that session ran. What a finished session is
+    /// owed depends on what it was sent to do: only `act` was sent to advance
+    /// the plan, so only `act` returns an abandoned one to the queue. Absent
+    /// in state written before this field existed — read as "not act".
+    pub last_errand: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -148,12 +153,18 @@ impl State {
     /// Record a spawn. The fire date is what the rituals scheduler reads
     /// back and the attempt stamp is what the dispatch cooldown reads, so
     /// both are set on a successful spawn and never on a skipped one.
-    pub fn fired(&mut self, key: &str, today: Date, log: Option<String>) {
+    pub fn fired(&mut self, key: &str, errand: &str, today: Date, log: Option<String>) {
         let run = self.runs.entry(key.to_string()).or_default();
         run.last_fired = Some(today.to_string());
         run.last_attempt_secs = Some(now_secs());
         run.last_exit = None;
         run.last_log = log;
+        run.last_errand = Some(errand.to_string());
+    }
+
+    /// What the last session on this key was sent to do.
+    pub fn last_errand(&self, key: &str) -> Option<&str> {
+        self.runs.get(key).and_then(|r| r.last_errand.as_deref())
     }
 
     pub fn finished(&mut self, key: &str, exit: Option<i32>) {
@@ -179,7 +190,12 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let today = Date::parse("2026-08-03").unwrap();
         let mut state = State::load_rituals(dir.path());
-        state.fired(&key_ritual("conventions lint"), today, Some("a.log".into()));
+        state.fired(
+            &key_ritual("conventions lint"),
+            "ritual",
+            today,
+            Some("a.log".into()),
+        );
         state.finished(&key_ritual("conventions lint"), Some(0));
         state.save(dir.path()).unwrap();
 

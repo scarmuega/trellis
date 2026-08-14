@@ -88,6 +88,7 @@ pub fn artifact(
                 put("type", fm.get_str("type").into());
                 put("complexity", fm.get_str("complexity").into());
                 put("awaits", fm.get_list("awaits").unwrap_or_default().into());
+                put("handoff", fm.get_str("handoff").into());
             }
             put(
                 "effective_class",
@@ -167,6 +168,9 @@ pub struct PlanRow {
     pub complexity: Option<String>,
     /// The `awaits:` target holding this plan, when one does.
     pub held: Option<String>,
+    /// What an active plan is parked on, when its taker declared one — a
+    /// handoff is why a plan can sit `active` with no session on it.
+    pub handoff: Option<String>,
     /// Every `awaits:` target, held or not — the plan's outgoing edges in
     /// the sequencing DAG, so a caller can draw the graph from the census
     /// alone. Targets are live addresses (spec rule 13).
@@ -201,6 +205,7 @@ pub fn plan_rows(tree: &Tree, git: &Git, derived: &Derived, today: Date) -> Vec<
                 owner: p.owner(),
                 complexity: p.fm.as_ref().and_then(|f| f.get_str("complexity")),
                 held: derived.hold(&p.rel).map(|(t, _)| t),
+                handoff: p.fm.as_ref().and_then(|f| f.get_str("handoff")),
                 awaits: derived
                     .plan_awaits
                     .get(crate::tree::live_path(&p.rel))

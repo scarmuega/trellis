@@ -166,6 +166,48 @@ pub fn set_scalar(path: &Path, key: &str, value: &str, create: bool) -> anyhow::
     write_atomic(path, &rendered)
 }
 
+/// Drop a top-level scalar field entirely. Absent is success — removal is
+/// idempotent by nature. A field holding a nested block is refused, on the
+/// same argument `set_scalar` refuses one: line surgery that could swallow
+/// lines must fail loudly.
+pub fn remove(path: &Path, key: &str) -> anyhow::Result<bool> {
+    let mut doc = Doc::load(path)?;
+    let hits = doc.key_lines(key);
+    let i = match hits.len() {
+        0 => return Ok(false),
+        1 => hits[0],
+        n => bail!(
+            "{} declares {key}: {n} times — fix the duplicate first",
+            path.display()
+        ),
+    };
+    doc.guard_shapes(i)?;
+    let has_children = doc
+        .lines
+        .get(i + 1)
+        .map(|next| {
+            i + 1 < doc.close
+                && (next.starts_with(' ') || next.starts_with('\t'))
+                && !next.trim().is_empty()
+        })
+        .unwrap_or(false);
+    if has_children {
+        bail!("{key}: holds a nested block — refusing to remove it line by line");
+    }
+    doc.lines.remove(i);
+    doc.close -= 1;
+
+    let rendered = doc.render();
+    verify(&rendered, path, |fm| {
+        if fm.has_key(key) {
+            bail!("post-edit verification failed: {key} is still declared");
+        }
+        Ok(())
+    })?;
+    write_atomic(path, &rendered)?;
+    Ok(true)
+}
+
 /// Append an entry to a top-level list field, in whichever form it already
 /// uses (flow `[a, b]` or block `- item`); creates `key: [value]` if absent.
 pub fn append_list(path: &Path, key: &str, value: &str) -> anyhow::Result<()> {

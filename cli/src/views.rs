@@ -223,6 +223,11 @@ pub fn board(tree: &Tree, git: &Git, today: Date) -> String {
             }
             "blocked" if days > window => flags.push("stalled blocker".into()),
             "active" => {
+                // Parked on a human, not stalled by an agent: the dwell is
+                // real, and so is the reason for it.
+                if let Some(handoff) = p.fm.as_ref().and_then(|f| f.get_str("handoff")) {
+                    flags.push(format!("parked — handoff {handoff}"));
+                }
                 let horizon = horizon_re
                     .captures(&p.text)
                     .and_then(|c| c[1].parse::<i64>().ok());
