@@ -179,11 +179,7 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
                     )
                     .ok()
                     .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
-                    let dispatch_alive = std::fs::read_to_string(
-                        crate::daemon::config::RuntimeConfig::runtime_dir(&shared.root)
-                            .join("dispatch.pid"),
-                    )
-                    .is_ok();
+                    let dispatch_alive = crate::daemon::dispatch_running(&shared.root);
                     obj.insert(
                         "dispatch".into(),
                         snapshot.unwrap_or(serde_json::Value::Null),

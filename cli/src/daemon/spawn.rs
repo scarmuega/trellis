@@ -5,10 +5,11 @@
 //! session-trail half of the ledger, where git holds the durable half.
 //!
 //! Two guards, at different scales. Within the process, a task already in
-//! flight is never launched twice. Across restarts, nothing here is the
-//! guard: dispatch idempotence comes from the taker flipping its plan
-//! `ready → active` on disk, so a session that dies before claiming is simply
-//! retried on the next tick (decision 0029). Children are put in their own
+//! flight is never launched twice. Across processes and restarts, nothing
+//! here is the guard: dispatch idempotence comes from the plan going
+//! `ready → active` on disk before its session starts (decision 0029, moved
+//! from the taker to the runtime by decision 0053), so a session that dies
+//! is relinquished and retried on a later tick. Children are put in their own
 //! process group, so a Ctrl-C to the daemon does not kill a session
 //! mid-artifact.
 

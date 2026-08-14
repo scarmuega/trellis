@@ -161,8 +161,10 @@ status: draft | ready | active | blocked | retired
     # owner has released a specified plan for a taker; the runtime dispatches it as
     # act(owner) (runtime companion) — an agent-held owner advances it autonomously,
     # a human-held owner receives it as a handoff — held, not dispatched, while
-    # any awaits: target is unretired. active = in flight; the taker
-    # flips ready → active on pickup, → blocked on an uncleared blocker. ready is
+    # any awaits: target is unretired. active = in flight; under dispatch the
+    # runtime flips ready → active as it sends the session (runtime companion)
+    # and a human driving a plan flips it on pickup; → blocked on an
+    # uncleared blocker. ready is
     # optional — a human driving a plan interactively goes straight to active.
     # retired is terminal, and terminal is what admits a plan to the terminal
     # tier (rule 13) — a later, separate act, never part of the flip.

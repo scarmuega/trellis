@@ -75,8 +75,9 @@ provenance: authored
 status: draft | ready | active | blocked | retired
     # draft = being authored; ready = released for a taker, the runtime dispatches
     # it as act(owner) (agent-held owner advances it, human-held owner receives a
-    # handoff); active = in flight (the taker flips ready→active on pickup,
-    # →blocked on an uncleared blocker); retired = done or abandoned, and
+    # handoff); active = in flight (under dispatch the runtime flips
+    # ready→active as it sends the session, a human driving a plan flips it on
+    # pickup; →blocked on an uncleared blocker); retired = done or abandoned, and
     # terminal — which is what later admits the plan to archive/ (see
     # Retention), never as part of this flip. ready is optional — a human
     # driving a plan goes straight to active. A dispatched taker that ends

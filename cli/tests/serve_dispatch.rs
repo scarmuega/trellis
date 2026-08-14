@@ -1,7 +1,8 @@
 //! The daemon's dispatcher: the same scan the forge workflow runs, with the
 //! same hold and fail-closed semantics, now spawning the act sessions itself.
-//! What makes it idempotent is not memory but the artifact — a taker flips
-//! its plan `ready → active`, so the next scan no longer sees it.
+//! What makes it idempotent is not memory but the artifact — the plan goes
+//! `ready → active` before its session starts, so the next scan no longer
+//! sees it, whichever process is scanning (decision 0053).
 
 mod common;
 
@@ -385,5 +386,134 @@ fn the_cooldown_is_the_bindings_knob() {
         dispatched(&f).len(),
         2,
         "cooldown zero: every pass may retry an unclaimed plan"
+    );
+}
+
+/// The dispatch guard (decision 0053). Two dispatchers ran one plan twice
+/// because the claim was the session's first turn, minutes after the spawn,
+/// and the plan read `ready` throughout that window. The runtime takes it
+/// before the session exists, so what the session finds is a plan already
+/// claimed for it — and every scan, in any process, has left the queue.
+#[test]
+fn the_runtime_claims_the_plan_before_its_session_starts() {
+    // This harness still claims, the way a session on the old contract
+    // would. Its snapshot is taken first, so it reports what it was handed.
+    let f = claiming_fixture();
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+
+    let seen = f.plans_as_sessions_found_them();
+    assert_eq!(seen.len(), 1, "one session, one snapshot: {seen:?}");
+    assert!(
+        seen[0].contains("status: active"),
+        "the session found its plan already claimed: {:?}",
+        seen[0]
+    );
+}
+
+/// The claim is for a session that exists. A spawn that never got off the
+/// ground leaves nothing holding the plan, and no retire will ever come to
+/// undo it — so the claim comes back off here, or the plan strands `active`
+/// with nobody on it, which is exactly the state decision 0052 closed.
+#[test]
+fn a_spawn_that_fails_puts_the_claim_back() {
+    let f = Fixture::healthy();
+    f.write(
+        "runtime.toml",
+        "[harness]\n\
+         act_cmd = [\".trellis/bin/not-a-harness\", \"{plan}\"]\n\
+         ritual_cmd = [\".trellis/bin/not-a-harness\", \"{ritual}\"]\n",
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+
+    let plan = std::fs::read_to_string(f.root().join("plans/ship-it.md")).unwrap();
+    assert!(
+        plan.contains("status: ready"),
+        "a plan nothing is working on belongs in the queue: {plan:?}"
+    );
+}
+
+/// `--once` skipped the lock on the reading that one pass is harmless. It is
+/// not: a pass scans the same plans, spawns into the same slots, and writes
+/// the same state file, so one-shot beside a daemon is the two-dispatchers
+/// case under another name (decision 0053). The session re-enters the
+/// binary, which is the only moment a live dispatcher exists to contend with.
+#[test]
+fn a_one_shot_pass_refuses_to_run_beside_a_live_dispatcher() {
+    let f = Fixture::healthy();
+    let bin = Fixture::bin_path();
+    let harness = f.fake_harness_leaving(
+        "reentrant",
+        &format!(
+            "\x20 \"{}\" dispatch run --once > \"$dir/../second-pass\" 2>&1\n",
+            bin.display()
+        ),
+    );
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[harness]\n\
+             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
+             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+
+    let refusal = std::fs::read_to_string(f.root().join(".trellis/runtime/second-pass"))
+        .expect("the session ran a second pass");
+    assert!(
+        refusal.contains("already running"),
+        "a one-shot pass under a live dispatcher is refused: {refusal:?}"
+    );
+    assert_eq!(
+        dispatched(&f).len(),
+        1,
+        "and it dispatched nothing of its own"
+    );
+}
+
+/// A dispatcher killed between the claim and the session's end leaves a plan
+/// `active` that no retire will ever come to release — a wider window since
+/// the claim moved ahead of the spawn (decision 0053). Startup already
+/// reconciles the acting-role marker against what is actually in flight;
+/// every line it drops is exactly such a plan, and it is handed back there.
+#[test]
+fn a_plan_whose_dispatcher_died_is_handed_back_at_startup() {
+    let f = claiming_fixture();
+    f.write(
+        "plans/orphaned.md",
+        &format!("{FM}status: active\ntype: initiative\n---\n# Orphaned\n"),
+    );
+    // What the dead dispatcher left behind: its marker line for a session
+    // that no longer exists, and the state saying that session was an `act`.
+    f.write(
+        ".trellis/acting-role",
+        "org/founder 2026-08-03T00:00:00Z plan:plans/orphaned.md\n",
+    );
+    f.write(
+        ".trellis/runtime/dispatch-state.json",
+        "{\"version\":2,\"runs\":{\"plan:plans/orphaned.md\":{\"last_errand\":\"act\"}}}\n",
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert!(
+        out.contains("plans/orphaned.md: its session ended with the plan still active"),
+        "{out}"
+    );
+    assert_eq!(
+        dispatched(&f),
+        vec!["plans/orphaned.md"],
+        "and the same pass picks it back up"
     );
 }

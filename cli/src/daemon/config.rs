@@ -98,9 +98,9 @@ pub struct Scheduler {
     /// Rituals only: what a cadence missed while nothing was running does.
     pub catchup: Catchup,
     /// Dispatch only: seconds a plan is skipped after a session ended
-    /// without claiming it. The daily cadence used to be this backstop by
-    /// accident; a tight loop needs it on purpose, or a crash-looping act
-    /// respawns every tick.
+    /// without leaving a verdict, and was relinquished to `ready`. The daily
+    /// cadence used to be this backstop by accident; a tight loop needs it on
+    /// purpose, or a crash-looping act respawns every tick.
     pub retry_cooldown_secs: u64,
 }
 
@@ -293,10 +293,12 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              Act as {{owner}}: advance {{plan}} toward its objective — make the next \
              increment of progress within your authority. The runtime has \
              pre-verified the mechanical readiness items and this plan's holds, the \
-             acting-role marker is already stamped (leave it alone), and the change \
+             acting-role marker is already stamped (leave it alone), the plan is \
+             already claimed for you — it went ready → active as this session started, \
+             so never claim it again — and the change \
              mechanics are computed: {{automation}}; core never lands, it is proposed. \
-             Evaluate only the judgment items. Claim with `trellis plan claim \
-             {{plan}}`; on an uncleared blocker `trellis plan block {{plan}} --by \
+             Evaluate only the judgment items. \
+             On an uncleared blocker `trellis plan block {{plan}} --by \
              {{owner}} --asks …` (escalations go to {{escalate_to}}); write escalation \
              records with `trellis escalate add`; leave a trail. End with a verdict: \
              retire it, block it, or — if you leave a proposal for its owner to rule \

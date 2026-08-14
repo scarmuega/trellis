@@ -120,26 +120,40 @@ pub fn remove(root: &Path, key: &str) -> std::io::Result<()> {
 /// keyspace* (`plan:` for dispatch, `ritual:` for rituals — the other
 /// process's live lines are not this one's to judge) whose key is still in
 /// flight, drop the stale ones, and leave everything else alone.
-pub fn reconcile(root: &Path, prefix: &str, live_keys: &[String]) -> std::io::Result<()> {
+///
+/// Returns the keys dropped: a session this runtime stamped and cannot
+/// account for now. That set is what the caller owes a verdict — since
+/// decision 0053 the plan was claimed before the session started, so a
+/// dispatcher killed between the two would otherwise leave it `active` with
+/// nobody on it, and no retire is ever coming to notice.
+pub fn reconcile(root: &Path, prefix: &str, live_keys: &[String]) -> std::io::Result<Vec<String>> {
     let _lock = Lock::take(root);
     let p = path(root);
     let Ok(content) = std::fs::read_to_string(&p) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
+    let mut dropped = Vec::new();
     let kept: String = content
         .lines()
         .filter(|l| match line_key(l) {
-            Some(key) if key.starts_with(prefix) => live_keys.iter().any(|k| k == key),
+            Some(key) if key.starts_with(prefix) => {
+                let live = live_keys.iter().any(|k| k == key);
+                if !live {
+                    dropped.push(key.to_string());
+                }
+                live
+            }
             _ => true,
         })
         .filter(|l| !l.trim().is_empty())
         .map(|l| format!("{l}\n"))
         .collect();
     if kept.is_empty() {
-        std::fs::remove_file(&p)
+        std::fs::remove_file(&p)?;
     } else {
-        std::fs::write(&p, kept)
+        std::fs::write(&p, kept)?;
     }
+    Ok(dropped)
 }
 
 #[cfg(test)]
@@ -183,7 +197,12 @@ mod tests {
         add(dir.path(), "org/coder", "t", "plan:plans/dead.md").unwrap();
         add(dir.path(), "org/coder", "t", "plan:plans/live.md").unwrap();
         add(dir.path(), "org/steward", "t", "ritual:conventions lint").unwrap();
-        reconcile(dir.path(), "plan:", &["plan:plans/live.md".into()]).unwrap();
+        let dropped = reconcile(dir.path(), "plan:", &["plan:plans/live.md".into()]).unwrap();
+        assert_eq!(
+            dropped,
+            vec!["plan:plans/dead.md"],
+            "the dropped keys are what the caller owes a verdict"
+        );
         let text = std::fs::read_to_string(path(dir.path())).unwrap();
         assert!(!text.contains("dead"), "{text:?}");
         assert!(text.contains("plan:plans/live.md"));

@@ -61,18 +61,24 @@ from, and an `awaits:` hold releasing mid-day is precisely the event dispatch
 exists to react to. For each dispatchable plan it invokes
 `act(plan.owner, "advance plans/{slug}.md")`. The holder branch of `act` (step 2
 above) routes it: an agent-package owner advances the plan autonomously; a
-human-held owner receives it as a handoff, never impersonated. The taker flips
-the plan `ready → active` as it claims the work, so a plan leaves the queue the
-moment work starts — dispatch is **idempotent** across ticks without a separate
-lock, and a session that dies before claiming simply gets retried next tick. A
+human-held owner receives it as a handoff, never impersonated. The runtime
+flips the plan `ready → active` for the session it is about to start —
+**before** the spawn, not on the session's first turn (v20; decision 0053) —
+so a plan leaves the queue the moment work is *sent*, and dispatch is
+**idempotent** across ticks, across processes, and across `--once` without a
+separate lock. Claiming at the taker's own pace left minutes between spawn and
+claim in which the plan still read `ready`, and a second scan in that window
+dispatched it again. A spawn that fails puts the claim back; a session that
+dies after it is relinquished at retire (below) and retried on a later tick. A
 plan may also declare `complexity:` (schema in `spec/model.md`); the scan reads it
 to size the taker's session — how much reasoning, which model, how much budget —
 per the binding's mapping. Reading a declared field keeps the scan deterministic;
 absent means the binding's default.
 
 A taker owes its plan a verdict, and the runtime supplies the one it left out.
-A session dispatched to advance a plan claims it `ready → active`; ending
-without retiring it, blocking it, or declaring a `handoff:` leaves the plan
+A session dispatched to advance a plan starts with it already claimed
+`ready → active`; ending without retiring it, blocking it, or declaring a
+`handoff:` leaves the plan
 claimed with nobody holding it — a state no scan reads and no tick retries, so
 the plan strands until a human notices. When such a session ends the runtime
 flips it back to **`ready`**, which is what the state already is: released, and
@@ -193,10 +199,22 @@ dispatcher owns the `.trellis/acting-role` marker for the sessions it spawns
 (decision 0045) and hosts the sessions' MCP back-channel on its own loopback
 socket — the channel lives with the process that owns the session lifecycle.
 A concurrency cap bounds how many sessions run at once; a **retry cooldown**
-bounds how soon a plan whose session ended without claiming may be retried —
+bounds how soon a plan whose session ended without a verdict may be retried —
 the daily cadence used to be that backstop by accident, the loop needs it on
 purpose. Reports are transitions, not standing facts: a hold is announced
 when it appears and when it clears, never once per tick.
+
+**One dispatcher per root** (decision 0053). `dispatch run` claims
+`.trellis/runtime/dispatch.pid` with an exclusive `flock` held for the
+process's lifetime, and `--once` takes the same lock — a one-shot pass scans
+the same plans, spawns into the same slots, and writes the same state file, so
+one beside a daemon is two dispatchers on one root. A second one refuses to
+start and says which pid holds it. The kernel releases the lock however the
+holder dies, so there is no stale lockfile to remove by hand; the recorded pid
+is informational, and `serve` reads it to report whether a dispatcher is live.
+`trellis serve` holds its own `serve.pid` the same way and never contends with
+dispatch. The plan claim above is the guard on the *work*; this is the guard
+on the *root*, and neither substitutes for the other.
 
 **Operator errands (decisions 0048, 0051).** Every session the runtime
 spawns is `act` under some framing, and every framing is a template: the

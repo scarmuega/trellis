@@ -214,9 +214,9 @@ Agents are stateless (rationale premise 9): whatever a loop needs to stop,
 skip, or resume must be reconstructible from the tree; and execution must carry
 status (premise 5): a loop whose progress lives in a transcript has none. The
 shape is already everywhere the runtime works. Dispatch is idempotent because
-the claim is an artifact edit — the taker's `ready → active` flip is what
-removes a plan from the scan, so a dead session changes nothing and the next
-tick retries. A hold is a status read — `awaits:` targets unretired — and its
+the claim is an artifact edit — the `ready → active` flip, taken before the
+session starts, is what removes a plan from the scan, so a dead session
+changes nothing and the next tick retries. A hold is a status read — `awaits:` targets unretired — and its
 release is another. The readiness gate ends a doomed loop by flipping
 `ready → blocked`: a declared field, not a memory that this plan was tried. What
 *clears* that block is filed the same way — an escalation record in the plan

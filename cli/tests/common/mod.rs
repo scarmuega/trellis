@@ -161,6 +161,11 @@ impl Fixture {
     /// sh run after the claim with `"$1"` naming the plan file. The bare
     /// `fake_harness` is this with no verdict at all — a session that claims
     /// the work and walks away, which is the case the runtime has to catch.
+    ///
+    /// The claim is a no-op since decision 0053 — the runtime takes it before
+    /// the session exists — and is kept because it must stay one: a harness
+    /// that still claims is exactly what a live session running the old
+    /// contract would do.
     pub fn fake_harness_leaving(&self, name: &str, verdict: &str) -> String {
         let rel = format!(".trellis/bin/{name}");
         let path = self.root().join(&rel);
@@ -182,6 +187,10 @@ impl Fixture {
                  \x20 cp .trellis/acting-role \"$dir/../marker-seen-$$\"\n\
                  fi\n\
                  if [ -n \"$1\" ] && [ -f \"$1\" ]; then\n\
+                 # Snapshot the plan as the session found it, before this\n\
+                 # harness touches it — the only moment the state the runtime\n\
+                 # handed over can be read (decision 0053).\n\
+                 \x20 cp \"$1\" \"$dir/../plan-seen-$$\"\n\
                  \x20 sed 's/^status: ready$/status: active/' \"$1\" > \"$1.claimed\" \\\n\
                  \x20   && mv \"$1.claimed\" \"$1\"\n\
                  \x20 {verdict}\n\
@@ -280,6 +289,26 @@ exit 9
             .iter()
             .filter_map(|p| std::fs::read_to_string(p).ok())
             .map(|text| text.lines().map(str::to_string).collect())
+            .collect()
+    }
+
+    /// Each plan as its session found it — the snapshot the fake harness
+    /// takes before it touches anything, which is where what the runtime
+    /// handed the session can be read (decision 0053).
+    pub fn plans_as_sessions_found_them(&self) -> Vec<String> {
+        let dir = self.root().join(".trellis/runtime");
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("plan-seen-"))
+            .map(|e| e.path())
+            .collect();
+        files.sort();
+        files
+            .iter()
+            .filter_map(|p| std::fs::read_to_string(p).ok())
             .collect()
     }
 

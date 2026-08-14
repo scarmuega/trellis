@@ -14,6 +14,32 @@ here and a matching `vx.y.z` git tag.
 
 ### Fixed
 
+- **One dispatcher per root, one claim per plan (decision 0053):** dogfooding
+  found two `trellis dispatch run` daemons live on the same root for seven
+  hours; both dispatched the same plan, and the two sessions spent 28 minutes
+  editing the same files in the same uncommitted checkout. Two independent
+  faults, both now closed. The `dispatch.pid` lock was advisory — read the
+  pid, ask `kill -0`, write your own — which is not atomic, whose `Drop`
+  removed the file unconditionally (so any exiting dispatcher deleted a live
+  one's lock), which `--once` skipped entirely, and which is blind by
+  construction to a daemon started from a binary that predates it. It is now
+  an exclusive `flock` held for the process's lifetime, rechecked against the
+  path, released by the kernel however the holder dies — no stale lockfile to
+  remove by hand — with `Drop` removing only its own file and `--once` taking
+  the same lock. `serve` reads the recorded pid for liveness rather than
+  treating the file's existence as proof. And the dispatch guard moved: the
+  plan is flipped `ready → active` **before** its session spawns rather than
+  on the session's first turn, closing the minutes-long window in which a
+  plan already sent to a session still read `ready` to every other scan. A
+  failed spawn puts the claim back. Only `act` sessions, only from `ready` —
+  the same pair `relinquish` tests on the other end. Two dispatchers can no
+  longer both write `dispatch-state.json`, which also closes the
+  last-writer-wins clobber that silently dropped a `seen_escalations` entry.
+  Updated: `spec/runtime.md`, the default `act` prompt (the session is told
+  the plan is already claimed, not to claim it). Not addressed, and named in
+  the decision: `trellis rituals` still takes no lock, and worktree isolation
+  for dispatched sessions remains its own open question.
+
 - **A plan can no longer strand in `active` (spec v19 → v20, additive;
   decision 0052):** dogfooding found a plan sitting `active` for a day with no
   session running — dispatch enumerates `ready` only, so nothing retried it,

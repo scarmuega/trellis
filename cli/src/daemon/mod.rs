@@ -42,6 +42,7 @@ use crate::dates::{self, Date};
 use crate::dispatch::{self, SessionMap};
 use crate::gitio::Git;
 use crate::graph;
+use crate::model::PlanStatus;
 use crate::registries;
 use crate::root::Root;
 use crate::tree::Tree;
@@ -323,7 +324,7 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         errands_available: errands_available(&cfg),
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
-    let _pidfile = Pidfile::claim(&root, "serve.pid", "trellis serve")?;
+    let _pidfile = Pidfile::claim(&root, SERVE_PIDFILE, "trellis serve")?;
     let port = server::start(Arc::clone(&shared), &cfg.server)?;
     shared.status.lock().unwrap().port = Some(port);
     println!("listening on {}:{port}", cfg.server.bind);
@@ -344,8 +345,10 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
 
 /// `trellis dispatch run` — the pull loop (decision 0046): poll the tree
 /// every tick, spawn an act for everything dispatchable, no calendar gate.
-/// Idempotency is the taker's claim; the only throttle a tight loop needs is
-/// the retry cooldown, or a session that dies unclaiming respawns per tick.
+/// Idempotency is the claim the runtime takes for each session as it spawns
+/// (decision 0053); the only throttle a tight loop needs on top is the retry
+/// cooldown, or a plan whose session dies without a verdict — relinquished
+/// back to `ready` — respawns per tick.
 pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
     let root = open_root(opts.root.as_deref())?;
     let mut cfg = RuntimeConfig::load(&root, opts.config.as_deref())?;
@@ -387,11 +390,12 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         errands_available: errands_available(&cfg),
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
-    let _pidfile = if opts.once {
-        None
-    } else {
-        Some(Pidfile::claim(&root, "dispatch.pid", "trellis dispatch")?)
-    };
+    // `--once` takes the same lock as the loop (decision 0053). It skipped
+    // it on the reading that a single pass is harmless, but a pass is a pass:
+    // it scans the same plans, spawns into the same slots, and writes the
+    // same state file. One-shot beside a daemon is two dispatchers on one
+    // root, which is the thing the lock exists to refuse.
+    let _pidfile = Pidfile::claim(&root, DISPATCH_PIDFILE, "trellis dispatch")?;
     let channels = open_channels(&cfg)?;
     let mut rt = Runtime {
         root: root.clone(),
@@ -429,11 +433,20 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
 
     // A crash removed no marker lines and adopted sessions should keep
     // theirs: reconcile `.trellis/acting-role` against what is actually in
-    // flight before the first pass can spawn anything.
+    // flight before the first pass can spawn anything. Every line dropped is
+    // a session this runtime stamped and cannot account for, and since the
+    // claim precedes the spawn (decision 0053) its plan is sitting `active`
+    // with nobody on it — the verdict `relinquish` owes at retire, owed here
+    // because the retire never came.
     if !rt.dry_run {
         let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
-        if let Err(e) = marker::reconcile(&root, "plan:", &live) {
-            note(&format!("acting-role marker reconcile failed: {e}"));
+        match marker::reconcile(&root, "plan:", &live) {
+            Ok(dropped) => {
+                for key in &dropped {
+                    relinquish_key(&rt, &state, key);
+                }
+            }
+            Err(e) => note(&format!("acting-role marker reconcile failed: {e}")),
         }
     }
 
@@ -814,8 +827,8 @@ fn dispatch_pass(
     for item in &report.dispatch {
         let key = state::key_plan(&item.plan);
         // The cooldown is the tight loop's backstop: a session that ended
-        // without claiming leaves its plan `ready`, and without this it
-        // would respawn every tick.
+        // without a verdict has its plan relinquished to `ready`, and
+        // without this it would respawn every tick.
         if !backend.is_busy(&key) {
             if let Some(at) = state.last_attempt_secs(&key) {
                 let elapsed = state::now_secs().saturating_sub(at);
@@ -1107,6 +1120,13 @@ fn fire(
         close();
         return Outcome::Started;
     }
+    // Claimed before the session exists, not on its first turn (decision
+    // 0053). Until now the flip was the taker's, which left minutes between
+    // spawn and claim in which the plan still read `ready` and any scan —
+    // this daemon's next pass, another process's, a `--once` — could dispatch
+    // it again. Two dispatchers did exactly that (observed live, 2026-08-14).
+    let claimed = claim_to_dispatch(rt, key, errand);
+
     match backend.spawn(key, label, &launch, token.clone()) {
         Ok(log) => {
             note(&format!("started {label} → logs/{log}"));
@@ -1122,8 +1142,56 @@ fn fire(
         }
         Err(e) => {
             note(&format!("{label}: {e:#}"));
+            // Nothing started, so nothing holds the plan. A claim left
+            // standing here is the strand `relinquish` exists to prevent,
+            // and no retire will ever come to undo it: a failed spawn never
+            // enters the backend.
+            if let Some(path) = &claimed {
+                if let Err(e) =
+                    crate::plan_ops::flip(path, &[PlanStatus::Active], PlanStatus::Ready)
+                {
+                    note(&format!("{label}: could not release the claim ({e:#})"));
+                }
+            }
             close();
             Outcome::Failed
+        }
+    }
+}
+
+/// Take the plan for the session about to run it, returning the path claimed
+/// so a failed spawn can put it back.
+///
+/// This is the dispatch guard, and the plan is what carries it: `ready` is
+/// the queue and `active` means somebody is on it (decision 0052), so the
+/// flip is the one in-flight fact every reader already consults — the next
+/// scan, another process's scan, `--once`, the board. A guard in the
+/// daemon's memory would have to be shared with every other daemon to mean
+/// anything; this one is on disk because that is where the queue is.
+///
+/// Only `act`, and only from `ready` — the same pair `relinquish` tests on
+/// the other end, because they are the two halves of one rule. An operator
+/// errand aimed at a plan in any other state is an attended act and takes it
+/// as it finds it; a `refine` never claims at all.
+fn claim_to_dispatch(rt: &Runtime, key: &str, errand: &str) -> Option<PathBuf> {
+    if rt.dry_run || errand != "act" {
+        return None;
+    }
+    let rel = key.strip_prefix("plan:")?;
+    let path = rt.root.join(rel);
+    if crate::plan_ops::current_status(&path).ok()? != PlanStatus::Ready {
+        return None;
+    }
+    match crate::plan_ops::flip(&path, &[PlanStatus::Ready], PlanStatus::Active) {
+        Ok(_) => Some(path),
+        // Said, not fatal: the session is still the one that does the work,
+        // and refusing to spawn over an unwritable plan would strand it.
+        // The cooldown bounds the re-dispatch this leaves possible.
+        Err(e) => {
+            note(&format!(
+                "{rel}: could not claim it for the session ({e:#})"
+            ));
+            None
         }
     }
 }
@@ -1186,13 +1254,22 @@ fn retire(rt: &Runtime, state: &State, done: &spawn::Finished) {
 /// never claimed anything, and demoting a plan a human is driving would be
 /// the runtime overruling its operator.
 fn relinquish(rt: &Runtime, state: &State, done: &spawn::Finished) {
+    relinquish_key(rt, state, &done.key)
+}
+
+/// `relinquish` by key, so startup can hand back the plans of sessions this
+/// runtime stamped and can no longer account for (decision 0053). The key
+/// having carried a daemon marker line is what makes it ours to judge: an
+/// interactive claim writes the keyless two-line form and is never in this
+/// set.
+fn relinquish_key(rt: &Runtime, state: &State, key: &str) {
     if rt.dry_run {
         return;
     }
-    let Some(rel) = done.key.strip_prefix("plan:") else {
+    let Some(rel) = key.strip_prefix("plan:") else {
         return;
     };
-    if state.last_errand(&done.key) != Some("act") {
+    if state.last_errand(key) != Some("act") {
         return;
     }
     let path = rt.root.join(rel);
@@ -1258,9 +1335,92 @@ fn open_root(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
 
 /// Two daemons on one root would double-spawn every session. The HTTP port
 /// already collides in the common case; this covers `--no-http`.
-struct Pidfile(PathBuf);
+///
+/// The claim is a `flock` held for the process's lifetime, not a
+/// read-the-pid-then-write-it (decision 0053). Two dispatchers ran on one
+/// root for seven hours (observed live, 2026-08-14) and the check-then-write
+/// form is why: it is not atomic, so two daemons starting together both pass
+/// it, and asking `kill -0` whether a *recorded* pid is alive says nothing
+/// about a daemon that never recorded one. The kernel releases a `flock` when
+/// its holder dies, however it dies, so there is no staleness to adjudicate
+/// and no file for an operator to remove by hand. The pid still goes in the
+/// file — the board's liveness overlay and this error message read it — but
+/// it is what the lock says about itself, never the lock.
+#[derive(Debug)]
+struct Pidfile {
+    path: PathBuf,
+    /// Dropped last, releasing the lock. Held open for exactly that.
+    #[cfg(unix)]
+    _handle: std::fs::File,
+}
 
 impl Pidfile {
+    #[cfg(unix)]
+    fn claim(root: &Path, file: &str, what: &str) -> anyhow::Result<Pidfile> {
+        use std::io::{Seek, Write};
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::io::AsRawFd;
+
+        let dir = RuntimeConfig::runtime_dir(root);
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(file);
+
+        // Twice, because the holder unlinks on the way out: winning the lock
+        // on an inode that is no longer the one at `path` means we raced a
+        // `Drop`, and the file worth locking is the one that replaced it.
+        // Without the recheck that race hands the lock to two processes.
+        for _ in 0..2 {
+            let handle = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                // Never truncate on open: a contender arriving mid-claim
+                // should read the incumbent's pid, not an empty file.
+                .truncate(false)
+                .open(&path)?;
+            // SAFETY: `flock` on a descriptor this scope owns. `LOCK_NB`
+            // makes it a test, never a wait — a daemon that cannot have the
+            // root says so and exits rather than queueing behind one.
+            let taken = unsafe { libc::flock(handle.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if taken != 0 {
+                let pid = std::fs::read_to_string(&path)
+                    .map(|t| t.trim().to_string())
+                    .ok()
+                    .filter(|p| !p.is_empty())
+                    .unwrap_or_else(|| "unknown".into());
+                anyhow::bail!(
+                    "another {what} is already running on this root (pid {pid}); stop it first"
+                );
+            }
+            let ours = match (handle.metadata(), std::fs::metadata(&path)) {
+                (Ok(held), Ok(named)) => held.dev() == named.dev() && held.ino() == named.ino(),
+                // The path is gone: the holder we raced took it with them.
+                _ => false,
+            };
+            if !ours {
+                continue;
+            }
+            let mut handle = handle;
+            handle.set_len(0)?;
+            handle.rewind()?;
+            handle.write_all(format!("{}\n", std::process::id()).as_bytes())?;
+            handle.flush()?;
+            return Ok(Pidfile {
+                path,
+                _handle: handle,
+            });
+        }
+        anyhow::bail!(
+            "could not claim {} for {what} — another one is starting or stopping on this root",
+            path.display()
+        )
+    }
+
+    /// Without `flock`, the advisory form is all there is: read the recorded
+    /// pid, believe it if the OS says it is alive. The ownership check in
+    /// `Drop` still applies, which is the half of the fix that does not need
+    /// a kernel lock.
+    #[cfg(not(unix))]
     fn claim(root: &Path, file: &str, what: &str) -> anyhow::Result<Pidfile> {
         let dir = RuntimeConfig::runtime_dir(root);
         std::fs::create_dir_all(&dir)?;
@@ -1276,14 +1436,43 @@ impl Pidfile {
             }
         }
         std::fs::write(&path, format!("{}\n", std::process::id()))?;
-        Ok(Pidfile(path))
+        Ok(Pidfile { path })
+    }
+
+    /// Whether the file at the path still records this process. Under
+    /// `flock` it cannot say otherwise while the lock is held; the check
+    /// earns its keep on the platform without one, and costs a read here.
+    fn is_ours(&self) -> bool {
+        std::fs::read_to_string(&self.path)
+            .map(|t| t.trim() == std::process::id().to_string())
+            .unwrap_or(false)
     }
 }
 
 impl Drop for Pidfile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        // Only ever our own file. This removed whatever was at the path
+        // unconditionally, which made any exiting dispatcher the one that
+        // deleted a live daemon's lock (decision 0053).
+        if self.is_ours() {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
+}
+
+/// Which process holds which root. Written under the runtime directory
+/// beside the addrfiles.
+pub const SERVE_PIDFILE: &str = "serve.pid";
+pub const DISPATCH_PIDFILE: &str = "dispatch.pid";
+
+/// Whether a dispatcher is live on this root, for the read-only server's
+/// overlay (decision 0046). Existence is not liveness: a clean exit removes
+/// the file but a crash leaves it, and what a dispatcher actually holds is
+/// the `flock`, not the path — so the recorded pid has to be asked.
+pub fn dispatch_running(root: &Path) -> bool {
+    std::fs::read_to_string(RuntimeConfig::runtime_dir(root).join(DISPATCH_PIDFILE))
+        .map(|t| alive(t.trim()))
+        .unwrap_or(false)
 }
 
 /// Where each process is listening, for the commands that talk to them.
@@ -1384,4 +1573,82 @@ pub fn snapshot(root: &Path) -> anyhow::Result<(Tree, Git, graph::Derived, Date)
     let tree = Tree::load(root)?;
     let derived = graph::derive(&tree);
     Ok((tree, git, derived, dates::today()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pidfile_path(root: &Path) -> PathBuf {
+        RuntimeConfig::runtime_dir(root).join(DISPATCH_PIDFILE)
+    }
+
+    /// The claim two dispatchers shared a root through (decision 0053). The
+    /// second must be refused whatever the first recorded, and — since
+    /// `flock` binds to the open file description, not the process — one
+    /// process asking twice is the same question the kernel answers.
+    #[test]
+    #[cfg(unix)]
+    fn a_second_claim_on_one_root_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let held = Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch").unwrap();
+        let refused = Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch").unwrap_err();
+        assert!(refused.to_string().contains("already running"), "{refused}");
+        assert!(
+            held.is_ours(),
+            "the refused claim left the incumbent's file alone"
+        );
+        assert!(dispatch_running(dir.path()), "and the root reads as held");
+
+        drop(held);
+        assert!(!pidfile_path(dir.path()).exists(), "a clean exit releases");
+        assert!(!dispatch_running(dir.path()));
+
+        Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch")
+            .expect("the root is free again once the holder is gone");
+    }
+
+    /// `Drop` removed the file unconditionally, so any exiting dispatcher
+    /// deleted whatever lock was recorded — including a live daemon's. The
+    /// pid in the file is the test, and a file recording somebody else
+    /// survives.
+    #[test]
+    fn an_exiting_holder_removes_only_its_own_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let held = Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch").unwrap();
+        std::fs::write(pidfile_path(dir.path()), "999999\n").unwrap();
+        assert!(!held.is_ours());
+
+        drop(held);
+        assert!(
+            pidfile_path(dir.path()).exists(),
+            "somebody else's lock is not ours to remove"
+        );
+        assert_eq!(
+            std::fs::read_to_string(pidfile_path(dir.path())).unwrap(),
+            "999999\n"
+        );
+    }
+
+    /// A stale file is not a held root: `serve` reads liveness off the
+    /// recorded pid, because a crash leaves the file behind and only a clean
+    /// exit removes it.
+    #[test]
+    fn a_pidfile_left_by_a_dead_process_is_not_a_live_dispatcher() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(RuntimeConfig::runtime_dir(dir.path())).unwrap();
+        std::fs::write(pidfile_path(dir.path()), "999999\n").unwrap();
+        assert!(!dispatch_running(dir.path()));
+        Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch")
+            .expect("and it is no obstacle to claiming the root");
+    }
+
+    /// Serve and dispatch hold different files, so one never refuses the
+    /// other — the lock is per process kind, not per root.
+    #[test]
+    fn serve_and_dispatch_do_not_contend() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _dispatch = Pidfile::claim(dir.path(), DISPATCH_PIDFILE, "trellis dispatch").unwrap();
+        let _serve = Pidfile::claim(dir.path(), SERVE_PIDFILE, "trellis serve").unwrap();
+    }
 }
