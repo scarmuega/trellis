@@ -306,6 +306,8 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              active with no handoff is returned to ready when your session ends, and \
              dispatched again.\n\
              \n\
+             {{skills}}\n\
+             \n\
              {PROCEDURE_BRIDGE}\n\
              \n\
              {{procedure}}"
@@ -323,6 +325,8 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              alone); escalations go to {{escalate_to}}. Deliver findings through the \
              instance's escalation channel; an executor that owns no artifact reports \
              each finding verbatim, addressed to the owner who transcribes it.\n\
+             \n\
+             {{skills}}\n\
              \n\
              {PROCEDURE_BRIDGE}\n\
              \n\
@@ -547,6 +551,16 @@ mod tests {
         // The names the instance did not touch keep their defaults.
         assert!(cfg.prompts["act"].contains("{procedure}"));
         assert!(cfg.prompts["ritual"].contains("{procedure}"));
+    }
+
+    #[test]
+    fn refine_never_names_the_skill_index() {
+        // Refinement reshapes the plan, never executes it — handing it the
+        // execution procedures would invite exactly that (decision 0055).
+        let prompts = default_prompts();
+        assert!(!prompts["refine"].contains("{skills}"));
+        assert!(prompts["act"].contains("{skills}"));
+        assert!(prompts["ritual"].contains("{skills}"));
     }
 
     #[test]

@@ -122,6 +122,31 @@ here and a matching `vx.y.z` git tag.
 
 ### Added
 
+- **Skills ride the spawn prompt as an index (decision 0055):** a new
+  `{skills}` placeholder closes the residue 0050 left ("the skills still
+  assume the plugin where humans work"). At spawn the runtime resolves the
+  session's skills deterministically — a plan session gets its owner's
+  `org/{role}/holder/skills/*` then each `contexts:` home's
+  `solution/{bc}/skills/*`, a ritual its executor's holder skills — and
+  renders an index: one line per skill, name and path always, description
+  when derivable (frontmatter `description:` first line, else first H1, else
+  first prose line; primary doc `README.md` → `SKILL.md` → sole `.md`).
+  Bodies are never inlined — the session reads a listed file through its own
+  tools, so any harness that takes a prompt gets the whole mechanism, no
+  plugin dialect. The value is self-contained and empty-safe (heading and
+  standing instruction inside; empty string when no skill exists), so the
+  default `act` and `ritual` templates name it unconditionally; `refine`
+  deliberately does not — refinement is never handed execution procedures —
+  though the variable is set for every errand, so a custom template may.
+  Compatibility: an old binary refuses a new template naming `{skills}` at
+  startup (`tmpl::check`), the designed direction of failure; a new binary
+  with old templates renders exactly as before. In passing,
+  `template/runtime.toml`'s commented prompt copies are re-synced to the
+  embedded defaults they had drifted from (the stale claim instruction and
+  the missing verdict paragraph from 0052/0053). No spec bump — no artifact
+  schema changes. Updated: `spec/runtime.md`, `spec/patterns.md`,
+  `template/runtime.toml`, `commands/act.md`.
+
 - **`handoff:` on plans (spec v19 → v20, additive; decision 0052):** an
   optional declared field naming what an active plan is parked on — a PR
   awaiting its owner's verdict, or any ref a human must move. While set, the

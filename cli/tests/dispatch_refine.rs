@@ -139,6 +139,29 @@ fn a_refine_request_spawns_on_the_wake_and_carries_the_instruction() {
 }
 
 #[test]
+fn the_default_refine_prompt_never_carries_the_skill_index() {
+    // Refinement reshapes the plan, never executes it — the default template
+    // deliberately omits `{skills}` (decision 0055), even when the owner's
+    // holder package has skills to offer.
+    let f = refining_fixture();
+    f.write(
+        "org/founder/holder/skills/door-outreach/README.md",
+        "# Door outreach\n",
+    );
+    let daemon = Daemon::dispatch(&f);
+
+    let (code, outcome) = refine(daemon.port, "reshape-me", "tighten the scope");
+    assert_eq!(code, 200, "{outcome}");
+
+    let argv = until("the refine session to start", || {
+        f.invocations().into_iter().next()
+    });
+    let prompt = argv.join("\n");
+    assert!(prompt.contains("The refinement contract"), "{prompt}");
+    assert!(!prompt.contains("## Skills"), "{prompt}");
+}
+
+#[test]
 fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
     let f = refining_fixture();
     f.write(

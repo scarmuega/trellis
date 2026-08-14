@@ -12,9 +12,11 @@ in the prompt that carries this procedure).
 Inputs — a **role** (matching `org/{role}/`) and an **input** (an instruction,
 or empty). Invoked as `/trellis:act`, `$ARGUMENTS` supplies them: the first
 token is the role, everything after it the input. Invoked under dispatch, the
-preamble above this procedure names them. No input means: report the role's
-standing state (mandate summary, pending escalations, rituals it executes) and
-await instruction.
+preamble above this procedure names them — and may carry a skill index
+(decision 0055): before doing work a listed skill covers, read its file in
+full; the skill is authoritative over your general approach where they
+overlap. No input means: report the role's standing state (mandate summary,
+pending escalations, rituals it executes) and await instruction.
 
 ## Procedure
 

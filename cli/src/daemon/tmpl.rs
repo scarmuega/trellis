@@ -45,6 +45,12 @@ pub const PLACEHOLDERS: &[&str] = &[
     // A ritual's executor role, resolved from its rituals.md row — under
     // dispatch the preamble names it so the session need not re-derive it.
     "executor",
+    // The session's rendered skill index (decision 0055): a plan session
+    // gets the owner's holder skills plus each `contexts:` home's, a ritual
+    // its executor's. Self-contained — heading and standing instruction ride
+    // inside the value — and the empty string when no skill exists, so a
+    // template may name it unconditionally.
+    "skills",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

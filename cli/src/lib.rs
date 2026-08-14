@@ -26,6 +26,7 @@ pub mod refs;
 pub mod registries;
 pub mod root;
 pub mod scaffold;
+pub mod skills;
 pub mod tree;
 pub mod views;
 

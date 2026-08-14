@@ -82,8 +82,9 @@ context's skill), a runtime concern (binding skills live outside the root,
 spec rules 1–2), or — most often — a bounded context waiting to be named: a domain
 accumulating "general" runbooks has an operations context it hasn't admitted
 to. Reachability never argues for the root — the session plane makes skills
-invocable at the root wherever they live; placement is knowledge
-classification, not availability.
+invocable at the root wherever they live, and dispatch renders an index of
+the relevant ones into the spawn prompt (decision 0055); placement is
+knowledge classification, not availability.
 
 ### Automation shapes
 Every automation resolves to an existing kind by who triggers it and what
