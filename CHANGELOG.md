@@ -3,16 +3,44 @@
 All notable changes to the Trellis plugin are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-**Versioning.** While Trellis is single-maintainer and pre-1.0, the plugin omits an
-explicit `version` and floats on the git commit SHA — every push to `main` is a new
-version for installers (see `decisions/0012-plugin-versioning-float-on-sha.md`).
-Once there are external consumers this switches to explicit
-[Semantic Versioning](https://semver.org/): each release gets a `## [x.y.z]` section
-here and a matching `vx.y.z` git tag.
+**Versioning.** The spec and the release move in lockstep: the version is
+`0.<spec>.<patch>`, so spec v21 ships as `0.21.0` and the next spec bump is
+`0.22.0` (see `decisions/0056-spec-and-cli-bump-in-lockstep.md`). One number
+covers the plugin (`.claude-plugin/plugin.json`) and the kernel
+(`cli/Cargo.toml`); the patch component carries plugin- or kernel-only releases
+between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
+`## [x.y.z]` section here and gets a matching `vx.y.z` git tag.
+`cli/tests/lockstep.rs` fails the build on a half-done one.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-15
+
 ### Changed
+
+- **Spec and CLI bump in lockstep (decision 0056):** the release version is now a
+  function of the spec version — `0.<spec>.<patch>` — instead of a number nobody
+  read. `cli/Cargo.toml` said `0.2.0` against spec v21, bumped by hand once and
+  made decorative by decision 0037 ("the binary floats on SHA"), so `trellis
+  version` printed two unrelated numbers, one of which meant nothing. The spec
+  integer was already lockstepped four ways (`build.rs` scrapes `spec/model.md`'s
+  title; `cli/tests/lockstep.rs` matches it against `template/trellis.toml`,
+  `evals/skeleton/trellis.toml`, and the README); the release version now joins
+  them. `.claude-plugin/plugin.json` gains a `version` and stops floating on the
+  commit SHA — 0012 deferred that switch until external consumers existed, and
+  the roots pinning `spec = N` are those consumers — while
+  `.claude-plugin/marketplace.json` deliberately declares none, since
+  `plugin.json` wins silently when both are set. A new lockstep assertion,
+  `release_version_tracks_the_spec_version`, checks all four halves: major is 0
+  and minor is the spec version, the plugin manifest matches the crate, the
+  marketplace entry carries no version, and `CHANGELOG.md` holds a section for
+  the current version — so a spec bump cannot land without its release. **The
+  cost 0012 named is now accepted**: installers no longer follow `main` HEAD, and
+  a forgotten bump freezes every install; CI catches a half-done bump, not a
+  forgotten one, and the patch component is the valve for reaching installers
+  without a spec bump. Updated: `cli/Cargo.toml`, `cli/Cargo.lock`,
+  `.claude-plugin/plugin.json`, `cli/tests/lockstep.rs`, `README.md`, and this
+  file.
 
 - **Machine config splits out of conventions.md (spec v20 → v21, Breaking;
   decision 0054):** the per-instance `conventions.md` — a hand-copied fork of

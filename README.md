@@ -8,8 +8,10 @@ map of market needs, committed strategies and the problem space they induce,
 solution contexts, mandates with explicit authority, plans with lifecycle,
 decisions as append-only memory, and rituals as the heartbeat.
 
-**Status: pre-1.0.** Specification v21, zero production usage-hours. Expect churn;
-conventions harden through dogfooding, and every change lands in `decisions/`.
+**Status: pre-1.0.** Release 0.21.0 — specification v21, zero production
+usage-hours. Expect churn; conventions harden through dogfooding, and every change
+lands in `decisions/`. Plugin and kernel share one version, keyed to the spec
+(`0.<spec>.<patch>`, decision 0056).
 
 ## Layout
 
@@ -109,13 +111,33 @@ at all. Concretely, when you touch:
   shape changed.
 - **the spec version** — re-pin `template/trellis.toml`,
   `evals/skeleton/trellis.toml`, and this README's status line; the binary
-  re-reads the title at build time.
+  re-reads the title at build time. A spec bump is also a release — see below.
 
 `cli/tests/lockstep.rs` enforces the mechanical part of this — item sets,
-version pins, enum vocabulary — and CI triggers on `spec/**` and `checks/**`,
-so an untranslated change fails in the commit that makes it. What the tests
-cannot check is whether a rule still *means* what the prose says: an item
-reworded under the same number passes them. Read the diff.
+version pins, release version, enum vocabulary — and CI triggers on `spec/**`
+and `checks/**`, so an untranslated change fails in the commit that makes it.
+What the tests cannot check is whether a rule still *means* what the prose says:
+an item reworded under the same number passes them. Read the diff.
+
+### Cutting a release
+
+Plugin and kernel share one version, and it is a function of the spec version:
+**`0.<spec>.<patch>`** (decision 0056). A spec bump moves the minor and is
+therefore a release commit; the patch carries plugin- or kernel-only releases in
+between. In one commit:
+
+1. Set `cli/Cargo.toml`'s `version` and `.claude-plugin/plugin.json`'s `version`
+   to the same number (`0.<spec>.<patch>`), and commit the `cli/Cargo.lock`
+   change. Never put a version in `.claude-plugin/marketplace.json` —
+   `plugin.json` wins silently when both are set.
+2. Close `## [Unreleased]` in `CHANGELOG.md` into `## [x.y.z] - YYYY-MM-DD` and
+   open a fresh empty `## [Unreleased]`.
+3. Merge, then tag: `git tag vx.y.z && git push --tags`.
+
+`cli/tests/lockstep.rs` fails a half-done bump — a version that does not match
+the spec, a plugin manifest out of step with the crate, or a missing changelog
+section. It cannot catch a *forgotten* one: since the plugin no longer floats on
+the commit SHA, a change reaches installers only when the version moves.
 
 ## Non-goals
 

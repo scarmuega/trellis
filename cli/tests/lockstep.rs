@@ -140,6 +140,74 @@ fn embedded_spec_version_matches_every_instance_pin() {
 }
 
 #[test]
+fn release_version_tracks_the_spec_version() {
+    // The release version is a function of the spec version — `0.<spec>.<patch>`
+    // (decision 0056) — so a spec bump *is* a release commit: it moves the minor,
+    // carries the plugin manifest with it, and cuts a changelog section. These
+    // assertions are what stop a bumped spec from shipping under a version that
+    // names nothing.
+    let version = env!("CARGO_PKG_VERSION");
+    let spec = trellis::spec_version();
+
+    let parts: Vec<&str> = version.split('.').collect();
+    let numeric: Option<Vec<u32>> = parts.iter().map(|p| p.parse().ok()).collect();
+    let numeric = numeric.filter(|n| n.len() == 3).unwrap_or_else(|| {
+        panic!("cli/Cargo.toml's version is not `major.minor.patch`: {version:?}")
+    });
+    assert!(
+        numeric[0] == 0 && numeric[1] == spec,
+        "the release version is {version} but the spec is v{spec} — the version is \
+         `0.<spec>.<patch>`, so this release is 0.{spec}.x; bump cli/Cargo.toml and \
+         .claude-plugin/plugin.json in the spec-bump commit (decision 0056)"
+    );
+
+    // The plugin manifest carries the same number, and the marketplace entry
+    // carries none: `plugin.json` wins silently when both are set, so the version
+    // lives in exactly one place (0012's warning, kept by 0056).
+    let manifest: serde_json::Value = serde_json::from_str(&read(".claude-plugin/plugin.json"))
+        .expect(".claude-plugin/plugin.json is not valid JSON");
+    let declared = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                ".claude-plugin/plugin.json declares no `version` — installers would float \
+                 on the commit SHA again (decision 0056)"
+            )
+        });
+    assert_eq!(
+        declared, version,
+        "the plugin declares {declared} but the crate is {version} — the two ship together"
+    );
+
+    let catalog: serde_json::Value = serde_json::from_str(&read(".claude-plugin/marketplace.json"))
+        .expect(".claude-plugin/marketplace.json is not valid JSON");
+    let entries = std::iter::once(&catalog).chain(
+        catalog
+            .get("plugins")
+            .and_then(|p| p.as_array())
+            .map(|p| p.iter())
+            .into_iter()
+            .flatten(),
+    );
+    for entry in entries {
+        assert!(
+            entry.get("version").is_none(),
+            "marketplace.json declares a `version` — plugin.json wins silently when both are \
+             set, so the marketplace entry must declare none (decision 0012, kept by 0056)"
+        );
+    }
+
+    // A bump is a release: the section exists before the tag does.
+    let section = regex::Regex::new(&format!(r"(?m)^## \[{}\]", regex::escape(version))).unwrap();
+    assert!(
+        section.is_match(&read("CHANGELOG.md")),
+        "CHANGELOG.md has no `## [{version}]` section — a version bump is a release: close \
+         [Unreleased] into it and tag v{version} (decision 0056)"
+    );
+}
+
+#[test]
 fn closed_enums_match_the_schema_prose() {
     // The spec's closed vocabularies are duplicated in model.rs. Each must
     // still appear verbatim in the schema block that defines it — which since
