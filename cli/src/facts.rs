@@ -3,6 +3,8 @@
 //! same JSON a command does. One shape per fact; a parallel encoding is the
 //! drift decision 0037 exists to prevent.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::dates::{self, Date};
@@ -180,6 +182,29 @@ pub struct PlanRow {
     /// Filed in the terminal tier. Rows carry it rather than being dropped
     /// here, so a caller can ask for the whole census when it wants one.
     pub archived: bool,
+}
+
+/// Cut a census down to the live one: drop the rows filed in the terminal
+/// tier, and drop the edges that named them with them. The tier leaves
+/// attention (spec rule 13), and an `awaits:` target that has been filed is a
+/// hold that already cleared, so the edge leaves with the row it named — the
+/// same drop `view plan-graph` performs on a retired target.
+///
+/// The prune is keyed on the archived rows, never on a target failing to
+/// resolve. A target matching no row at all is the other thing entirely — a
+/// ref naming no plan, which lint item 4 owns and a graph draws as a hole
+/// rather than silently dropping.
+pub fn live_only(rows: &mut Vec<PlanRow>) {
+    let filed: HashSet<String> = rows
+        .iter()
+        .filter(|r| r.archived)
+        .map(|r| crate::tree::live_path(&r.plan).to_string())
+        .collect();
+    rows.retain(|r| !r.archived);
+    for row in rows {
+        row.awaits
+            .retain(|t| !filed.contains(crate::tree::live_path(t.trim())));
+    }
 }
 
 /// `trellis plan list`: the whole plan census, sorted by path. Callers apply

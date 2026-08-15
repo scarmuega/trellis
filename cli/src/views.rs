@@ -75,12 +75,18 @@ pub fn board(tree: &Tree, git: &Git, today: Date) -> String {
         .and_then(|r| registries::cadence_days(&r.cadence))
         .unwrap_or(1);
 
-    let mut plans: Vec<_> = tree.by_kind(Kind::Plan).collect();
-    plans.sort_by(|a, b| a.rel.cmp(&b.rel));
+    let mut all_plans: Vec<_> = tree.by_kind(Kind::Plan).collect();
+    all_plans.sort_by(|a, b| a.rel.cmp(&b.rel));
+    // The terminal tier leaves attention (spec rule 13), and the census, the
+    // cuts, dwell, and mix are attention readings: a filed plan would sit in
+    // `retired` forever, growing the column without bound and diluting every
+    // cut with history nobody is deciding about. Flow is the exception, and
+    // reads `all_plans` below.
+    let plans: Vec<_> = all_plans.iter().copied().filter(|p| !p.archived).collect();
 
     let mut out = fm_header("board", today);
     out.push_str("# Plan board\n\n");
-    out.push_str("Census, flow, dwell, and mix over `plans/`, computed from frontmatter and\ngit history alone (Execution health pattern). Dwell and movement are the\nsignals; there is no percent-complete.\n\n");
+    out.push_str("Census, flow, dwell, and mix over `plans/`, computed from frontmatter and\ngit history alone (Execution health pattern). Dwell and movement are the\nsignals; there is no percent-complete. Plans filed in the terminal tier are\nleft out — `trellis plan list --archived` is where the whole census lives.\n\n");
 
     // Census.
     out.push_str("## Census\n\n| status | count |\n|--------|-------|\n");
@@ -142,13 +148,17 @@ pub fn board(tree: &Tree, git: &Git, today: Date) -> String {
         &mut out,
     );
 
-    // Flow.
+    // Flow, and flow alone, reads the whole tier. It is a git-history reading
+    // bounded by the window, so filed plans age out of it on their own, and
+    // `--follow` carries the timeline across the rename: a plan retired and
+    // filed inside the same window still counts its closure. Dropping it here
+    // would shed no attention, only the event the metric exists to count.
     let in_window =
         |d: Date| dates::days_between(d, today) <= window && dates::days_between(d, today) >= 0;
     let mut authored = 0usize;
     let mut released = 0usize;
     let mut closed = 0usize;
-    for p in &plans {
+    for p in &all_plans {
         if git
             .first_commit_date(&p.rel)
             .map(&in_window)

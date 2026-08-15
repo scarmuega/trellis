@@ -1,8 +1,11 @@
-//! The terminal tier (`archive/`). The load-bearing property is that moving
-//! an artifact into it changes no reading: kind is classified through the
-//! prefix, and `gitio` follows the rename, so census, flow, and cycle time
-//! are the same before and after. A test that only checked the move happened
-//! would miss exactly the failure this design exists to avoid.
+//! The terminal tier (`archive/`). Two load-bearing properties, and the line
+//! between them is what these tests hold. Moving an artifact in changes no
+//! *history* reading: kind is classified through the prefix, `gitio` follows
+//! the rename, and refs resolve across the move, so flow and cycle time are
+//! the same before and after. It does change the *attention* readings — the
+//! census, the cuts, dwell, mix — because that is what filing is for (spec
+//! rule 13). A test that only checked the move happened would miss exactly
+//! the failure this design exists to avoid.
 
 mod common;
 
@@ -63,11 +66,16 @@ fn board_readings_survive_archiving() {
     archive(&f, "plans/winter-line.md", "archive/plans/winter-line.md");
     let after = board(&f);
 
-    // The census still sees a retired plan — classification reads through
-    // the tier.
-    assert_eq!(row(&before, "retired"), row(&after, "retired"));
-    // The closure is still in the window — the rename did not truncate the
-    // status timeline. This is the reading that dies without --follow.
+    // The census is an attention reading, and the tier leaves attention
+    // (spec rule 13): filing takes the plan out of `retired` rather than
+    // parking it there for good.
+    assert_eq!(row(&before, "retired"), "| retired | 1 |");
+    assert_eq!(row(&after, "retired"), "| retired | 0 |");
+    // Flow is the exception, and this is the assertion that earns it: the
+    // closure is still in the window, because the rename did not truncate
+    // the status timeline. This is the reading that dies without --follow —
+    // and the one that would die just as surely if flow read only the live
+    // plans, since this plan was retired and filed inside the same window.
     assert_eq!(row(&before, "closed"), row(&after, "closed"));
     assert_eq!(
         line_with(&before, "closures in window:"),
@@ -141,6 +149,86 @@ fn an_awaits_edge_survives_its_target_being_archived() {
         .map(|f| f["message"].as_str().unwrap().to_string())
         .collect();
     assert!(dangling.is_empty(), "awaits edge broke: {dangling:?}");
+}
+
+/// The other half of the edge story. The ref keeps resolving (above), but the
+/// live census stops drawing it: a filed target is a hold that already
+/// cleared, so the edge leaves with the row it named rather than dangling
+/// off a plan nobody can see. `--archived` asks for the whole thing back.
+#[test]
+fn the_live_census_drops_the_edges_onto_filed_plans() {
+    let f = fixture_with_retired_plan();
+    f.write(
+        "plans/spring-line.md",
+        &plan_at("ready")
+            .replace("# Winter line", "# Spring line")
+            .replace(
+                "type: initiative",
+                "type: initiative\nawaits: [plans/winter-line.md]",
+            ),
+    );
+    f.commit_at("2026-08-01", "queue spring behind winter");
+    archive(&f, "plans/winter-line.md", "archive/plans/winter-line.md");
+
+    let awaits = |args: &[&str]| -> serde_json::Value {
+        let out = f
+            .bin()
+            .args(["plan", "list"])
+            .args(args)
+            .args(["--format", "json"])
+            .output()
+            .unwrap();
+        let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["plan"] == "plans/spring-line.md")
+            .expect("spring is live either way")["awaits"]
+            .clone()
+    };
+
+    assert_eq!(
+        awaits(&[]),
+        serde_json::json!([]),
+        "the live census draws no edge onto a filed plan"
+    );
+    assert_eq!(
+        awaits(&["--archived"]),
+        serde_json::json!(["plans/winter-line.md"]),
+        "asking for the tier asks for its edges too"
+    );
+
+    // The prune is keyed on the filed row, never on a target failing to
+    // resolve: a ref naming no plan at all is lint item 4's to report, and
+    // dropping it here would hide exactly what the graph should draw as a
+    // hole.
+    f.write(
+        "plans/summer-line.md",
+        &plan_at("ready")
+            .replace("# Winter line", "# Summer line")
+            .replace(
+                "type: initiative",
+                "type: initiative\nawaits: [plans/ghost.md]",
+            ),
+    );
+    f.commit_at("2026-08-02", "queue summer behind nothing");
+    let out = f
+        .bin()
+        .args(["plan", "list", "--format", "json"])
+        .output()
+        .unwrap();
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let summer = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["plan"] == "plans/summer-line.md")
+        .unwrap();
+    assert_eq!(
+        summer["awaits"],
+        serde_json::json!(["plans/ghost.md"]),
+        "an unresolvable target survives the cut — item 4 owns that complaint"
+    );
 }
 
 fn items_for(f: &Fixture, path: &str) -> Vec<u8> {

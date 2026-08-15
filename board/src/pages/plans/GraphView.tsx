@@ -16,9 +16,11 @@ import "@xyflow/react/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
 import { api, type PlanRow } from "../../lib/api";
 
-// Node identity is the plan's live address (spec rule 13): an archived plan
-// lives at archive/plans/… but awaits edges keep naming plans/…, so edges
-// written before the move still join up.
+// Node identity is the plan's live address (spec rule 13), which is what an
+// awaits edge names whichever side of the terminal tier its target sits on.
+// The census this reads is the live one — serve sheds the tier, and the
+// edges onto it, before we get here — so normalizing is belt and braces for
+// a census that carries `archive/…` rows anyway.
 const live = (rel: string) => rel.replace(/^archive\//, "");
 const slug = (rel: string) =>
   live(rel)

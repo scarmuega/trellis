@@ -157,6 +157,52 @@ fn the_plan_census_matches_the_command_exactly() {
     assert_eq!(d.json("/api/plans"), cli_json(&f, &["plan", "list"]));
 }
 
+/// The tier leaves attention (spec rule 13), and both read routes are
+/// attention surfaces — so they cut the census the way the command cuts it,
+/// and `?archived=1` is `--archived` spelled for a URL. Matching the command
+/// is the assertion that matters: it is what keeps an operator reading the
+/// CLI and a UI reading the API on one domain.
+#[test]
+fn the_served_census_sheds_the_terminal_tier_unless_asked() {
+    let f = fixture();
+    f.write(
+        "archive/plans/done.md",
+        &format!("{FM}status: retired\ntype: initiative\n---\n# Done\n"),
+    );
+    f.commit_at(common::BACKDATE, "file a finished plan");
+    let d = Daemon::start(&f);
+
+    let live = d.json("/api/plans");
+    let plans = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["plan"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(
+        !plans(&live).contains(&"archive/plans/done.md".to_string()),
+        "a filed plan is off the board: {:?}",
+        plans(&live)
+    );
+    assert_eq!(live, cli_json(&f, &["plan", "list"]));
+
+    let all = d.json("/api/plans?archived=1");
+    assert!(
+        plans(&all).contains(&"archive/plans/done.md".to_string()),
+        "asking for the tier gets it: {:?}",
+        plans(&all)
+    );
+    assert_eq!(all, cli_json(&f, &["plan", "list", "--archived"]));
+
+    // The board is the same cut, one projection further on.
+    let retired = d.json("/api/board")["columns"]["retired"].clone();
+    assert!(
+        retired.as_array().unwrap().is_empty(),
+        "the retired column is live plans only: {retired}"
+    );
+}
+
 #[test]
 fn one_plans_facts_match_trellis_show() {
     let f = fixture();

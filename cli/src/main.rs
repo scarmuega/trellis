@@ -1177,11 +1177,14 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
             held,
             archived,
         } => {
-            let rows: Vec<facts::PlanRow> = facts::plan_rows(&tree, &git, &derived, dates::today())
+            let mut rows = facts::plan_rows(&tree, &git, &derived, dates::today());
+            // The default census is the live one — the whole reason the tier
+            // exists. `--archived` asks for the rest.
+            if !archived {
+                facts::live_only(&mut rows);
+            }
+            let rows: Vec<facts::PlanRow> = rows
                 .into_iter()
-                // The default census is the live one — the whole reason the
-                // tier exists. `--archived` asks for the rest.
-                .filter(|r| archived || !r.archived)
                 .filter(|r| !held || r.held.is_some())
                 .filter(|r| match &status {
                     Some(want) => r.status.as_deref() == Some(want.as_str()),

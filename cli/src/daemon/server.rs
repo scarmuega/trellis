@@ -639,6 +639,31 @@ fn status_flip(mut request: Request, shared: &Shared, slug: &str) -> std::io::Re
     error(request, 405, "this process runs no dispatch loop")
 }
 
+/// The plan census the read routes project, cut the way `trellis plan list`
+/// cuts it: the live census by default, the whole thing under `?archived=1`,
+/// which is `--archived` spelled for a URL. Both routes that serve this are
+/// attention surfaces, and the terminal tier leaves attention (spec rule 13).
+///
+/// The cut itself lives in `facts::live_only` so the command and the endpoint
+/// cannot drift — an operator reading the CLI and a UI reading the API see
+/// one domain, which is the whole charter of this module.
+fn plan_census(
+    tree: &crate::tree::Tree,
+    git: &crate::gitio::Git,
+    derived: &crate::graph::Derived,
+    today: crate::dates::Date,
+    query: &str,
+) -> Vec<facts::PlanRow> {
+    let mut rows = facts::plan_rows(tree, git, derived, today);
+    if !query
+        .split('&')
+        .any(|p| p == "archived=1" || p == "archived=true")
+    {
+        facts::live_only(&mut rows);
+    }
+    rows
+}
+
 /// Everything that reads the domain. One tree load per request, shared by
 /// whichever projection the path asked for.
 fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> std::io::Result<()> {
@@ -649,12 +674,12 @@ fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> st
 
     match path {
         "/api/plans" => {
-            let rows = facts::plan_rows(&tree, &git, &derived, today);
+            let rows = plan_census(&tree, &git, &derived, today, query);
             json(request, &serde_json::to_value(rows).unwrap())
         }
 
         "/api/board" => {
-            let rows = facts::plan_rows(&tree, &git, &derived, today);
+            let rows = plan_census(&tree, &git, &derived, today, query);
             let mut columns = serde_json::Map::new();
             for status in COLUMNS {
                 let in_column: Vec<&facts::PlanRow> = rows

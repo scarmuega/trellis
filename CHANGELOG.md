@@ -30,6 +30,28 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
   stale**: any root that has written one fails `trellis view plan-graph
   --check` (lint item 2) until it is regenerated with `--write`.
 
+- **The terminal tier leaves the board, the graph, and the served census:**
+  spec rule 13 has always said archived artifacts "leave attention," and
+  dispatch, codeowners, errands, and `plan list` all honored it — but
+  `view board`, `/api/board`, and `/api/plans` did not, so a filed plan sat in
+  `retired` forever and the board UI's graph drew the whole archival history
+  of the root. All three now cut the tier by default. `?archived=1` on either
+  read route is `--archived` spelled for a URL, and the cut itself moved into
+  `facts::live_only` so the command and the endpoint cannot drift — an
+  operator reading the CLI and a UI reading the API still see one domain.
+  **Cutting the rows cuts their edges with them**: an `awaits:` target that
+  has been filed is a hold that already cleared, so the edge leaves with the
+  row it named, the same drop `view plan-graph` performs on a retired target.
+  The prune is keyed on the filed row and never on a target failing to
+  resolve, so a ref naming no plan at all still reaches lint item 4 and still
+  draws as a hole. **Flow is the one exception** and keeps reading the whole
+  tier: it is a git-history reading bounded by the freshness window, and
+  `--follow` carries the timeline across the rename, so a plan retired and
+  filed inside the same window still counts its closure — dropping it there
+  would shed no attention, only the event the metric exists to count. This
+  narrows what `archive/` promised: filing changes no *history* reading, but
+  it was never meant to leave the *attention* readings untouched.
+
 ## [0.21.0] - 2026-08-15
 
 ### Changed
