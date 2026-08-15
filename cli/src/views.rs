@@ -340,8 +340,8 @@ fn node_label(rel: &str) -> String {
 /// list --held`, `readiness`, the board's dwell flag — which never shows a
 /// chain's length or that one unretired plan is holding five others.
 ///
-/// Arrows point target → dependent: forward in time, what clears when, which
-/// is how the CLI already talks about holds ("dependents that may now clear").
+/// Arrows point dependent → target: the edge carries the declaration, so an
+/// arrow reads "waits on", and following one leads to what must finish first.
 ///
 /// Every live plan is a node, sequenced or not — the graph is the standing
 /// picture of the board, and a plan free of ordering constraints is a fact
@@ -367,11 +367,11 @@ pub fn plan_graph(tree: &Tree, today: Date) -> String {
         .map(|p| p.to_string())
         .collect();
 
-    // `(target, dependent)` — the arrow's direction, the reverse of the
-    // declaration's. Keys are already live paths (graph.rs), so an edge
-    // written before its target was archived still lands on one node. A target
-    // that resolves to nothing is drawn anyway (lint item 4 owns the
-    // complaint); one that has retired is not, and its edge goes with it.
+    // `(dependent, target)` — the arrow's direction, the declaration's own.
+    // Keys are already live paths (graph.rs), so an edge written before its
+    // target was archived still lands on one node. A target that resolves to
+    // nothing is drawn anyway (lint item 4 owns the complaint); one that has
+    // retired is not, and its edge goes with it.
     let mut edges: Vec<(String, String)> = Vec::new();
     for plan in plans.iter().filter(|p| !retired(p)) {
         for target in &derived.plan_awaits[*plan] {
@@ -380,7 +380,7 @@ pub fn plan_graph(tree: &Tree, today: Date) -> String {
                 continue;
             }
             nodes.insert(target.clone());
-            edges.push((target, plan.to_string()));
+            edges.push((plan.to_string(), target));
         }
     }
     edges.sort();
@@ -388,11 +388,11 @@ pub fn plan_graph(tree: &Tree, today: Date) -> String {
 
     let mut out = fm_header("plan-graph", today);
     out.push_str("# Plan graph\n\n");
-    out.push_str("The `awaits:` DAG over `plans/`. An arrow runs from a plan to the plans its\nretirement releases; a plan with no arrows is under no ordering constraint.\nRetired plans are left out — they hold nothing and wait on nothing. Red is a\ncycle (lint item 22) or an `awaits:` target that resolves to nothing (item 4).\n\n");
+    out.push_str("The `awaits:` DAG over `plans/`. An arrow runs from a plan to what it is\nwaiting for; a plan with no arrows is under no ordering constraint. Retired\nplans are left out — they hold nothing and wait on nothing. Red is a cycle\n(lint item 22) or an `awaits:` target that resolves to nothing (item 4).\n\n");
 
     let unsequenced = nodes
         .iter()
-        .filter(|n| !edges.iter().any(|(t, d)| t == *n || d == *n))
+        .filter(|n| !edges.iter().any(|(d, t)| d == *n || t == *n))
         .count();
 
     if nodes.is_empty() {
@@ -434,11 +434,11 @@ pub fn plan_graph(tree: &Tree, today: Date) -> String {
                 status_class(node)
             ));
         }
-        for (target, dependent) in &edges {
+        for (dependent, target) in &edges {
             out.push_str(&format!(
                 "  {} --> {}\n",
-                ids[target.as_str()],
-                ids[dependent.as_str()]
+                ids[dependent.as_str()],
+                ids[target.as_str()]
             ));
         }
         for (class, style) in NODE_CLASSES {

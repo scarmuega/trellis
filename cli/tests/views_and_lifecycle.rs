@@ -120,10 +120,10 @@ fn plan_graph_draws_every_live_plan_sequenced_or_not() {
     assert!(text.contains("- retired: 1 plan, left out"), "{text}");
 
     // Ids are positional over the sorted live node set: expand-retail-doors,
-    // pilot, rollout, seasonal-recipe-line. Arrows run target → dependent.
+    // pilot, rollout, seasonal-recipe-line. Arrows run dependent → target.
     assert!(text.contains(r#"p1["pilot<br/>active"]"#), "{text}");
     assert!(text.contains(r#"p2["rollout<br/>ready"]"#), "{text}");
-    assert!(text.contains("p1 --> p2"), "live hold:\n{text}");
+    assert!(text.contains("p2 --> p1"), "live hold:\n{text}");
     assert!(text.contains("- drawn: 4 nodes, 1 edge"), "{text}");
     assert!(text.contains("- held: 1 ready plan,"), "{text}");
     assert!(
@@ -147,8 +147,8 @@ fn plan_graph_shows_cycles_and_unresolved_targets() {
     assert!(text.contains(r#"p1["ghost<br/>missing"]"#), "{text}");
     assert!(text.contains("classDef missing"), "{text}");
     assert!(
-        text.contains("p1 --> p4"),
-        "ghost still holds rollout:\n{text}"
+        text.contains("p4 --> p1"),
+        "rollout still waits on ghost:\n{text}"
     );
     assert!(text.contains("- unresolved: 1 `awaits:` target,"), "{text}");
 

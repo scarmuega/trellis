@@ -62,8 +62,8 @@ const nodeTypes = { plan: PlanNode };
 
 const elk = new ELK();
 
-// Prerequisite → dependent, left to right: an edge B ← A means “B awaits A”,
-// drawn as A → B so the layout reads in execution order.
+// Dependent → prerequisite, left to right: an edge carries the declaration, so
+// “B awaits A” is drawn B → A and the arrowhead lands on what B is waiting for.
 async function layout(rows: PlanRow[]): Promise<{ nodes: Node[]; edges: Edge[] }> {
   const byLive = new Map(rows.map((r) => [live(r.plan), r]));
   const ids = new Set(byLive.keys());
@@ -72,12 +72,12 @@ async function layout(rows: PlanRow[]): Promise<{ nodes: Node[]; edges: Edge[] }
 
   for (const row of rows) {
     for (const target of row.awaits) {
-      const from = live(target);
-      if (!ids.has(from)) missing.add(from);
+      const to = live(target);
+      if (!ids.has(to)) missing.add(to);
       edges.push({
-        id: `${from}->${live(row.plan)}`,
-        source: from,
-        target: live(row.plan),
+        id: `${live(row.plan)}->${to}`,
+        source: live(row.plan),
+        target: to,
         markerEnd: { type: MarkerType.ArrowClosed },
         style: row.held === target ? { stroke: "#f87171", strokeWidth: 1.5 } : undefined,
       });

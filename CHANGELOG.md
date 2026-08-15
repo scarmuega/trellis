@@ -14,6 +14,22 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ## [Unreleased]
 
+### Changed
+
+- **`awaits:` arrows point at the dependency:** both graph renderings — the
+  board's `/plans` graph view and `trellis view plan-graph` — drew the edge
+  backwards, prerequisite → dependent, on the rationale that the figure should
+  read forward in execution order ("what clears when"). Dogfooding says the
+  reader expects the opposite: `awaits:` is a declaration of dependency, so the
+  arrow should carry that statement and following one should lead to what must
+  finish first. Edges now run dependent → target on both surfaces, and the
+  board's ELK layout flips with them — dependents on the left, the plans they
+  await on the right — so arrows still run left to right in the reading
+  direction. Nothing about hold semantics changes; only which end of the edge
+  the arrowhead sits on. **Generated `metrics/actuals/plan-graph.md` files go
+  stale**: any root that has written one fails `trellis view plan-graph
+  --check` (lint item 2) until it is regenerated with `--write`.
+
 ## [0.21.0] - 2026-08-15
 
 ### Changed
