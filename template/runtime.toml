@@ -52,7 +52,8 @@ backend = "process"
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
 # {ritual} {complexity} {mcp} {escalate_to} {automation} {instruction}
-# {procedure} {executor} {skills}. A second harness (pi, Codex, OpenCode) is
+# {delegation} {procedure} {executor} {skills}. A second harness (pi, Codex,
+# OpenCode) is
 # these two lines rewritten — Claude Code is the reference adapter, not a
 # hardcode, and since the default prompts are self-contained (decision 0050)
 # the second harness needs no plugin dialect of its own.
@@ -187,6 +188,8 @@ The procedure below is the trellis framework's commands/act.md, rendered into th
 refine = """refine {plan} as {owner} (trellis runtime).
 
 Act as {owner}: refine {plan} — reshape its content, never execute it. The operator's instruction, verbatim: {instruction}
+
+{delegation}
 
 The runtime has already resolved you as the plan's owner and verified the plan is live and owned; the acting-role marker is already stamped (leave it alone); escalations go to {escalate_to}.
 

@@ -14,7 +14,35 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-15
+
 ### Changed
+
+- **A requested errand is delegation, not impersonation (decision 0057; spec
+  v22):** the errand gate inherited dispatch's human-held short-circuit, so
+  the founder asking the board for an errand on their own plan was refused
+  with "human-held — this is a handoff, not a session" — the system handing
+  the work back to the very person delegating it. The never-impersonate rule
+  is rescoped, not weakened: `kind: human` still short-circuits the dispatch
+  scan and the ritual cadence (no session with nobody present), but an errand
+  the holder requests themselves now spawns as **delegated execution** — the
+  session acts under the role's mandate at the holder's direction, which is
+  the explicit authority `spec/rationale.md` item 10 requires. Not a new
+  primitive: act's holder branch gains the third disposition (package acts,
+  agent ref adopts, human ref hands off *unless the holder asked*), per
+  0048's ruling that everything composes `act`. Three boundaries keep
+  delegation from becoming abdication: automation classes are untouched
+  (core still lands as a proposal the holder reviews), the mandate's
+  `authority: approve` share stays personal (anything approval-shaped
+  returns as a proposal), and the trail names the errand and instruction as
+  the attribution. The runtime renders the disposition rather than letting
+  the session infer it (0045): a new `{delegation}` placeholder is set on
+  every errand fire — empty for agent-held or undeclared holders, byte for
+  byte the old prompt — and the default refine template carries it.
+  `validate_errand` loses its `Handoff` refusal (route and drain both);
+  undeclared holders behave exactly as before. spec/model.md,
+  spec/runtime.md, commands/act.md, commands/refine.md, and the skeleton's
+  founder ref amended in the same commit (the 0041 precedent).
 
 - **`awaits:` arrows point at the dependency:** both graph renderings — the
   board's `/plans` graph view and `trellis view plan-graph` — drew the edge

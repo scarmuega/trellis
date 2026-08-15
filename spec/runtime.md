@@ -38,7 +38,10 @@ All three planes reduce to `act(role, input)`:
 2. **Bind the holder**: a local package (`holder/system.md` plus its tools,
    skills, evals) becomes the acting identity; a `holder/ref.md` to an external
    agent delegates to that agent; a ref to a *human* is never impersonated —
-   work that lands on a human holder becomes an escalation or handoff.
+   work the runtime's own triggers land on a human holder becomes an
+   escalation or handoff, while an errand the holder requests themselves runs
+   as delegated execution: under the mandate, at their direction, approvals
+   still theirs (v22; decision 0057).
 3. **Execute within authority**: `scope:` bounds which artifacts may change;
    `authority:` bounds spend, publishing, and approvals; each touched artifact's
    effective automation policy (below) bounds the mechanics of the change.
@@ -263,10 +266,14 @@ running dispatcher — `trellis dispatch request <errand> <plan>
 /api/errands` lists — and the loop, still the only spawner, validates
 against a fresh tree and fires one session through the same seam as
 dispatch, in the same per-plan keyspace so an errand and an advance never
-overlap. `act` and `ritual` stay the triggers' own, never requestable. The
-instruction rides verbatim into the prompt; on a non-loopback bind that is
-an unauthenticated prompt door, which is why the loopback default is
-load-bearing.
+overlap. `act` and `ritual` stay the triggers' own, never requestable. A
+human-held owner refuses nothing here (v22; decision 0057): the request is
+the holder's own directive, so the session runs as delegated execution —
+the never-impersonate rule binds the runtime's triggers, not the holder's
+asks — and the spawn prompt says so (`{delegation}`), with the mandate's
+`approve:` share left unexercised. The instruction rides verbatim into the
+prompt; on a non-loopback bind that is an unauthenticated prompt door,
+which is why the loopback default is load-bearing.
 
 **Rituals (`trellis rituals`).** One pass of the wall-clock work: compute the
 due set from `rituals.md` cadences and the last-fired dates, fire one session

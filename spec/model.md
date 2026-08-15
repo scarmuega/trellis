@@ -1,4 +1,4 @@
-# Trellis — specification (v21)
+# Trellis — specification (v22)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 
@@ -243,10 +243,16 @@ holder: holder/ | <opaque external ref>   # identity is portable; authority is n
 
 `holder/ref.md` may declare `kind: agent | human` in its frontmatter — the
 machine-readable form of a split that was prose-only before v19. A runtime
-routing work to a role may read it: `human` means never spawn a session for
-this role's work, hand it off. Absent means undeclared, and every consumer
-treats undeclared exactly as the pre-v19 behavior (route, and let the acting
-session apply the never-impersonate rule).
+routing work to a role may read it: `human` means the runtime's *own*
+triggers — the dispatch scan, the ritual cadence — never spawn a session for
+this role's work; they hand it off. An errand the holder requests themselves
+does spawn (v22; decision 0057): the request is the holder's explicit
+directive, so the session runs as delegated execution — under the role's
+mandate, at the holder's direction, with the mandate's `approve:` share left
+unexercised; anything approval-shaped returns as a proposal. Absent means
+undeclared, and every consumer treats undeclared exactly as the pre-v19
+behavior (route, and let the acting session apply the never-impersonate
+rule).
 
 ## Rules
 

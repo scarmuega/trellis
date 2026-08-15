@@ -52,8 +52,18 @@ pending escalations, rituals it executes) and await instruction.
      stop. Nothing is acting as the role here, so nothing writes on its behalf:
      the holder authors any escalation record the handoff earns. (Dispatch
      short-circuits a holder declaring `kind: human` before any session
-     spawns; reaching this branch means the invocation is interactive or the
-     declaration is missing — worth adding while you are here.)
+     spawns; reaching this branch means the invocation is interactive, a
+     requested errand, or the declaration is missing — worth adding while you
+     are here.)
+
+     **Exception — delegated execution (decision 0057):** when the invocation
+     is an errand the holder requested themselves — the spawn prompt says so,
+     or the human in your interactive session is the one asking — proceed
+     under the mandate at their direction. The request is your authority and
+     your attribution: commissioned work, not the runtime's initiative. The
+     holder's personal share stays personal — never exercise the mandate's
+     `authority: approve` on their behalf, and anything approval-shaped lands
+     in your report as a proposal for them to rule on.
 
 5. **Execute within authority**:
    - Touch only artifacts within the mandate's `scope:`.

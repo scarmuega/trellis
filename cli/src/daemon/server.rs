@@ -327,7 +327,6 @@ fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std:
                     super::ErrandRefusal::NotAPlan => (404, "not-a-plan"),
                     super::ErrandRefusal::Terminal => (409, "terminal"),
                     super::ErrandRefusal::Unowned => (409, "unowned"),
-                    super::ErrandRefusal::Handoff { .. } => (409, "handoff"),
                 };
                 let body = serde_json::json!({
                     "plan": rel,

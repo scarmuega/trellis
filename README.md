@@ -8,7 +8,7 @@ map of market needs, committed strategies and the problem space they induce,
 solution contexts, mandates with explicit authority, plans with lifecycle,
 decisions as append-only memory, and rituals as the heartbeat.
 
-**Status: pre-1.0.** Release 0.21.0 — specification v21, zero production
+**Status: pre-1.0.** Release 0.22.0 — specification v22, zero production
 usage-hours. Expect churn; conventions harden through dogfooding, and every change
 lands in `decisions/`. Plugin and kernel share one version, keyed to the spec
 (`0.<spec>.<patch>`, decision 0056).

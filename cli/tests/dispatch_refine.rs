@@ -136,6 +136,45 @@ fn a_refine_request_spawns_on_the_wake_and_carries_the_instruction() {
     assert!(prompt.contains("verbatim: split the scope"), "{prompt}");
     assert!(prompt.contains("The refinement contract"), "{prompt}");
     assert!(prompt.contains("Bind to the domain root"), "{prompt}");
+    // The fixture's founder holder declares no `kind:` — undeclared renders
+    // an empty `{delegation}`. (The act body always mentions the disposition;
+    // the *note* is what an undeclared holder must not get.)
+    assert!(
+        !prompt.contains("This role's holder is a declared human"),
+        "{prompt}"
+    );
+}
+
+/// The gate that used to stop here (decision 0057): a declared-human holder
+/// is a handoff for the runtime's own triggers, but an errand is the
+/// holder's own ask — it spawns, and the prompt names the disposition so the
+/// session proceeds under the mandate at their direction instead of stopping
+/// at act's never-impersonate branch.
+#[test]
+fn a_human_held_owner_is_delegation_not_a_refusal() {
+    let f = refining_fixture();
+    f.write(
+        "org/founder/holder/ref.md",
+        "---\nprovenance: authored\nowner: org/founder\nref: the founder, a human\nkind: human\n---\n# Holder\n",
+    );
+    let daemon = Daemon::dispatch(&f);
+
+    let (code, outcome) = refine(daemon.port, "reshape-me", "tighten the scope");
+    assert_eq!(code, 200, "a holder's own ask is no refusal: {outcome}");
+    assert_eq!(outcome["outcome"], "requested");
+
+    let argv = until("the delegated session to start", || {
+        f.invocations().into_iter().next()
+    });
+    let prompt = argv.join("\n");
+    assert!(
+        prompt.contains("delegated execution (act's holder branch, decision 0057)"),
+        "the prompt names the disposition:\n{prompt}"
+    );
+    assert!(
+        prompt.contains("`authority: approve` stays theirs"),
+        "approvals stay personal:\n{prompt}"
+    );
 }
 
 #[test]
@@ -172,18 +211,6 @@ fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
         "plans/orphan.md",
         "---\nprovenance: authored\nstatus: draft\ntype: initiative\n---\n# Orphan\n",
     );
-    f.write(
-        "org/advisor/mandate.md",
-        "---\nprovenance: authored\nowner: org/founder\npurpose: advise\nescalate-to: org/founder\nholder: holder/\n---\n# Advisor\n",
-    );
-    f.write(
-        "org/advisor/holder/ref.md",
-        "---\nprovenance: authored\nowner: org/founder\nref: a human advisor\nkind: human\n---\n# Holder\n",
-    );
-    f.write(
-        "plans/advice.md",
-        "---\nprovenance: authored\nowner: org/advisor\nstatus: draft\ntype: initiative\n---\n# Advice\n",
-    );
     let daemon = Daemon::dispatch(&f);
 
     let (code, v) = refine(daemon.port, "never-heard-of-it", "split it");
@@ -197,10 +224,6 @@ fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
     let (code, v) = refine(daemon.port, "orphan", "split it");
     assert_eq!(code, 409, "{v}");
     assert_eq!(v["outcome"], "unowned");
-
-    let (code, v) = refine(daemon.port, "advice", "split it");
-    assert_eq!(code, 409, "{v}");
-    assert_eq!(v["outcome"], "handoff");
 
     let (code, _) = post(daemon.port, "/api/plans/reshape-me/refine", "{}");
     assert_eq!(code, 400, "an absent instruction is refused, not defaulted");

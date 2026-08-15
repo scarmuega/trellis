@@ -38,6 +38,14 @@ pub const PLACEHOLDERS: &[&str] = &[
     // The operator's refinement instruction, relayed verbatim into the
     // prompt (decision 0048). Set only for refine sessions.
     "instruction",
+    // The delegated-execution disposition (decision 0057), rendered by the
+    // runtime rather than re-derived by the session (0045's discipline).
+    // Set on every errand fire: the empty string for an agent-held or
+    // undeclared holder, a sentence naming the disposition for a declared
+    // human — the request is the holder's own, so the session acts under
+    // the mandate at their direction instead of stopping at act's
+    // never-impersonate branch.
+    "delegation",
     // The rendered procedure body — the canonical commands/*.md, embedded in
     // the binary and composed per prompt kind, so a spawned session needs no
     // installed plugin (decision 0050).

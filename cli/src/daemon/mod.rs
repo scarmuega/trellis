@@ -207,12 +207,6 @@ pub enum ErrandRefusal {
     Terminal,
     /// No `owner:` — no mandate to act under.
     Unowned,
-    /// The owner's holder is a declared human: the work is theirs to do by
-    /// hand, not a session's to run.
-    Handoff {
-        owner: String,
-        holder_ref: Option<String>,
-    },
 }
 
 impl ErrandRefusal {
@@ -225,19 +219,16 @@ impl ErrandRefusal {
             ErrandRefusal::Unowned => {
                 format!("{rel} declares no owner: — there is no mandate to act under")
             }
-            ErrandRefusal::Handoff { owner, holder_ref } => format!(
-                "{rel}: {owner} is human-held{} — this is a handoff, not a session",
-                holder_ref
-                    .as_deref()
-                    .map(|r| format!(" ({r})"))
-                    .unwrap_or_default()
-            ),
         }
     }
 }
 
 /// Whether one plan may carry an errand session right now; `Ok` carries its
-/// `owner:`.
+/// `owner:`. A human-held owner is no refusal (decision 0057): the request
+/// is the holder's own directive, so the session runs as delegated
+/// execution — the never-impersonate rule binds the runtime's triggers (the
+/// scan, the cadence), not the holder's asks. The drain pass renders the
+/// disposition into the prompt as `{delegation}`.
 pub fn validate_errand(tree: &Tree, rel: &str) -> Result<String, ErrandRefusal> {
     let Some(plan) = tree.get_addressed(rel) else {
         return Err(ErrandRefusal::NotAPlan);
@@ -251,15 +242,26 @@ pub fn validate_errand(tree: &Tree, rel: &str) -> Result<String, ErrandRefusal> 
     let Some(owner) = plan.owner() else {
         return Err(ErrandRefusal::Unowned);
     };
-    let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
-    let holder = crate::org::holder(tree, &owner_short);
-    if holder.is_declared_human() {
-        return Err(ErrandRefusal::Handoff {
-            owner,
-            holder_ref: holder.reference,
-        });
-    }
     Ok(owner)
+}
+
+/// The `{delegation}` value for one errand fire (decision 0057): empty for
+/// an agent-held or undeclared holder — the pre-0057 prompt, byte for byte —
+/// and the disposition sentence when the owner's holder declares
+/// `kind: human`, so the session proceeds under act's delegated-execution
+/// branch instead of stopping at never-impersonate.
+pub fn delegation_note(tree: &Tree, owner: &str) -> String {
+    let owner_short = owner.strip_prefix("org/").unwrap_or(owner);
+    if crate::org::holder(tree, owner_short).is_declared_human() {
+        "This role's holder is a declared human, and this errand is their own \
+         request — delegated execution (act's holder branch, decision 0057): \
+         proceed under the mandate at the holder's direction rather than \
+         handing off. Their `authority: approve` stays theirs; anything \
+         approval-shaped lands in your report as a proposal for them to rule on."
+            .to_string()
+    } else {
+        String::new()
+    }
 }
 
 /// Everything a pass needs that does not change between passes.
@@ -802,6 +804,7 @@ fn dispatch_pass(
             .set("owner", owner_short)
             .set("escalate_to", dispatch::escalate_to(&tree, &owner))
             .set("instruction", req.instruction.clone())
+            .set("delegation", delegation_note(&tree, &owner))
             .set("complexity", complexity.as_str())
             .set("model", session.model.clone())
             .set("effort", session.effort.clone())

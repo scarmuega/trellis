@@ -39,7 +39,9 @@ would close) and await one.
    mandate, record the acting role in `.trellis/acting-role` (under dispatch
    the runtime owns this marker, decision 0045), adopt the holder, execute
    within authority, remove the marker when done. A holder declaring a human
-   becomes a handoff, never an impersonation, per act's own procedure.
+   is no bar when the ask is the holder's own: a requested refine is delegated
+   execution per act's holder branch (decision 0057) — only the runtime's
+   unattended triggers hand off.
 
 4. **The refinement contract** — the input act executes:
    - The write target is the plan artifact itself, plus any new plans a split

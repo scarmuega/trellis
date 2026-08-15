@@ -341,6 +341,8 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              Act as {{owner}}: refine {{plan}} — reshape its content, never execute \
              it. The operator's instruction, verbatim: {{instruction}}\n\
              \n\
+             {{delegation}}\n\
+             \n\
              The runtime has already resolved you as the plan's owner and verified \
              the plan is live and owned; the acting-role marker is already stamped \
              (leave it alone); escalations go to {{escalate_to}}.\n\
