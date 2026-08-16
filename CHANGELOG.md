@@ -14,6 +14,25 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-08-16
+
+### Fixed
+
+- **The act preamble's verdict clause no longer forecloses a mandated
+  hand-off:** it offered exactly three terminal states — retire, block, or
+  `trellis plan handoff` — so a role whose mandate spells its delivery as a
+  relay hand-off (a new `owner:` + `status: ready`, the move
+  `spec/runtime.md` already leaves alone as "one the session moved itself")
+  received two contradictory instructions for the same moment. Observed in a
+  domain running an owner-relay QA gate: the session performed the mandated
+  hand-off, then obeyed the preamble too — the kernel's active-only guard on
+  `plan handoff` rightly refused, and the contradiction cost an escalation
+  (and, a day earlier, a sibling plan parked `active` + `handoff:` instead of
+  relayed). The clause now names the mandate-prescribed hand-off as a verdict
+  of its own and scopes `plan handoff` to parking a proposal on the plan's
+  owner when no hand-off is mandated; the mandate's spelling wins. Shipped
+  default and template updated together.
+
 ## [0.22.0] - 2026-08-15
 
 ### Changed

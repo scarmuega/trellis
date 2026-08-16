@@ -301,10 +301,12 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              On an uncleared blocker `trellis plan block {{plan}} --by \
              {{owner}} --asks …` (escalations go to {{escalate_to}}); write escalation \
              records with `trellis escalate add`; leave a trail. End with a verdict: \
-             retire it, block it, or — if you leave a proposal for its owner to rule \
-             on — record it with `trellis plan handoff {{plan}} <pr>`. A plan left \
-             active with no handoff is returned to ready when your session ends, and \
-             dispatched again.\n\
+             retire it, block it, hand it to its next taker where your mandate names \
+             a hand-off (a new `owner:` + `status: ready` via the trellis CLI — the \
+             mandate's spelling wins), or — if you leave a proposal for its owner to \
+             rule on and no hand-off is mandated — record it with `trellis plan \
+             handoff {{plan}} <pr>`. A plan left active with no handoff is returned \
+             to ready when your session ends, and dispatched again.\n\
              \n\
              {{skills}}\n\
              \n\
