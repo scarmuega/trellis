@@ -59,6 +59,16 @@ pub const PLACEHOLDERS: &[&str] = &[
     // inside the value — and the empty string when no skill exists, so a
     // template may name it unconditionally.
     "skills",
+    // The acting role's mandate, rendered whole into the prompt (decision
+    // 0058) — the read the procedure's resolve-the-mandate step asks for,
+    // already done. Self-contained, and the empty string when the mandate is
+    // missing.
+    "mandate",
+    // The role's local holder package (holder/system.md), when one exists —
+    // the adopt step, already done (decision 0058). Empty for a ref holder
+    // (a plugin agent still adopts inline; a declared human never reaches a
+    // runtime-triggered spawn) and when no package exists.
+    "holder",
 ];
 
 static PATTERN: LazyLock<regex::Regex> =

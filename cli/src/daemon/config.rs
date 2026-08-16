@@ -297,16 +297,25 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              already claimed for you — it went ready → active as this session started, \
              so never claim it again — and the change \
              mechanics are computed: {{automation}}; core never lands, it is proposed. \
-             Evaluate only the judgment items. \
+             Evaluate only the judgment items. Your mandate and any local holder \
+             package are rendered below, so the procedure's read-the-mandate and \
+             adopt-the-holder steps are already done — a holder ref naming a plugin \
+             agent still adopts inline per the procedure. \
              On an uncleared blocker `trellis plan block {{plan}} --by \
              {{owner}} --asks …` (escalations go to {{escalate_to}}); write escalation \
-             records with `trellis escalate add`; leave a trail. End with a verdict: \
-             retire it, block it, hand it to its next taker where your mandate names \
-             a hand-off (a new `owner:` + `status: ready` via the trellis CLI — the \
-             mandate's spelling wins), or — if you leave a proposal for its owner to \
-             rule on and no hand-off is mandated — record it with `trellis plan \
-             handoff {{plan}} <pr>`. A plan left active with no handoff is returned \
+             records with `trellis escalate add`; leave a trail. End with a verdict, \
+             spelled as a command: retire it (`trellis plan retire {{plan}}`); block \
+             it (`trellis plan block {{plan}} --by {{owner}} --asks …`); where your \
+             mandate names a hand-off, pass it to the mandated next taker (`trellis \
+             plan pass {{plan}} --to <role>` — the mandate's spelling wins for the \
+             role); or — if you leave a proposal for its owner to rule on and no \
+             hand-off is mandated — park it on that proposal (`trellis plan handoff \
+             {{plan}} <pr>`). A plan left active with no handoff is returned \
              to ready when your session ends, and dispatched again.\n\
+             \n\
+             {{mandate}}\n\
+             \n\
+             {{holder}}\n\
              \n\
              {{skills}}\n\
              \n\
@@ -324,9 +333,16 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              its row and take the procedure (a skill ref or inline steps) and the \
              cadence — the freshness window for any metrics involved. The runtime \
              resolved the executor and stamped the acting-role marker (leave it \
-             alone); escalations go to {{escalate_to}}. Deliver findings through the \
+             alone); escalations go to {{escalate_to}}. The executor's mandate and \
+             any local holder package are rendered below, so the procedure's \
+             read-the-mandate and adopt-the-holder steps are already done. Deliver \
+             findings through the \
              instance's escalation channel; an executor that owns no artifact reports \
              each finding verbatim, addressed to the owner who transcribes it.\n\
+             \n\
+             {{mandate}}\n\
+             \n\
+             {{holder}}\n\
              \n\
              {{skills}}\n\
              \n\
@@ -565,6 +581,30 @@ mod tests {
         assert!(!prompts["refine"].contains("{skills}"));
         assert!(prompts["act"].contains("{skills}"));
         assert!(prompts["ritual"].contains("{skills}"));
+    }
+
+    #[test]
+    fn refine_never_names_the_role_context() {
+        // The mandate and holder are execution context (decision 0058) — the
+        // same line 0055 drew for {skills}. Act and ritual carry both.
+        let prompts = default_prompts();
+        for key in ["{mandate}", "{holder}"] {
+            assert!(!prompts["refine"].contains(key));
+            assert!(prompts["act"].contains(key), "act lost {key}");
+            assert!(prompts["ritual"].contains(key), "ritual lost {key}");
+        }
+    }
+
+    #[test]
+    fn the_act_verdict_clause_spells_every_exit_as_a_command() {
+        // The transcript audit's lesson (decision 0059): a directive embedded
+        // as a concrete command is followed; one described as an outcome is
+        // improvised.
+        let act = &default_prompts()["act"];
+        assert!(act.contains("`trellis plan retire {plan}`"));
+        assert!(act.contains("`trellis plan pass {plan} --to <role>`"));
+        assert!(act.contains("`trellis plan handoff {plan} <pr>`"));
+        assert!(act.contains("`trellis plan block {plan} --by {owner} --asks …`"));
     }
 
     #[test]

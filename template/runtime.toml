@@ -52,7 +52,8 @@ backend = "process"
 # so nothing an artifact carries can become a shell word. Placeholders:
 # {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
 # {ritual} {complexity} {mcp} {escalate_to} {automation} {instruction}
-# {delegation} {procedure} {executor} {skills}. A second harness (pi, Codex,
+# {delegation} {procedure} {executor} {skills} {mandate} {holder}. A second
+# harness (pi, Codex,
 # OpenCode) is
 # these two lines rewritten — Claude Code is the reference adapter, not a
 # hardcode, and since the default prompts are self-contained (decision 0050)
@@ -78,6 +79,14 @@ backend = "process"
 # can add "--setting-sources", "" and "--settings",
 # '{"disableBundledSkills":true}' to act_cmd, at the price of every
 # settings-borne hook.
+#
+# {mandate} and {holder} are the acting role's mandate.md and (when the
+# holder is a local package) holder/system.md, rendered whole into the
+# prompt (decision 0058) — the reads the act procedure's resolve-the-mandate
+# and adopt-the-holder steps ask for, already done at spawn. Both values are
+# self-contained and the empty string when there is nothing to render, so
+# naming them costs nothing; a ref holder still adopts inline per the
+# procedure.
 #
 # No --plugin-dir below: the default prompts render the act procedure into
 # the prompt itself (decision 0050), so a spawned session needs no installed
@@ -164,7 +173,11 @@ on_shutdown = "detach"
 [prompts]
 act = """{plan} — dispatched act as {owner} (trellis runtime).
 
-Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), the plan is already claimed for you — it went ready → active as this session started, so never claim it again — and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. On an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail. End with a verdict: retire it, block it, hand it to its next taker where your mandate names a hand-off (a new `owner:` + `status: ready` via the trellis CLI — the mandate's spelling wins), or — if you leave a proposal for its owner to rule on and no hand-off is mandated — record it with `trellis plan handoff {plan} <pr>`. A plan left active with no handoff is returned to ready when your session ends, and dispatched again.
+Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), the plan is already claimed for you — it went ready → active as this session started, so never claim it again — and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. Your mandate and any local holder package are rendered below, so the procedure's read-the-mandate and adopt-the-holder steps are already done — a holder ref naming a plugin agent still adopts inline per the procedure. On an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail. End with a verdict, spelled as a command: retire it (`trellis plan retire {plan}`); block it (`trellis plan block {plan} --by {owner} --asks …`); where your mandate names a hand-off, pass it to the mandated next taker (`trellis plan pass {plan} --to <role>` — the mandate's spelling wins for the role); or — if you leave a proposal for its owner to rule on and no hand-off is mandated — park it on that proposal (`trellis plan handoff {plan} <pr>`). A plan left active with no handoff is returned to ready when your session ends, and dispatched again.
+
+{mandate}
+
+{holder}
 
 {skills}
 
@@ -174,7 +187,11 @@ The procedure below is the trellis framework's commands/act.md, rendered into th
 
 ritual = """ritual {ritual} — executed by {executor} (trellis runtime).
 
-Execute the ritual "{ritual}" from rituals.md as {executor}: read its row and take the procedure (a skill ref or inline steps) and the cadence — the freshness window for any metrics involved. The runtime resolved the executor and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. Deliver findings through the instance's escalation channel; an executor that owns no artifact reports each finding verbatim, addressed to the owner who transcribes it.
+Execute the ritual "{ritual}" from rituals.md as {executor}: read its row and take the procedure (a skill ref or inline steps) and the cadence — the freshness window for any metrics involved. The runtime resolved the executor and stamped the acting-role marker (leave it alone); escalations go to {escalate_to}. The executor's mandate and any local holder package are rendered below, so the procedure's read-the-mandate and adopt-the-holder steps are already done. Deliver findings through the instance's escalation channel; an executor that owns no artifact reports each finding verbatim, addressed to the owner who transcribes it.
+
+{mandate}
+
+{holder}
 
 {skills}
 

@@ -1,6 +1,6 @@
 [package]
 name = "trellis-cli"
-version = "0.22.1"
+version = "0.22.2"
 edition = "2021"
 rust-version = "1.85"
 description = "Deterministic kernel for Trellis domain roots: lint, dispatch scan, gate, lifecycle porcelain, generated views"
@@ -36,6 +36,7 @@ libc = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2"
+basic-toml = "0.1"
 
 [profile.release]
 strip = true

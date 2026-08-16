@@ -49,6 +49,35 @@ pub fn flip(path: &Path, from: &[PlanStatus], to: PlanStatus) -> anyhow::Result<
     Ok(current)
 }
 
+/// The mandated relay hand-off (decision 0059): a new owner and `ready` in
+/// one guarded move. Legal from `active` — the session-verdict case — or
+/// `ready` — the operator reassigning a queued plan. Clears any stale
+/// `handoff:` ref: a passed plan must not stay parked on the previous
+/// taker's proposal. Whether the target role exists is the caller's check;
+/// this op owns only the frontmatter mechanics.
+pub fn pass(path: &Path, to_owner: &str) -> anyhow::Result<PlanStatus> {
+    let current = current_status(path)?;
+    if !matches!(current, PlanStatus::Active | PlanStatus::Ready) {
+        bail!(
+            "{} is {} — a pass starts from active | ready",
+            path.display(),
+            current.as_str()
+        );
+    }
+    if fmedit::get(path, "owner")?.is_none() {
+        bail!(
+            "{} declares no owner: — a pass moves ownership, it does not invent it",
+            path.display()
+        );
+    }
+    fmedit::set_scalar(path, "owner", to_owner, false)?;
+    if current == PlanStatus::Active {
+        fmedit::set_scalar(path, "status", PlanStatus::Ready.as_str(), false)?;
+    }
+    fmedit::remove(path, HANDOFF)?;
+    Ok(current)
+}
+
 /// Record (or clear) what an active plan is parked on. Guarded to `active`
 /// for the same reason the flips are guarded: a handoff on a plan nobody
 /// holds is a claim about work that is not happening.
@@ -168,6 +197,53 @@ mod tests {
             Some("initiative")
         );
         assert_eq!(relinquish(&path).unwrap(), Relinquished::Released);
+    }
+
+    #[test]
+    fn a_pass_moves_the_owner_and_readies_an_active_plan() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(
+            dir.path(),
+            "status: active\nowner: org/coder\nhandoff: https://forge/pr/7\ntype: initiative\n",
+        );
+        assert_eq!(pass(&path, "org/qa").unwrap(), PlanStatus::Active);
+        assert_eq!(current_status(&path).unwrap(), PlanStatus::Ready);
+        assert_eq!(
+            fmedit::get(&path, "owner").unwrap().as_deref(),
+            Some("org/qa")
+        );
+        // The previous taker's parked proposal is spent…
+        assert_eq!(fmedit::get(&path, HANDOFF).unwrap(), None);
+        // …and unrelated frontmatter is untouched.
+        assert_eq!(
+            fmedit::get(&path, "type").unwrap().as_deref(),
+            Some("initiative")
+        );
+    }
+
+    #[test]
+    fn a_pass_on_a_ready_plan_changes_only_the_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = plan(dir.path(), "status: ready\nowner: org/coder\n");
+        assert_eq!(pass(&path, "org/qa").unwrap(), PlanStatus::Ready);
+        assert_eq!(current_status(&path).unwrap(), PlanStatus::Ready);
+        assert_eq!(
+            fmedit::get(&path, "owner").unwrap().as_deref(),
+            Some("org/qa")
+        );
+    }
+
+    #[test]
+    fn a_pass_refuses_terminal_and_unowned_plans() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for status in ["draft", "blocked", "retired"] {
+            let path = plan(dir.path(), &format!("status: {status}\nowner: org/coder\n"));
+            let err = pass(&path, "org/qa").unwrap_err();
+            assert!(err.to_string().contains("active | ready"), "{err}");
+        }
+        let path = plan(dir.path(), "status: active\n");
+        let err = pass(&path, "org/qa").unwrap_err();
+        assert!(err.to_string().contains("no owner"), "{err}");
     }
 
     #[test]

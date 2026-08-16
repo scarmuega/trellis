@@ -810,6 +810,8 @@ fn dispatch_pass(
             .set("effort", session.effort.clone())
             .set("budget", session.budget_usd.to_string())
             .set("skills", crate::skills::for_plan(&tree, &req.plan, &owner))
+            .set("mandate", crate::org::mandate_block(&tree, &owner))
+            .set("holder", crate::org::holder_block(&tree, &owner))
             .set("procedure", rt.procedure.clone());
         let started = fire(
             rt,
@@ -862,6 +864,8 @@ fn dispatch_pass(
                 "skills",
                 crate::skills::for_plan(&tree, &item.plan, &item.owner),
             )
+            .set("mandate", crate::org::mandate_block(&tree, &item.owner))
+            .set("holder", crate::org::holder_block(&tree, &item.owner))
             .set("procedure", rt.procedure.clone());
         let started = fire(
             rt,
@@ -989,6 +993,14 @@ fn rituals_pass(
             .set(
                 "skills",
                 crate::skills::for_ritual(&tree, &due.task.executor),
+            )
+            .set(
+                "mandate",
+                crate::org::mandate_block(&tree, &due.task.executor),
+            )
+            .set(
+                "holder",
+                crate::org::holder_block(&tree, &due.task.executor),
             )
             .set("procedure", rt.procedure.clone());
         let started = fire(

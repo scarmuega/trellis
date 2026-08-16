@@ -10,13 +10,21 @@ where the plugin is installed; under dispatch the operative parts are restated
 in the prompt that carries this procedure).
 
 Inputs — a **role** (matching `org/{role}/`) and an **input** (an instruction,
-or empty). Invoked as `/trellis:act`, `$ARGUMENTS` supplies them: the first
-token is the role, everything after it the input. Invoked under dispatch, the
+or empty).
+<!-- interactive-only -->
+Invoked as `/trellis:act`, `$ARGUMENTS` supplies them: the first
+token is the role, everything after it the input.
+<!-- /interactive-only -->
+Invoked under dispatch, the
 preamble above this procedure names them — and may carry a skill index
-(decision 0055): before doing work a listed skill covers, read its file in
-full; the skill is authoritative over your general approach where they
-overlap. No input means: report the role's standing state (mandate summary,
+(decision 0055) and render the mandate and holder package inline (decision
+0058, each a read this procedure asks for, already done): before doing work a
+listed skill covers, read its file in full; the skill is authoritative over
+your general approach where they overlap.
+<!-- interactive-only -->
+No input means: report the role's standing state (mandate summary,
 pending escalations, rituals it executes) and await instruction.
+<!-- /interactive-only -->
 
 ## Procedure
 
@@ -26,21 +34,32 @@ pending escalations, rituals it executes) and await instruction.
    `domain.md` (authoritative over this procedure where they differ) —
    especially domain.md's "Runtime binding" and secrets-policy sections.
 
-2. **Resolve the mandate**: read `org/{role}/mandate.md`. If the role does not
-   exist, list the roles under `org/` and stop. Note `purpose`, `scope`,
+2. **Resolve the mandate**: read `org/{role}/mandate.md` (rendered into the
+   prompt under dispatch).
+<!-- interactive-only -->
+   If the role does not
+   exist, list the roles under `org/` and stop.
+<!-- /interactive-only -->
+   Note `purpose`, `scope`,
    `authority` (spend, publish, approve), `escalate-to`, and `holder`.
 
-3. **Record the acting role**: write `.trellis/acting-role` at the root
-   containing the role ref and the current UTC timestamp, one per line (create
-   `.trellis/` if needed; it must be gitignored — never commit it). This marker
-   is how the enforcement gate attributes writes. Remove it in step 7 even if
-   the work fails. **Under dispatch the runtime owns this marker** (decision
+3. **Record the acting role**: the `.trellis/acting-role` marker at the root
+   is how the enforcement gate attributes writes.
+<!-- interactive-only -->
+   Write it containing
+   the role ref and the current UTC timestamp, one per line (create
+   `.trellis/` if needed; it must be gitignored — never commit it). Remove it
+   in step 7 even if the work fails.
+<!-- /interactive-only -->
+   **Under dispatch the runtime owns this marker** (decision
    0045): a session whose prompt says so finds its line already stamped and
-   removed around its lifetime — leave the file alone in both steps.
+   removed around its lifetime — leave the file alone here and in the
+   close-out.
 
 4. **Adopt the holder**:
    - `holder/system.md` (local package) — its content is your operating
-     instructions for this invocation; load the skills and tools it references.
+     instructions for this invocation (rendered into the prompt under
+     dispatch); load the skills and tools it references.
    - `holder/ref.md` naming a plugin agent (e.g. `trellis:steward`,
      `trellis:focus`) — **adopt it inline**: read the agent's definition and
      continue as it in this same session, the mandate already bound. Never
@@ -96,8 +115,12 @@ pending escalations, rituals it executes) and await instruction.
    content in your report addressed to the owner, who transcribes it. Never
    silently attempt or silently drop it.
 
-7. **Close out**: remove `.trellis/acting-role` (interactive invocations only
-   — under dispatch the runtime removes its own line). Report: the role acted,
+7. **Close out**:
+<!-- interactive-only -->
+   remove `.trellis/acting-role` (interactive invocations only
+   — under dispatch the runtime removes its own line).
+<!-- /interactive-only -->
+   Report: the role acted,
    the trigger/input, artifacts changed (with commits or PR refs), escalations
    raised — quoting each record and where it landed, or stating it is the report
    itself and whose transcription it awaits — and anything left for humans to

@@ -240,6 +240,13 @@ enum PlanCmd {
         #[arg(long, conflicts_with = "reference")]
         clear: bool,
     },
+    /// active|ready → ready under a new owner: the mandated relay hand-off
+    Pass {
+        plan: String,
+        /// The role taking the plan (org/<role>; the bare name is accepted)
+        #[arg(long)]
+        to: String,
+    },
     /// blocked → ready (warns if open records remain)
     Unblock { plan: String },
     /// → retired — the owner's verdict; releases awaits: dependents
@@ -1310,6 +1317,37 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
                 ),
                 None => println!("{rel}: handoff cleared"),
             }
+            Ok(ok)
+        }
+
+        PlanCmd::Pass { plan, to } => {
+            let rel = to_rel(&tree.root, &plan);
+            let short = to.strip_prefix("org/").unwrap_or(&to);
+            let target = format!("org/{short}");
+            if tree.get(&format!("org/{short}/mandate.md")).is_none() {
+                let roles: Vec<String> = tree
+                    .artifacts
+                    .iter()
+                    .filter_map(|a| {
+                        a.rel
+                            .strip_suffix("/mandate.md")
+                            .and_then(|r| r.strip_prefix("org/"))
+                            .map(str::to_string)
+                    })
+                    .collect();
+                anyhow::bail!(
+                    "{target} has no mandate — a pass hands the plan to a role that exists; \
+                     roles here: {}",
+                    if roles.is_empty() {
+                        "(none)".into()
+                    } else {
+                        roles.join(", ")
+                    }
+                );
+            }
+            let abs = tree.root.path.join(&rel);
+            plan_ops::pass(&abs, &target)?;
+            println!("{rel}: passed to {target} — ready for its next taker");
             Ok(ok)
         }
 

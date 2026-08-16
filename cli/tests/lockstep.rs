@@ -208,6 +208,46 @@ fn release_version_tracks_the_spec_version() {
 }
 
 #[test]
+fn template_runtime_toml_mirrors_the_default_prompts() {
+    // template/runtime.toml shows the shipped prompt templates "verbatim" —
+    // and a scaffolded root's runtime.toml *overrides* the compiled defaults,
+    // so drift there silently changes every downstream instance's prompt.
+    // Parse the raw file, not RuntimeConfig::load: the load-time merge would
+    // fill a dropped key back in and mask exactly the drift this guards.
+    let cfg: trellis::daemon::config::RuntimeConfig =
+        basic_toml::from_str(&read("template/runtime.toml"))
+            .expect("template/runtime.toml does not parse as a RuntimeConfig");
+    let defaults = trellis::daemon::config::default_prompts();
+
+    let mut shown: Vec<&String> = cfg.prompts.keys().collect();
+    shown.sort();
+    let mut shipped: Vec<&String> = defaults.keys().collect();
+    shipped.sort();
+    assert_eq!(
+        shown, shipped,
+        "template/runtime.toml's [prompts] and default_prompts() name different errands"
+    );
+
+    for (name, template) in &defaults {
+        assert_eq!(
+            cfg.prompts[name].trim(),
+            template.trim(),
+            "template/runtime.toml's `{name}` prompt has drifted from the embedded default — \
+             re-sync it in the same commit as the default_prompts() change"
+        );
+    }
+
+    // The placeholder comment stays a complete vocabulary list.
+    let text = read("template/runtime.toml");
+    for name in trellis::daemon::tmpl::PLACEHOLDERS {
+        assert!(
+            text.contains(&format!("{{{name}}}")),
+            "template/runtime.toml's placeholder comment no longer mentions {{{name}}}"
+        );
+    }
+}
+
+#[test]
 fn closed_enums_match_the_schema_prose() {
     // The spec's closed vocabularies are duplicated in model.rs. Each must
     // still appear verbatim in the schema block that defines it — which since

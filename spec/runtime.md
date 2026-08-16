@@ -80,7 +80,9 @@ absent means the binding's default.
 
 A taker owes its plan a verdict, and the runtime supplies the one it left out.
 A session dispatched to advance a plan starts with it already claimed
-`ready → active`; ending without retiring it, blocking it, or declaring a
+`ready → active`; ending without retiring it, blocking it, passing it to its
+mandated next taker (`trellis plan pass` — a new `owner:` and `ready` in one
+guarded move, decision 0059), or declaring a
 `handoff:` leaves the plan
 claimed with nobody holding it — a state no scan reads and no tick retries, so
 the plan strands until a human notices. When such a session ends the runtime
@@ -204,7 +206,7 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | service | binding |
 |---|---|
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`); plan refinement via `/trellis:refine` (`commands/refine.md`) — `act(owner, refinement)` over a plan's content, never its execution (decision 0048) |
-| act | `/trellis:act <role> [input]` (`commands/act.md`) interactively; headless, the dispatcher renders that same command file into the spawn prompt (decision 0050) — computed facts first, then the `{skills}` index (the owner's holder skills plus each `contexts:` home's, names and paths only, bodies read lazily; decision 0055), the procedure body after — so the spawned session needs no installed plugin, and any harness that takes a prompt can carry it. A domain preferring the slash spelling restores it in `runtime.toml`'s `[prompts]`; `--plugin-root` swaps a live checkout in place of the embedded procedure text, and `--plugin-dir` remains the uninstalled-checkout option for the hooks and the interactive plane's invocable skills. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
+| act | `/trellis:act <role> [input]` (`commands/act.md`) interactively; headless, the dispatcher renders that same command file into the spawn prompt (decision 0050) — computed facts first, then the role's mandate and any local holder package rendered whole (decision 0058), the `{skills}` index (the owner's holder skills plus each `contexts:` home's, names and paths only, bodies read lazily; decision 0055), the procedure body after, its interactive-only spans stripped (one source, two renderings; decision 0058) — so the spawned session needs no installed plugin, and any harness that takes a prompt can carry it. A domain preferring the slash spelling restores it in `runtime.toml`'s `[prompts]`; `--plugin-root` swaps a live checkout in place of the embedded procedure text, and `--plugin-dir` remains the uninstalled-checkout option for the hooks and the interactive plane's invocable skills. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
 | schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting an errand over a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048, 0051). An instance that needs a real ingress binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
@@ -225,8 +227,9 @@ model, effort, and budget — the tier's meaning is the spec's, the prices are
 this binding's, retuned in `runtime.toml`, never in a plan — holds on
 unretired `awaits:` targets and failed mechanical readiness, short-circuits
 declared-human holders into handoffs, and carries the computed facts into the
-prompt (`{escalate_to}`, `{automation}`, the pre-verified gate, and the
-`{skills}` index — decision 0055). The
+prompt (`{escalate_to}`, `{automation}`, the pre-verified gate, the
+`{skills}` index — decision 0055 — and the role's rendered mandate and
+holder package, `{mandate}` and `{holder}` — decision 0058). The
 dispatcher owns the `.trellis/acting-role` marker for the sessions it spawns
 (decision 0045) and hosts the sessions' MCP back-channel on its own loopback
 socket — the channel lives with the process that owns the session lifecycle.

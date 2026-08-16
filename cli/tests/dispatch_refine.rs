@@ -198,6 +198,10 @@ fn the_default_refine_prompt_never_carries_the_skill_index() {
     let prompt = argv.join("\n");
     assert!(prompt.contains("The refinement contract"), "{prompt}");
     assert!(!prompt.contains("## Skills"), "{prompt}");
+    // The role context is execution context, and refinement must not execute
+    // — the default template omits {mandate}/{holder} too (decision 0058).
+    assert!(!prompt.contains("## Mandate"), "{prompt}");
+    assert!(!prompt.contains("## Holder"), "{prompt}");
 }
 
 #[test]

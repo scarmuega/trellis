@@ -282,6 +282,57 @@ fn plan_lifecycle_end_to_end() {
 }
 
 #[test]
+fn pass_relays_a_plan_to_the_mandated_next_taker() {
+    let f = Fixture::healthy();
+    f.write(
+        "org/qa/mandate.md",
+        "---\nprovenance: authored\nowner: org/founder\nescalate-to: org/founder\n---\n# QA\n",
+    );
+    let plan = "plans/relay.md";
+    f.write(
+        plan,
+        "---\nprovenance: authored\nowner: org/founder\nstatus: active\nhandoff: https://forge/pr/9\ntype: initiative\n---\n# Relay\n",
+    );
+
+    // The bare role name normalizes; the flip is atomic and clears the
+    // previous taker's parked ref.
+    f.bin()
+        .args(["plan", "pass", plan, "--to", "qa"])
+        .assert()
+        .success();
+    let text = f.read(plan);
+    assert!(text.contains("owner: org/qa"), "{text}");
+    assert!(text.contains("status: ready"), "{text}");
+    assert!(!text.contains("handoff:"), "{text}");
+
+    // A ready plan passes too — only the owner moves.
+    f.bin()
+        .args(["plan", "pass", plan, "--to", "org/founder"])
+        .assert()
+        .success();
+    assert!(f.read(plan).contains("owner: org/founder"));
+    assert!(f.read(plan).contains("status: ready"));
+
+    // A ghost role refuses, naming the roles that do exist.
+    let out = f
+        .bin()
+        .args(["plan", "pass", plan, "--to", "ghost"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(err.contains("no mandate"), "{err}");
+    assert!(err.contains("founder"), "{err}");
+
+    // A retired plan is nobody's to pass.
+    f.bin().args(["plan", "retire", plan]).assert().success();
+    f.bin()
+        .args(["plan", "pass", plan, "--to", "qa"])
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn release_gates_on_the_mechanical_readiness_share() {
     let f = Fixture::healthy();
     let plan = "plans/vague.md";

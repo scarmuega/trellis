@@ -14,6 +14,49 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-08-16
+
+The changes below follow the first transcript audit of the dispatch
+machinery — fifteen real sessions on a dogfooding root — whose one
+repeatable lesson is that a directive embedded in the prompt as a concrete,
+scenario-specific fact is followed, while one left for the session to derive
+or improvise is not. No schema is added and the spec does not bump (0055's
+precedent: placeholders and prompt renderings are the binding's, not the
+model's), so this ships as a patch.
+
+### Added
+
+- **The spawn prompt renders the role's mandate and holder package**
+  (`decisions/0058-one-source-two-renderings.md`): two new placeholders in
+  decision 0055's shape — `{mandate}` renders `org/{role}/mandate.md` whole,
+  `{holder}` renders `holder/system.md` when the holder is a local package;
+  both self-contained and empty-safe, set at every spawn site, named by the
+  default `act` and `ritual` templates. The three-to-seven startup tool calls
+  every audited session spent re-reading files the runtime had just read are
+  gone; a dispatched session's org-tree reads collapse to the plan and
+  `domain.md`.
+- **`trellis plan pass <plan> --to <role>`**
+  (`decisions/0059-the-mandated-hand-off-is-a-verb.md`): the mandated relay
+  hand-off as a guarded verb — a new `owner:` and `active|ready → ready` in
+  one move, the target role validated against `org/`, any stale `handoff:`
+  ref cleared. Eight of the fifteen audited sessions improvised this
+  transition as raw `trellis fm set` sequences; the act template's verdict
+  clause now spells all four exits as verbatim commands (retire, block,
+  pass, park).
+- **A lockstep test for the template mirror**: `template/runtime.toml`'s
+  `[prompts]` copies are now asserted byte-identical to the embedded
+  defaults, closing a silent-drift gap.
+
+### Changed
+
+- **One source, two renderings** (decision 0058): `commands/act.md` gains
+  `<!-- interactive-only -->` fences around the spans that exist for the
+  interactive plane only — `$ARGUMENTS` parsing, the no-input report, the
+  acting-role marker mechanics — and every dispatch rendering strips them.
+  The interactive `/trellis:act` file stays whole; unbalanced fences refuse
+  at daemon startup. The delegated-execution exception (0057) and the
+  human-holder branch survive in both renderings, because errands need them.
+
 ## [0.22.1] - 2026-08-16
 
 ### Fixed
