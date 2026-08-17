@@ -260,7 +260,7 @@ fn a_flip_under_a_running_session_is_refused() {
     let (code, _) = request(
         daemon.port,
         "POST",
-        "/api/plans/still-drafting/refine",
+        "/api/plans/still-drafting/errand",
         &body,
     );
     assert_eq!(code, 200);

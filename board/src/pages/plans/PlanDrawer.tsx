@@ -3,84 +3,67 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, FlipError } from "../../lib/api";
+import { api, FlipError, type ErrandOutcome } from "../../lib/api";
 import { markdownComponents, withoutFrontmatter } from "../../lib/markdown";
 import { FrontmatterFields } from "../../lib/fields";
 
-// Preset instructions for the shipped `refine` errand — UI sugar; the errand
-// accepts any instruction, and other errands get the custom box.
-const REFINE_PRESETS = [
-  {
-    label: "Simplify scope",
-    instruction:
-      "Simplify this plan's scope: cut what is not essential to the objective, and tighten the objective itself.",
-  },
-  {
-    label: "Split scope",
-    instruction:
-      "Split this plan: carve its scope into smaller sequenced plans (filed as drafts with awaits: between them), leaving this plan as the first coherent increment.",
-  },
-  {
-    label: "Refactor scope",
-    instruction:
-      "Refactor this plan's structure: reorganize objective, approach, and scope for clarity and readiness, without changing what it commits to.",
-  },
-];
-
-/// The Act menu, built from the daemon's own errand table (decision 0051):
-/// one section per requestable errand — refine's canned presets plus a
-/// custom instruction, other errands with the custom instruction alone —
-/// POSTing through serve's relay (decision 0048).
-function ActMenu({ rel }: { rel: string }) {
+/// The Errand menu (decision 0060). One errand, no types: the operator
+/// writes the instruction — that *is* the errand — and picks the size it
+/// runs at. It is named "Errand", not "Act", because `act` is the dispatch
+/// loop's own trigger and was never requestable from here.
+///
+/// The model and effort choices come from the daemon's resolved complexity
+/// tiers, so they are this domain's configured vocabulary rather than a list
+/// baked in here that would date with the models.
+function ErrandMenu({
+  rel,
+  complexity,
+  onRequested,
+}: {
+  rel: string;
+  complexity?: string;
+  onRequested: (outcome: ErrandOutcome) => void;
+}) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState<string | null>(null);
   const [text, setText] = useState("");
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const clearTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: api.status,
     refetchInterval: 10_000,
   });
-  const { data: errands } = useQuery({
-    queryKey: ["errands"],
-    queryFn: api.errands,
-    staleTime: 60_000,
-  });
   const dispatcherUp = status?.dispatch_running === true;
   const inFlight = (status?.dispatch?.in_flight ?? []).some(
     (s) => s.key === `plan:${rel}`,
   );
 
+  const tiers = status?.session_tiers ?? {};
+  // Absent a choice, the plan's own complexity tier sizes the session — the
+  // same fallback the daemon applies, shown so the default is not a mystery.
+  const fallback = tiers[complexity ?? "standard"] ?? tiers.standard;
+  const uniq = (values: string[]) => [...new Set(values.filter(Boolean))];
+  const models = uniq(Object.values(tiers).map((t) => t.model));
+  const efforts = uniq(Object.values(tiers).map((t) => t.effort));
+
   const mutation = useMutation({
-    mutationFn: ({ errand, instruction }: { errand: string; instruction: string }) =>
-      api.requestErrand(rel, errand, instruction),
+    mutationFn: () =>
+      api.requestErrand(rel, text.trim(), {
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+      }),
     onSuccess: (outcome) => {
-      show(
-        true,
-        `${outcome.errand ?? "errand"} session requested — ${outcome.owner} (${outcome.model}/${outcome.effort})`,
-      );
+      setOpen(false);
+      setText("");
+      setError(null);
+      onRequested(outcome);
       queryClient.invalidateQueries({ queryKey: ["status"] });
-      queryClient.invalidateQueries({ queryKey: ["artifact", rel] });
     },
-    onError: (e: Error) => show(false, e.message),
+    onError: (e: Error) => setError(e.message),
   });
-
-  const show = (ok: boolean, message: string) => {
-    setResult({ ok, message });
-    clearTimeout(clearTimer.current);
-    clearTimer.current = setTimeout(() => setResult(null), 6000);
-  };
-  useEffect(() => () => clearTimeout(clearTimer.current), []);
-
-  const run = (errand: string, instruction: string) => {
-    setOpen(false);
-    setCustom(null);
-    setText("");
-    mutation.mutate({ errand, instruction });
-  };
 
   const disabled = !dispatcherUp || inFlight || mutation.isPending;
   const disabledReason = !dispatcherUp
@@ -88,8 +71,6 @@ function ActMenu({ rel }: { rel: string }) {
     : inFlight
       ? "a session is already running on this plan"
       : undefined;
-
-  const available = errands ?? ["refine"];
 
   return (
     <div className="relative">
@@ -99,70 +80,135 @@ function ActMenu({ rel }: { rel: string }) {
         title={disabledReason}
         className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium hover:border-neutral-500 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Act ▾
+        Errand ▾
       </button>
       {open && (
-        <div className="absolute right-0 z-10 mt-1 w-64 rounded-md border border-neutral-200 bg-white p-1 shadow-lg">
-          {available.map((errand) => (
-            <div key={errand}>
-              {available.length > 1 && (
-                <p className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-neutral-400 uppercase">
-                  {errand}
-                </p>
-              )}
-              {errand === "refine" &&
-                REFINE_PRESETS.map((a) => (
-                  <button
-                    key={a.label}
-                    onClick={() => run("refine", a.instruction)}
-                    className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-neutral-100"
-                    title={a.instruction}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              {custom !== errand ? (
-                <button
-                  onClick={() => {
-                    setCustom(errand);
-                    setText("");
-                  }}
-                  className="block w-full rounded px-2 py-1.5 text-left text-xs text-neutral-500 hover:bg-neutral-100"
-                >
-                  {errand === "refine" ? "Custom…" : `${errand}…`}
-                </button>
-              ) : (
-                <div className="p-1.5">
-                  <textarea
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    rows={3}
-                    autoFocus
-                    placeholder="what should the owner do to this plan?"
-                    className="w-full rounded border border-neutral-200 p-1.5 text-xs focus:border-neutral-400 focus:outline-none"
-                  />
-                  <button
-                    onClick={() => text.trim() && run(errand, text.trim())}
-                    disabled={!text.trim()}
-                    className="mt-1 rounded bg-neutral-900 px-2 py-1 text-xs text-white disabled:opacity-40"
-                  >
-                    Request
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+        <div className="absolute right-0 z-10 mt-1 w-80 rounded-md border border-neutral-200 bg-white p-2 shadow-lg">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            autoFocus
+            placeholder="what should this plan's owner do?"
+            className="w-full rounded border border-neutral-200 p-1.5 text-xs focus:border-neutral-400 focus:outline-none"
+          />
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="rounded border border-neutral-200 px-1 py-0.5 text-[11px]"
+            >
+              <option value="">model: {fallback?.model ?? "default"}</option>
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select
+              value={effort}
+              onChange={(e) => setEffort(e.target.value)}
+              className="rounded border border-neutral-200 px-1 py-0.5 text-[11px]"
+            >
+              <option value="">effort: {fallback?.effort ?? "default"}</option>
+              {efforts.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => text.trim() && mutation.mutate()}
+              disabled={!text.trim() || mutation.isPending}
+              className="ml-auto rounded bg-neutral-900 px-2 py-1 text-xs text-white disabled:opacity-40"
+            >
+              Request
+            </button>
+          </div>
+          <p className="mt-1.5 text-[10px] leading-snug text-neutral-400">
+            Spawns a session as this plan's owner, which will write to the
+            repo{status?.budget_enforced === false ? " with no budget cap" : ""}.
+          </p>
+          {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
         </div>
       )}
-      {result && (
-        <p
-          className={`absolute top-full right-0 mt-1.5 w-72 text-right text-xs ${
-            result.ok ? "text-emerald-600" : "text-red-600"
-          }`}
+    </div>
+  );
+}
+
+/// What became of the ask, for as long as it is worth knowing (decision
+/// 0060). The six-second toast this replaces said a session had been
+/// requested and then took the only trace of it away.
+function ErrandStatus({
+  rel,
+  outcome,
+  onDismiss,
+}: {
+  rel: string;
+  outcome: ErrandOutcome;
+  onDismiss: () => void;
+}) {
+  const { data: status } = useQuery({
+    queryKey: ["status"],
+    queryFn: api.status,
+    refetchInterval: 5_000,
+  });
+  const session = (status?.dispatch?.in_flight ?? []).find(
+    (s) => s.key === `plan:${rel}`,
+  );
+  // Queued until the loop's next wake picks it up; running once it appears
+  // in flight; finished when it has been and is gone.
+  const [wasRunning, setWasRunning] = useState(false);
+  useEffect(() => {
+    if (session) setWasRunning(true);
+  }, [session]);
+  const phase = session ? "running" : wasRunning ? "finished" : "queued";
+
+  const tone =
+    phase === "running"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+      : phase === "finished"
+        ? "border-neutral-200 bg-neutral-50 text-neutral-600"
+        : "border-sky-300 bg-sky-50 text-sky-900";
+
+  return (
+    <div className={`mb-4 rounded-md border px-3 py-2 text-xs ${tone}`}>
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 grow">
+          <p className="font-medium">
+            errand {phase}
+            {outcome.outcome === "replaced" && phase === "queued"
+              ? " — replaced the ask already waiting on this plan"
+              : ""}
+          </p>
+          <p className="mt-0.5 opacity-80">
+            as {outcome.owner} · {outcome.model}/{outcome.effort}
+            {outcome.budget_enforced === false
+              ? " · budget unenforced (herdr)"
+              : outcome.budget_usd
+                ? ` · $${outcome.budget_usd}`
+                : ""}
+          </p>
+          {outcome.delegated && (
+            <p className="mt-0.5 opacity-80">
+              delegated execution — running under your own mandate at your
+              direction; approvals stay yours
+            </p>
+          )}
+          {session?.pane && (
+            <p className="mt-0.5 font-mono text-[11px] opacity-70">
+              herdr pane {session.pane}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={onDismiss}
+          className="shrink-0 opacity-50 hover:opacity-100"
+          aria-label="Dismiss"
         >
-          {result.message}
-        </p>
-      )}
+          ✕
+        </button>
+      </div>
     </div>
   );
 }
@@ -341,6 +387,12 @@ function Chip({ label, value }: { label: string; value: string }) {
 
 export default function PlanDrawer() {
   const { rel, open, close } = usePlanDrawer();
+  const [errand, setErrand] = useState<ErrandOutcome | null>(null);
+
+  // The status row belongs to the plan it was requested on, not to the
+  // drawer — switching plans must not show one plan's session under another.
+  useEffect(() => setErrand(null), [rel]);
+
   useEffect(() => {
     if (!rel) return;
     const onKey = (e: KeyboardEvent) => {
@@ -381,7 +433,17 @@ export default function PlanDrawer() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
-            {facts.status !== "retired" && <ActMenu rel={rel} />}
+            {facts.status !== "retired" && (
+              <ErrandMenu
+                rel={rel}
+                complexity={
+                  typeof frontmatter.complexity === "string"
+                    ? frontmatter.complexity
+                    : undefined
+                }
+                onRequested={setErrand}
+              />
+            )}
             <Link
               to={`/artifacts/${rel}`}
               className="text-xs text-neutral-400 hover:text-neutral-900"
@@ -401,6 +463,13 @@ export default function PlanDrawer() {
         <div className="grow overflow-y-auto px-5 py-4">
           {isPending && <p className="text-sm text-neutral-500">Loading {rel}…</p>}
           {error && <p className="text-sm text-red-600">{String(error)}</p>}
+          {errand && (
+            <ErrandStatus
+              rel={rel}
+              outcome={errand}
+              onDismiss={() => setErrand(null)}
+            />
+          )}
           {data && (
             <>
               <div className="mb-5 rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2.5">

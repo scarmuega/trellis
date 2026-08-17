@@ -45,6 +45,56 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
   with the fields shown properly above it, it was the same data twice, the
   second time unreadable.
 
+## [0.23.0] - 2026-08-17
+
+### Changed
+
+- **An errand is an ask, not a type (decision 0060; spec v23):** 0051 made
+  every errand a named `[prompts]` template an instance could extend, and
+  operating it showed the generalization went the wrong way. Every use of an
+  errand starts with an operator typing what they want done *now*, about this
+  plan — the instruction *is* the errand, and the name in front of it bought
+  nothing but a menu of canned paraphrases of an instruction the operator was
+  about to write anyway. **There is now one errand and it has no name.**
+  `[prompts]` keeps `act` and `ritual`, the two prompts the runtime fires on
+  its own, and loses `refine`; there is no errand table, no `GET
+  /api/errands`, no instance-declared errand names. `POST
+  /api/plans/{slug}/errand` carries `{instruction, model?, effort?}` and that
+  is the whole vocabulary. The framing is framework-authored
+  (`config::errand_prompt`) and reachable from no config key — it supplies
+  only what the instruction cannot (who to act as, the resolved mandate and
+  holder, the escalation target, the delegation disposition, the skills
+  index, the act procedure) and states **no write contract of its own**:
+  `refine`'s template bounded the write target to the plan artifact, which
+  was right for refinement and wrong as the default for an ask nobody had
+  written yet. What bounds an errand session is what bounds every session —
+  the mandate's `scope:` and `authority:`, and the artifact's automation
+  class.
+- **Sizing is chosen at the call.** `model` and `effort` ride the request and
+  beat the plan's `complexity:` tier, which describes the plan and not the
+  ask somebody just thought of. Both stay free strings; `/api/status` grows
+  `session_tiers` so a client offers this domain's configured values rather
+  than a model list baked into itself. The board's control is renamed **Act →
+  Errand**, because `act` is the dispatch loop's own trigger and was never
+  requestable from there — the button named after the primitive could do
+  everything except it.
+- **The request reports its own fate.** A queued ask displaced by a later one
+  for the same plan now answers `outcome: "replaced"` instead of
+  `"requested"` — it replaced silently before, which is how an instruction is
+  lost without anyone noticing. The response also carries `budget_enforced`
+  (false under the herdr backend, where `--max-budget-usd` cannot be honored)
+  and `delegated`, and `InFlightView` gains the herdr `pane` the pool always
+  held and never surfaced. The board spends them on a persistent
+  queued → running → finished row in place of the six-second toast, which
+  announced a session and then took the only trace of it away.
+- **Breaking:** `trellis dispatch request` loses its `<errand>` positional and
+  gains `--model`/`--effort`; `trellis dispatch refine` is gone; `POST
+  /api/plans/{slug}/errands/{name}` and its `/refine` alias are gone; a root
+  that declared its own `[prompts]` errand keys loses them, with no migration
+  but typing the instruction. `commands/refine.md` stays — it is the
+  interactive plane's slash command, a procedure a human runs, not a type the
+  daemon offers.
+
 ## [0.22.2] - 2026-08-16
 
 The changes below follow the first transcript audit of the dispatch

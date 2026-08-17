@@ -321,26 +321,19 @@ enum DispatchCmd {
         #[arg(long, value_name = "SPEC")]
         map: Vec<String>,
     },
-    /// Ask the running dispatcher to spawn one errand session over a plan —
-    /// any [prompts] entry that is not a trigger's (decision 0051)
+    /// Ask the running dispatcher to spawn one errand session over a plan:
+    /// the plan's owner, this instruction, at the size you name (0048, 0060)
     Request {
-        /// The errand — a [prompts] key ("refine", or one this root added)
-        errand: String,
         /// The plan (plans/x.md, plans/x, or x)
         plan: String,
         /// What to do (e.g. "split the scope")
         instruction: String,
-        /// Reach a daemon at this host:port instead of the one on this root
-        #[arg(long, value_name = "ADDR")]
-        addr: Option<String>,
-    },
-    /// Alias for `dispatch request refine` — the shipped errand: the plan's
-    /// owner reshaping its content, never executing it (decision 0048)
-    Refine {
-        /// The plan (plans/x.md, plans/x, or x)
-        plan: String,
-        /// What to do to the plan's content (e.g. "split the scope")
-        instruction: String,
+        /// Model for this session; default is the plan's complexity tier
+        #[arg(long, value_name = "MODEL")]
+        model: Option<String>,
+        /// Reasoning effort for this session; default is the tier's
+        #[arg(long, value_name = "EFFORT")]
+        effort: Option<String>,
         /// Reach a daemon at this host:port instead of the one on this root
         #[arg(long, value_name = "ADDR")]
         addr: Option<String>,
@@ -876,30 +869,23 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }),
 
         Cmd::Dispatch {
-            cmd: cmd @ (DispatchCmd::Request { .. } | DispatchCmd::Refine { .. }),
-        } => {
-            // `dispatch refine` is `dispatch request refine` by another name.
-            let (errand, plan, instruction, addr) = match cmd {
+            cmd:
                 DispatchCmd::Request {
-                    errand,
                     plan,
                     instruction,
+                    model,
+                    effort,
                     addr,
-                } => (errand, plan, instruction, addr),
-                DispatchCmd::Refine {
-                    plan,
-                    instruction,
-                    addr,
-                } => ("refine".to_string(), plan, instruction, addr),
-                _ => unreachable!(),
-            };
+                },
+        } => {
             let root = Root::discover(cli.root.as_deref())?.path;
             let outcome = daemon::client::request_errand(
                 &root,
                 addr.as_deref(),
-                &errand,
                 &plan,
                 &instruction,
+                model.as_deref(),
+                effort.as_deref(),
             )?;
             match cli.format {
                 Format::Json => print_json(&outcome),
@@ -911,18 +897,29 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                             .unwrap_or("?")
                             .to_string()
                     };
+                    let budget = outcome
+                        .get("budget_usd")
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0);
+                    // "replaced" is the queue displacing an earlier ask on
+                    // this plan, and worth saying out loud (decision 0060).
                     println!(
-                        "requested: {} {} → {} ({}, {} / {} / ${})",
-                        get("errand"),
+                        "{}: errand {} → {} ({}, {} / {} / ${budget}{})",
+                        get("outcome"),
                         get("plan"),
                         get("owner"),
                         get("complexity"),
                         get("model"),
                         get("effort"),
-                        outcome
-                            .get("budget_usd")
-                            .and_then(serde_json::Value::as_f64)
-                            .unwrap_or(0.0),
+                        if outcome
+                            .get("budget_enforced")
+                            .and_then(serde_json::Value::as_bool)
+                            == Some(false)
+                        {
+                            " unenforced"
+                        } else {
+                            ""
+                        },
                     );
                 }
             }

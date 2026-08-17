@@ -16,13 +16,13 @@
 //! and `POST /api/sessions/{token}/answer` carries the reply (decision 0041).
 //! Both write `.trellis/runtime/` and no artifact; both concern a session
 //! already running under a mandate this surface did not grant and cannot
-//! widen. `POST /api/plans/{slug}/errands/{name}` (decisions 0048, 0051 —
-//! `/refine` is the alias the route shipped under) enqueues an operator's ask
-//! that the plan's own `owner:` run a configured errand over it: honored
-//! locally only on the dispatcher's socket — where the loop, still the only
-//! spawner, re-validates and fires it — and answered by serve purely as a
-//! relay to that socket. The errand is a `[prompts]` template, the plan is
-//! already in the domain, and the mandate is the one it already declares
+//! widen. `POST /api/plans/{slug}/errand` (decisions 0048, 0060) enqueues an
+//! operator's ask that the plan's own `owner:` carry out one instruction over
+//! it, at a `model`/`effort` the caller may name: honored locally only on the
+//! dispatcher's socket — where the loop, still the only spawner, re-validates
+//! and fires it — and answered by serve purely as a relay to that socket. The
+//! framing is framework-authored, the plan is already in the domain, and the
+//! mandate is the one it already declares
 //! (decision 0029), so nothing here grants or widens anything. Relaying is
 //! the verb the daemon is chartered for, not judgment. `POST /api/plans/{slug}/status` (decision 0049) is the operator's
 //! own lifecycle verbs behind the window: the same guarded flip `trellis plan
@@ -135,15 +135,12 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
             return answer(request, shared, &ticket);
         }
         if let Some(rest) = path.strip_prefix("/api/plans/") {
-            // `/{slug}/errands/{name}` requests any configured errand
-            // (decision 0051); `/{slug}/refine` is the alias the route
-            // shipped under (decision 0048).
-            if let Some((slug, name)) = rest.split_once("/errands/") {
-                let (slug, name) = (slug.to_string(), name.to_string());
-                return errand(request, shared, &slug, &name);
-            }
-            if let Some(slug) = rest.strip_suffix("/refine").map(str::to_string) {
-                return errand(request, shared, &slug, "refine");
+            // `/{slug}/errand` is the operator's ask over one plan
+            // (decisions 0048, 0060). There is no name in the path because
+            // there is no errand type to name: the body carries the
+            // instruction and, optionally, the size to run it at.
+            if let Some(slug) = rest.strip_suffix("/errand").map(str::to_string) {
+                return errand(request, shared, &slug);
             }
             if let Some(slug) = rest.strip_suffix("/status").map(str::to_string) {
                 return status_flip(request, shared, &slug);
@@ -157,13 +154,6 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
     match path.as_str() {
         "" => request
             .respond(Response::from_string(INDEX).with_header(header("text/html; charset=utf-8"))),
-        // The requestable errand names (decision 0051): the [prompts] keys
-        // minus the triggers' own. Config-derived, so every process answers
-        // from the same runtime.toml it loaded — no relay needed.
-        "/api/errands" => json(
-            request,
-            &serde_json::to_value(&shared.errands_available).unwrap_or(serde_json::Value::Null),
-        ),
         "/api/status" => {
             let status = shared.status.lock().unwrap();
             let mut value = serde_json::to_value(&*status).unwrap_or(serde_json::Value::Null);
@@ -199,6 +189,26 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
                     "pending".into(),
                     serde_json::to_value(shared.inbox.pending()).unwrap(),
                 );
+                // The complexity tiers this root resolved, so a caller
+                // sizing an errand by hand (decision 0060) can offer the
+                // default and this domain's own vocabulary rather than a
+                // model list baked into a client.
+                let tier = |s: &crate::dispatch::Session| {
+                    serde_json::json!({
+                        "model": s.model,
+                        "effort": s.effort,
+                        "budget_usd": s.budget_usd,
+                    })
+                };
+                obj.insert(
+                    "session_tiers".into(),
+                    serde_json::json!({
+                        "mechanical": tier(&shared.sessions.mechanical),
+                        "standard": tier(&shared.sessions.standard),
+                        "deep": tier(&shared.sessions.deep),
+                    }),
+                );
+                obj.insert("budget_enforced".into(), shared.budget_enforced.into());
             }
             json(request, &value)
         }
@@ -256,29 +266,32 @@ fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Resul
     }
 }
 
-/// `POST /api/plans/{slug}/errands/{name}` — an operator asks the plan's
-/// `owner:` to run one of the configured errands over it (decisions 0048,
-/// 0051; `refine` is the shipped one and `…/refine` its alias). Honored
-/// locally only where the dispatch loop runs — the handler validates
-/// mechanically and enqueues; the loop is the only spawner. Serve answers the
-/// same path purely as a relay to the dispatcher's socket — including for
-/// errand names it does not know, because the errand table is the
-/// dispatcher's config to judge; a rituals pass refuses it.
-fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std::io::Result<()> {
+/// `POST /api/plans/{slug}/errand` — an operator asks the plan's `owner:` to
+/// carry out one instruction over it (decisions 0048, 0060), optionally
+/// naming the `model` and `effort` to run it at. Honored locally only where
+/// the dispatch loop runs — the handler validates mechanically and enqueues;
+/// the loop is the only spawner. Serve answers the same path purely as a
+/// relay to the dispatcher's socket.
+fn errand(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
     let mut body = String::new();
     if let Err(e) = request.as_reader().read_to_string(&mut body) {
         return error(request, 400, &format!("cannot read the request body: {e}"));
     }
-    let instruction = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|v| {
-            v.get("instruction")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let parsed = serde_json::from_str::<serde_json::Value>(&body).ok();
+    let field = |key: &str| -> Option<String> {
+        parsed
+            .as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let instruction = field("instruction").unwrap_or_default();
+    // Sizing chosen at the call (decision 0060). Free strings, as everywhere
+    // else the harness takes them — the kernel has never held a model
+    // vocabulary and inventing one here would date faster than the models.
+    let (model, effort) = (field("model"), field("effort"));
     if instruction.is_empty() {
         return error(
             request,
@@ -296,26 +309,6 @@ fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std:
     let rel = format!("plans/{}.md", slug.trim_end_matches(".md"));
 
     if shared.dispatches {
-        if super::TRIGGER_ERRANDS.contains(&name) {
-            return error(
-                request,
-                404,
-                &format!(
-                    "{name} belongs to the runtime's own trigger — the dispatch loop and \
-                     the cadence pass fire it; it is not an operator request"
-                ),
-            );
-        }
-        if !shared.errands_available.iter().any(|e| e == name) {
-            return error(
-                request,
-                404,
-                &format!(
-                    "no errand named {name} — this root's [prompts] carries: {}",
-                    shared.errands_available.join(", ")
-                ),
-            );
-        }
         let (tree, _, _, _) = match snapshot(&shared.root) {
             Ok(s) => s,
             Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),
@@ -373,18 +366,26 @@ fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std:
         }
         let (complexity, session) =
             crate::dispatch::plan_session(&tree, &shared.sessions, &rel);
-        shared.request_errand(name, &rel, &instruction);
+        let replaced = shared.request_errand(super::ErrandRequest {
+            plan: rel.clone(),
+            instruction,
+            model: model.clone(),
+            effort: effort.clone(),
+        });
+        // What will actually be spawned, resolved the same way the drain
+        // pass resolves it — the operator's choice over the plan's tier.
         return json(
             request,
             &serde_json::json!({
                 "plan": rel,
-                "errand": name,
-                "outcome": "requested",
+                "outcome": if replaced { "replaced" } else { "requested" },
                 "owner": owner,
                 "complexity": complexity.as_str(),
-                "model": session.model,
-                "effort": session.effort,
+                "model": model.unwrap_or_else(|| session.model.clone()),
+                "effort": effort.unwrap_or_else(|| session.effort.clone()),
                 "budget_usd": session.budget_usd,
+                "budget_enforced": shared.budget_enforced,
+                "delegated": !super::delegation_note(&tree, &owner).is_empty(),
             }),
         );
     }
@@ -401,11 +402,16 @@ fn errand(mut request: Request, shared: &Shared, slug: &str, name: &str) -> std:
                 "no dispatcher is running on this root — start `trellis dispatch run`",
             );
         };
-        let forward = serde_json::json!({ "instruction": instruction }).to_string();
+        let forward = serde_json::json!({
+            "instruction": instruction,
+            "model": model,
+            "effort": effort,
+        })
+        .to_string();
         return match super::client::raw(
             addr.trim(),
             "POST",
-            &format!("/api/plans/{slug}/errands/{name}"),
+            &format!("/api/plans/{slug}/errand"),
             Some(&forward),
         ) {
             Ok((code, body)) => request.respond(

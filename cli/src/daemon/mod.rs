@@ -129,10 +129,11 @@ pub struct Shared {
     /// queue is memory only — a request is one-shot and best-effort, and the
     /// loop stays the only spawner.
     pub errands: Mutex<Vec<ErrandRequest>>,
-    /// The operator-requestable errand names this config carries: every
-    /// `[prompts]` key except `act` and `ritual`, which belong to their
-    /// triggers (decision 0051). Sorted, computed once at startup.
-    pub errands_available: Vec<String>,
+    /// Whether a session's budget cap is actually enforced, which the herdr
+    /// backend cannot do (`--max-budget-usd` only works with `--print`). The
+    /// errand route reports it: a number the operator reads as a ceiling,
+    /// with nothing holding it, is worse than saying so.
+    pub budget_enforced: bool,
     /// Ask the loop to pass now without queueing anything. Set when a request
     /// is refused as in-flight: `status.in_flight` is only as fresh as the
     /// last pass, so if that session actually ended, the nudged pass reaps it
@@ -140,49 +141,40 @@ pub struct Shared {
     pub nudge: std::sync::atomic::AtomicBool,
 }
 
-/// The `[prompts]` keys reserved for the runtime's own triggers: the dispatch
-/// loop and the cadence pass. Everything else in the map is an operator's to
-/// request.
-pub const TRIGGER_ERRANDS: &[&str] = &["act", "ritual"];
+/// The name the errand runs under wherever a session is labelled or
+/// recorded. Not a `[prompts]` key and not a type an operator picks
+/// (decision 0060) — there is one errand, and this is what it is called.
+pub const ERRAND: &str = "errand";
 
-/// The requestable errand names a config carries, sorted.
-pub fn errands_available(cfg: &RuntimeConfig) -> Vec<String> {
-    let mut names: Vec<String> = cfg
-        .prompts
-        .keys()
-        .filter(|k| !TRIGGER_ERRANDS.contains(&k.as_str()))
-        .cloned()
-        .collect();
-    names.sort();
-    names
-}
-
-/// One operator ask: run this errand over this plan, per this instruction.
+/// One operator ask: run this instruction over this plan, at this size.
 #[derive(Debug, Clone)]
 pub struct ErrandRequest {
-    /// A `[prompts]` key that is not a trigger's ("refine", or whatever the
-    /// instance added).
-    pub errand: String,
     /// The plan rel ("plans/x.md").
     pub plan: String,
+    /// The whole of the ask, written at the moment it was wanted.
     pub instruction: String,
+    /// Sizing chosen at the call. `None` falls back to the plan's
+    /// `complexity:` tier, which is what dispatch would have used.
+    pub model: Option<String>,
+    pub effort: Option<String>,
 }
 
 impl Shared {
-    /// Queue an errand. A second request for a plan already queued replaces
-    /// its errand and instruction — the operator changed their mind, not
-    /// their target, and one plan carries one session either way.
-    pub fn request_errand(&self, errand: &str, plan: &str, instruction: &str) {
+    /// Queue an errand, reporting whether it displaced one already waiting.
+    ///
+    /// A second request for the same plan replaces the first: the operator
+    /// changed their mind, not their target, and one plan carries one
+    /// session either way. The caller is told so it can say so — a
+    /// replacement that looks identical to a fresh ask is how an operator
+    /// loses an instruction without noticing.
+    pub fn request_errand(&self, request: ErrandRequest) -> bool {
         let mut queue = self.errands.lock().unwrap();
-        if let Some(existing) = queue.iter_mut().find(|r| r.plan == plan) {
-            existing.errand = errand.to_string();
-            existing.instruction = instruction.to_string();
+        if let Some(existing) = queue.iter_mut().find(|r| r.plan == request.plan) {
+            *existing = request;
+            true
         } else {
-            queue.push(ErrandRequest {
-                errand: errand.to_string(),
-                plan: plan.to_string(),
-                instruction: instruction.to_string(),
-            });
+            queue.push(request);
+            false
         }
     }
 
@@ -323,7 +315,7 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         overlay_status: true,
         dispatches: false,
         errands: Mutex::new(Vec::new()),
-        errands_available: errands_available(&cfg),
+        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = Pidfile::claim(&root, SERVE_PIDFILE, "trellis serve")?;
@@ -389,7 +381,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         overlay_status: false,
         dispatches: true,
         errands: Mutex::new(Vec::new()),
-        errands_available: errands_available(&cfg),
+        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // `--once` takes the same lock as the loop (decision 0053). It skipped
@@ -528,7 +520,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         overlay_status: false,
         dispatches: false,
         errands: Mutex::new(Vec::new()),
-        errands_available: errands_available(&cfg),
+        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // No channels: announcing newly-open records is the dispatcher's watch.
@@ -771,33 +763,29 @@ fn dispatch_pass(
 
     let mut outcome = Pass::default();
 
-    // Operator-requested errand sessions drain first (decisions 0048, 0051):
-    // an explicit ask outranks the scheduled scan for the same slots. Each is
-    // one-shot — re-validated against this pass's tree, then fired or dropped
-    // with its reason, never carried to a later pass. No cooldown: the
-    // cooldown throttles unattended respawns, and this is the attended case.
+    // Operator-requested errand sessions drain first (decisions 0048, 0051,
+    // 0060): an explicit ask outranks the scheduled scan for the same slots.
+    // Each is one-shot — re-validated against this pass's tree, then fired or
+    // dropped with its reason, never carried to a later pass. No cooldown:
+    // the cooldown throttles unattended respawns, and this is the attended
+    // case.
+    let errand_prompt = config::errand_prompt();
     for req in rt.shared.take_errands() {
-        let Some(prompt) = rt.cfg.prompts.get(&req.errand) else {
-            note(&format!(
-                "{} {} dropped — no [prompts] entry names that errand",
-                req.errand, req.plan
-            ));
-            continue;
-        };
         let owner = match validate_errand(&tree, &req.plan) {
             Ok(owner) => owner,
             Err(refusal) => {
-                note(&format!(
-                    "{} dropped — {}",
-                    req.errand,
-                    refusal.describe(&req.plan)
-                ));
+                note(&format!("{ERRAND} dropped — {}", refusal.describe(&req.plan)));
                 continue;
             }
         };
         let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
+        // The tier the plan's `complexity:` resolves to is the default; what
+        // the operator chose at the call wins over it (decision 0060), which
+        // is the one thing that genuinely varies per ask.
         let (complexity, session) =
             dispatch::plan_session(&tree, &rt.shared.sessions, &req.plan);
+        let model = req.model.clone().unwrap_or_else(|| session.model.clone());
+        let effort = req.effort.clone().unwrap_or_else(|| session.effort.clone());
         let key = state::key_plan(&req.plan);
         let vars = tmpl::Vars::new()
             .set("plan", req.plan.clone())
@@ -806,8 +794,8 @@ fn dispatch_pass(
             .set("instruction", req.instruction.clone())
             .set("delegation", delegation_note(&tree, &owner))
             .set("complexity", complexity.as_str())
-            .set("model", session.model.clone())
-            .set("effort", session.effort.clone())
+            .set("model", model)
+            .set("effort", effort)
             .set("budget", session.budget_usd.to_string())
             .set("skills", crate::skills::for_plan(&tree, &req.plan, &owner))
             .set("mandate", crate::org::mandate_block(&tree, &owner))
@@ -818,10 +806,10 @@ fn dispatch_pass(
             state,
             backend,
             &key,
-            &req.errand,
-            &format!("{} {} → {}", req.errand, req.plan, owner),
+            ERRAND,
+            &format!("{ERRAND} {} → {}", req.plan, owner),
             &owner,
-            prompt,
+            &errand_prompt,
             &rt.cfg.harness.act_cmd,
             &rt.cfg.harness.herdr.act_args,
             vars,
@@ -1605,6 +1593,52 @@ mod tests {
 
     fn pidfile_path(root: &Path) -> PathBuf {
         RuntimeConfig::runtime_dir(root).join(DISPATCH_PIDFILE)
+    }
+
+    fn shared_for_queue() -> Shared {
+        Shared {
+            status: Mutex::new(Status::default()),
+            root: PathBuf::from("/nonexistent"),
+            sessions: SessionMap::default(),
+            inbox: mcp::Inbox::default(),
+            overlay_status: false,
+            dispatches: true,
+            errands: Mutex::new(Vec::new()),
+            budget_enforced: true,
+            nudge: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn ask(plan: &str, instruction: &str) -> ErrandRequest {
+        ErrandRequest {
+            plan: plan.to_string(),
+            instruction: instruction.to_string(),
+            model: None,
+            effort: None,
+        }
+    }
+
+    /// One plan carries one session, so a second ask before the drain
+    /// displaces the first — and the queue says so, because an instruction
+    /// replaced in silence is an instruction lost (decision 0060).
+    #[test]
+    fn a_second_ask_for_one_plan_replaces_the_first_and_reports_it() {
+        let shared = shared_for_queue();
+
+        assert!(!shared.request_errand(ask("plans/a.md", "split the scope")));
+        assert!(!shared.request_errand(ask("plans/b.md", "another plan, another ask")));
+        assert!(
+            shared.request_errand(ask("plans/a.md", "actually, tighten it")),
+            "the same plan twice is a replacement"
+        );
+
+        let drained = shared.take_errands();
+        assert_eq!(drained.len(), 2, "one entry per plan, never two");
+        let a = drained.iter().find(|r| r.plan == "plans/a.md").unwrap();
+        assert_eq!(
+            a.instruction, "actually, tighten it",
+            "the later ask is the one that runs"
+        );
     }
 
     /// The claim two dispatchers shared a root through (decision 0053). The

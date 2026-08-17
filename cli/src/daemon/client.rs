@@ -158,9 +158,10 @@ pub fn answer(
 pub fn request_errand(
     root: &Path,
     addr: Option<&str>,
-    errand: &str,
     plan: &str,
     instruction: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> anyhow::Result<serde_json::Value> {
     let addr = match addr {
         Some(a) => a.to_string(),
@@ -186,11 +187,16 @@ pub fn request_errand(
         .strip_prefix("plans/")
         .unwrap_or(plan.trim())
         .trim_end_matches(".md");
-    let body = serde_json::json!({ "instruction": instruction }).to_string();
+    let body = serde_json::json!({
+        "instruction": instruction,
+        "model": model,
+        "effort": effort,
+    })
+    .to_string();
     let text = request(
         &addr,
         "POST",
-        &format!("/api/plans/{slug}/errands/{errand}"),
+        &format!("/api/plans/{slug}/errand"),
         Some(&body),
     )?;
     Ok(serde_json::from_str(&text)?)

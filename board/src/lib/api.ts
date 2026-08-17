@@ -54,22 +54,49 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
+export interface InFlight {
+  key: string;
+  label?: string;
+  started?: string;
+  log?: string;
+  // The herdr pane to attach to; absent under the process backend, whose
+  // sessions are headless children with only a log.
+  pane?: string;
+}
+
+export interface SessionTier {
+  model: string;
+  effort: string;
+  budget_usd: number;
+}
+
 export interface DaemonStatus {
   dispatch_running?: boolean;
   dispatch?: {
-    in_flight?: { key: string; label?: string }[];
+    in_flight?: InFlight[];
     [key: string]: unknown;
   } | null;
+  // The complexity tiers this root resolved — the domain's own model/effort
+  // vocabulary, so sizing an errand offers configured values rather than a
+  // list baked into this client (decision 0060).
+  session_tiers?: Record<string, SessionTier>;
+  // False under the herdr backend, where --max-budget-usd cannot be honored.
+  budget_enforced?: boolean;
   [key: string]: unknown;
 }
 
 export interface ErrandOutcome {
   plan: string;
-  errand?: string;
+  // "requested", or "replaced" when this ask displaced one already queued
+  // for the same plan (decision 0060).
   outcome: string;
   owner?: string;
+  complexity?: string;
   model?: string;
   effort?: string;
+  budget_usd?: number;
+  budget_enforced?: boolean;
+  delegated?: boolean;
   [key: string]: unknown;
 }
 
@@ -106,28 +133,24 @@ export const api = {
     if (!res.ok) throw new Error(`view ${name}: ${res.status}`);
     return res.text();
   },
-  // The operator-requestable errand names this root's [prompts] carries
-  // (decision 0051) — "refine" ships; instances add their own.
-  errands: () => getJson<string[]>("/api/errands"),
-  // Ask the plan's owner to run an errand over it (decisions 0048, 0051).
-  // Serve relays this to the dispatcher; a refusal comes back verbatim.
+  // Ask the plan's owner to carry out one instruction over it (decisions
+  // 0048, 0060), optionally at a model/effort chosen here rather than taken
+  // from the plan's complexity tier. Serve relays this to the dispatcher; a
+  // refusal comes back verbatim.
   requestErrand: async (
     rel: string,
-    errand: string,
     instruction: string,
+    size?: { model?: string; effort?: string },
   ): Promise<ErrandOutcome> => {
     const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
-    const res = await fetch(
-      `/api/plans/${encodeURIComponent(slug)}/errands/${encodeURIComponent(errand)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction }),
-      },
-    );
+    const res = await fetch(`/api/plans/${encodeURIComponent(slug)}/errand`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction, ...size }),
+    });
     const body = await res.json().catch(() => null);
     if (!res.ok)
-      throw new Error(body?.error ?? `${errand} failed (${res.status})`);
+      throw new Error(body?.error ?? `the errand was refused (${res.status})`);
     return body;
   },
   // Flip a plan's lifecycle status (decision 0049) — the same guarded move

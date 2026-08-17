@@ -251,25 +251,34 @@ is informational, and `serve` reads it to report whether a dispatcher is live.
 dispatch. The plan claim above is the guard on the *work*; this is the guard
 on the *root*, and neither substitutes for the other.
 
-**Operator errands (decisions 0048, 0051).** Every session the runtime
-spawns is `act` under some framing, and every framing is a template: the
-`[prompts]` table in `runtime.toml` maps errand names to prompt templates,
-three of them shipped as framework-authored defaults — `act` (the dispatch
-loop's), `ritual` (the cadence pass's), and `refine`, the shipped
-operator-requestable errand: `act(owner, refinement)`, a contract whose
-write target is the plan artifact (plus split-off drafts) and nothing else,
-carried in its default template. Any additional key an instance declares is
-a new requestable errand, no recompile — the instance owns its templates the
-way it owns its `rituals.md` rows. Interactively, refine is plane 1
-(`/trellis:refine`). Headlessly, an operator requests any errand of the
-running dispatcher — `trellis dispatch request <errand> <plan>
-"<instruction>"` (`dispatch refine` is the alias), or `POST
-/api/plans/{slug}/errands/{name}` on the dispatcher's own socket
-(`…/refine` aliased), which serve answers only as a relay, and `GET
-/api/errands` lists — and the loop, still the only spawner, validates
+**Operator errands (decisions 0048, 0051, 0060).** Every session the runtime
+spawns is `act` under some framing. Two framings are the runtime's own
+triggers and live as templates in `runtime.toml`'s `[prompts]` table — `act`
+(the dispatch loop's) and `ritual` (the cadence pass's). The operator's
+errand is the third, and it is **not** one of them: there is one errand, it
+has no name, and its framing is framework-authored and not configurable
+(v23; decision 0060). An errand is an ask written at the moment it is
+wanted, so its content is the operator's instruction, and the framing
+supplies only what the instruction cannot — who to act as, that the mandate
+is resolved and the marker stamped, where escalations go, the delegation
+disposition, and the act procedure. It states no write contract of its own:
+what bounds an errand session is what bounds every session, the mandate's
+`scope:` and `authority:` and the touched artifact's automation class.
+
+**Sizing is chosen at the call.** The request may name a `model` and an
+`effort`; absent, the plan's `complexity:` tier resolves as dispatch would.
+The plan's tier describes the plan, and an errand is not the plan.
+
+Headlessly, an operator asks the running dispatcher — `trellis dispatch
+request <plan> "<instruction>" [--model M] [--effort E]`, or `POST
+/api/plans/{slug}/errand` on the dispatcher's own socket, which serve
+answers only as a relay — and the loop, still the only spawner, validates
 against a fresh tree and fires one session through the same seam as
 dispatch, in the same per-plan keyspace so an errand and an advance never
-overlap. `act` and `ritual` stay the triggers' own, never requestable. A
+overlap. A queued ask displaced by a later one for the same plan is reported
+as such, never silently. Interactively, the same shape is plane 1's
+`/trellis:refine` (a procedure a human runs, not a type the daemon offers).
+A
 human-held owner refuses nothing here (v22; decision 0057): the request is
 the holder's own directive, so the session runs as delegated execution —
 the never-impersonate rule binds the runtime's triggers, not the holder's

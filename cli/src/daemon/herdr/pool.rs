@@ -262,6 +262,9 @@ impl HerdrPool {
                 log: s.log.clone(),
                 started: s.started.clone(),
                 token: s.token.clone(),
+                // The pane is the session's identity here (see `target`),
+                // and the one thing an operator needs to go look at it.
+                pane: Some(s.pane_id.clone()),
             })
             .collect();
         views.sort_by(|a, b| a.key.cmp(&b.key));

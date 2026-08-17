@@ -1,4 +1,4 @@
-# Trellis — specification (v22)
+# Trellis — specification (v23)
 
 > *A domain-driven operating model for businesses run by humans and AI agents.*
 

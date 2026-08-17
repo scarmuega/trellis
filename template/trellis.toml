@@ -5,7 +5,7 @@
 
 # The spec version this root operates against (required; lint item 18
 # compares it to the kernel's).
-spec = 22
+spec = 23
 
 # Carried-content registry: root-relative path prefixes this root carries but
 # does not author — a deployment unit's own docs, a vendored tree, an

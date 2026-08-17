@@ -1,5 +1,5 @@
 # The fixture root's machine-read config and root marker.
-spec = 22
+spec = 23
 
 carried = []
 

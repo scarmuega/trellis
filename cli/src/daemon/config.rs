@@ -269,16 +269,16 @@ const PROCEDURE_BRIDGE: &str = "The procedure below is the trellis framework's \
      required; the domain root's trellis.toml and domain.md are authoritative over it where \
      they differ.";
 
-/// The errand table (decision 0051): every spawn prompt is a template in this
-/// map, and `act` is the only procedure the binary carries — `{procedure}`
-/// always renders its body. Three framework-authored defaults ship (`act` for
-/// the dispatch loop, `ritual` for the cadence pass, `refine` as the shipped
-/// operator-requestable errand); an instance entry overrides its name, and
-/// any *additional* name is a new requestable errand — `[prompts] audit =
-/// "…"` needs no recompile. What an errand adds on top of act (the refine
-/// contract, the ritual framing) lives in its template: the default is
-/// framework-authored, and an instance that rewrites it owns the variant,
-/// exactly as with a rituals.md row.
+/// The trigger table: the two prompts the runtime fires on its own — `act`
+/// per dispatchable plan, `ritual` per due row — and nothing else. `act` is
+/// still the only procedure the binary carries, and `{procedure}` always
+/// renders its body (decision 0051, narrowed by 0060).
+///
+/// The operator's errand is deliberately *not* here. It was a third entry
+/// (`refine`) in a map any instance could extend with named errands of its
+/// own, and 0060 removed the whole notion: an errand is an ask written at
+/// the moment it is wanted, so its content is the operator's instruction and
+/// its framing is `ERRAND_PROMPT`, which no config can name or override.
 ///
 /// Every default opens with a per-session-unique first line — the herdr
 /// backend proves delivery by matching the prompt's opening against pane
@@ -351,36 +351,54 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              {{procedure}}"
         ),
     );
-    map.insert(
-        "refine".to_string(),
-        format!(
-            "refine {{plan}} as {{owner}} (trellis runtime).\n\
-             \n\
-             Act as {{owner}}: refine {{plan}} — reshape its content, never execute \
-             it. The operator's instruction, verbatim: {{instruction}}\n\
-             \n\
-             {{delegation}}\n\
-             \n\
-             The runtime has already resolved you as the plan's owner and verified \
-             the plan is live and owned; the acting-role marker is already stamped \
-             (leave it alone); escalations go to {{escalate_to}}.\n\
-             \n\
-             The refinement contract: the write target is the plan artifact itself, \
-             plus any new plans a split produces — nothing else; never claim the \
-             plan, never advance its contexts:, never touch the solution or the \
-             problem space. New plans from a split are filed status: draft with this \
-             plan's owner:, sequenced with awaits:. Keep frontmatter valid; preserve \
-             status: unless the instruction says otherwise. The plan's automation \
-             class still decides how the edit lands; anything beyond the owner's \
-             authority is an escalation, not an improvisation. Report what changed, \
-             plans created by a split, and escalations raised.\n\
-             \n\
-             {PROCEDURE_BRIDGE}\n\
-             \n\
-             {{procedure}}"
-        ),
-    );
     map
+}
+
+/// The operator's errand, framed (decision 0060). One prompt, no name, not
+/// in `[prompts]` and not overridable — the errand's *content* is the
+/// instruction the operator wrote, and this supplies only what the
+/// instruction cannot: who to act as, that the runtime already resolved and
+/// stamped, where escalations go, whether the ask is delegated execution
+/// (0057), the role context, the skills index, and the act procedure.
+///
+/// It states no contract of its own. `refine` used to carry one — write only
+/// the plan artifact, never claim it, never touch the solution — which was
+/// right for refinement and wrong as a default for an ask nobody had written
+/// yet. What bounds a session here is what bounds every session: the
+/// mandate's `scope:` and `authority:`, and the artifact's automation class.
+pub fn errand_prompt() -> String {
+    format!(
+        "errand on {{plan}} as {{owner}} (trellis runtime).\n\
+         \n\
+         Act as {{owner}} over {{plan}}. The operator's instruction, verbatim, is \
+         the whole of the ask — do that and nothing beyond it:\n\
+         \n\
+         {{instruction}}\n\
+         \n\
+         {{delegation}}\n\
+         \n\
+         The runtime has already resolved you as the plan's owner and verified the \
+         plan is live and owned; the acting-role marker is already stamped (leave \
+         it alone); your mandate and any local holder package are rendered below, \
+         so the procedure's read-the-mandate and adopt-the-holder steps are \
+         already done; escalations go to {{escalate_to}}. This is an operator's ask, \
+         not a dispatch: the plan's status is not yours to flip unless the \
+         instruction says so, and it was not claimed for you. Stay inside the \
+         mandate's scope: and authority:; the touched artifact's automation class \
+         still decides how the change lands, and core never lands, it is proposed. \
+         Anything the ask requires beyond that authority is an escalation, not an \
+         improvisation. Report what changed and what you escalated.\n\
+         \n\
+         {{mandate}}\n\
+         \n\
+         {{holder}}\n\
+         \n\
+         {{skills}}\n\
+         \n\
+         {PROCEDURE_BRIDGE}\n\
+         \n\
+         {{procedure}}"
+    )
 }
 
 /// `model:effort:budget` per complexity tier — the same triples
@@ -435,6 +453,10 @@ impl RuntimeConfig {
         for (name, template) in &self.prompts {
             tmpl::check(&format!("prompts.{name}"), std::slice::from_ref(template))?;
         }
+        // Framework-authored and unreachable from config, so a failure here
+        // is this binary's bug rather than the instance's — checked all the
+        // same, because the placeholder set is what both share.
+        tmpl::check("the errand prompt", std::slice::from_ref(&errand_prompt()))?;
         if self.scheduler.tick_secs == 0 {
             anyhow::bail!("scheduler.tick_secs must be at least 1");
         }
@@ -565,35 +587,49 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_errands_merge_under_instance_prompts() {
-        let cfg = parse("[prompts]\nrefine = \"custom {plan} {instruction}\"\n").unwrap();
-        assert_eq!(cfg.prompts["refine"], "custom {plan} {instruction}");
-        // The names the instance did not touch keep their defaults.
+    fn the_trigger_prompts_merge_under_instance_overrides() {
+        let cfg = parse("[prompts]\nritual = \"custom {ritual}\"\n").unwrap();
+        assert_eq!(cfg.prompts["ritual"], "custom {ritual}");
+        // The name the instance did not touch keeps its default.
         assert!(cfg.prompts["act"].contains("{procedure}"));
-        assert!(cfg.prompts["ritual"].contains("{procedure}"));
     }
 
     #[test]
-    fn refine_never_names_the_skill_index() {
-        // Refinement reshapes the plan, never executes it — handing it the
-        // execution procedures would invite exactly that (decision 0055).
+    fn the_table_carries_the_triggers_and_nothing_else() {
+        // The operator's errand is not a `[prompts]` entry and has no name to
+        // declare (decision 0060) — an instance adding a key gets a prompt
+        // nothing fires, which `errand_prompt` exists so nobody needs.
         let prompts = default_prompts();
-        assert!(!prompts["refine"].contains("{skills}"));
-        assert!(prompts["act"].contains("{skills}"));
-        assert!(prompts["ritual"].contains("{skills}"));
+        let mut names: Vec<&String> = prompts.keys().collect();
+        names.sort();
+        assert_eq!(names, vec!["act", "ritual"]);
     }
 
     #[test]
-    fn refine_never_names_the_role_context() {
-        // The mandate and holder are execution context (decision 0058) — the
-        // same line 0055 drew for {skills}. Act and ritual carry both.
-        let prompts = default_prompts();
-        for key in ["{mandate}", "{holder}"] {
-            assert!(!prompts["refine"].contains(key));
-            assert!(prompts["act"].contains(key), "act lost {key}");
-            assert!(prompts["ritual"].contains(key), "ritual lost {key}");
+    fn the_errand_prompt_frames_what_the_instruction_cannot() {
+        // The ask is the operator's; the framing is the runtime's, and this
+        // is the whole of it (decision 0060).
+        let errand = errand_prompt();
+        for key in [
+            "{instruction}",
+            "{delegation}",
+            "{escalate_to}",
+            "{mandate}",
+            "{holder}",
+            "{skills}",
+            "{procedure}",
+        ] {
+            assert!(errand.contains(key), "the errand prompt lost {key}");
         }
+        // Placeholder discipline is shared with the configurable templates.
+        tmpl::check("errand", std::slice::from_ref(&errand)).unwrap();
+        // It states no write contract of its own: what bounds the session is
+        // the mandate and the automation class, not a clause copied from
+        // refine, whose contract fit refinement and nothing else.
+        assert!(!errand.contains("never claim the plan"));
     }
+
+
 
     #[test]
     fn the_act_verdict_clause_spells_every_exit_as_a_command() {
@@ -607,18 +643,10 @@ mod tests {
         assert!(act.contains("`trellis plan block {plan} --by {owner} --asks …`"));
     }
 
-    #[test]
-    fn an_extra_prompt_key_is_a_new_requestable_errand() {
-        let cfg = parse("[prompts]\naudit = \"audit {plan}: {instruction}\"\n").unwrap();
-        assert_eq!(
-            crate::daemon::errands_available(&cfg),
-            vec!["audit".to_string(), "refine".to_string()]
-        );
-    }
 
     #[test]
-    fn an_errand_template_still_catches_misspelled_placeholders() {
-        let err = parse("[prompts]\naudit = \"{instrucion}\"\n").unwrap_err();
+    fn a_prompt_template_still_catches_misspelled_placeholders() {
+        let err = parse("[prompts]\nritual = \"{instrucion}\"\n").unwrap_err();
         assert!(err.to_string().contains("instrucion"), "{err}");
     }
 

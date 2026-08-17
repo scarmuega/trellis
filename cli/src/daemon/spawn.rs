@@ -44,6 +44,11 @@ pub struct InFlightView {
     pub log: String,
     pub started: String,
     pub token: Option<String>,
+    /// The herdr pane this session runs in, when the backend has one — the
+    /// address an operator attaches to. `None` under the process backend,
+    /// whose sessions are headless children with only a log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
 }
 
 #[derive(Debug)]
@@ -116,6 +121,8 @@ impl Spawner {
                 log: f.log.clone(),
                 started: f.started.clone(),
                 token: f.token.clone(),
+                // A headless child has no pane to attach to; the log is it.
+                pane: None,
             })
             .collect();
         views.sort_by(|a, b| a.key.cmp(&b.key));

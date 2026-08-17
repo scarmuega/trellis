@@ -143,28 +143,22 @@ retain = "on-failure"
 # herdr and the next daemon adopts them; "stop" closes their workspaces.
 on_shutdown = "detach"
 
-# The errand table (decision 0051): every session the runtime spawns is an
-# entry here, name → prompt template, and the only procedure the binary
-# carries is act — {procedure} always renders commands/act.md (embedded, or
-# the --plugin-root checkout's copy), so no installed plugin is required.
-# What an errand does beyond act lives in its template, and each template is
-# self-contained (decision 0050).
+# The trigger table (decisions 0051, 0060): the two prompts the runtime fires
+# on its own, name → template. "act" is what the dispatch loop fires per
+# dispatchable plan, "ritual" what the cadence pass fires per due row. Both
+# ship as defaults, shown below verbatim; override either and you own the
+# variant. The only procedure the binary carries is act — {procedure} always
+# renders commands/act.md (embedded, or the --plugin-root checkout's copy),
+# so no installed plugin is required, and each template is self-contained
+# (decision 0050).
 #
-# Three names are the runtime's own and ship as defaults (shown below,
-# verbatim): "act" is what the dispatch loop fires per dispatchable plan,
-# "ritual" what the cadence pass fires per due row, "refine" the shipped
-# operator-requestable errand. Any OTHER key you add is a new requestable
-# errand, no recompile:
+# There is no errand entry here, and adding one buys nothing: an errand is an
+# ask written at the moment it is wanted (decision 0060), so it has no name
+# to declare and its framing is framework-authored. Ask for one with
+# `trellis dispatch request <plan> "<instruction>" [--model M] [--effort E]`,
+# or the board's Errand menu.
 #
-#   audit = """audit {plan} as {owner} (trellis runtime).
-#
-#   The ask, verbatim: {instruction}
-#
-#   {procedure}"""
-#
-# then `trellis dispatch request audit <plan> "…"`, or the board's Act menu,
-# or POST /api/plans/{slug}/errands/audit; GET /api/errands lists them. The
-# first line of every template is deliberately per-session-unique — the
+# The first line of every template is deliberately per-session-unique — the
 # herdr backend proves a prompt landed by matching its opening against pane
 # scrollback. An instance that prefers the installed-plugin spelling sets a
 # one-liner back — e.g. act = "/trellis:act {owner} advance {plan} …" — and
@@ -194,23 +188,6 @@ Execute the ritual "{ritual}" from rituals.md as {executor}: read its row and ta
 {holder}
 
 {skills}
-
-The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's trellis.toml and domain.md are authoritative over it where they differ.
-
-{procedure}"""
-
-# The shipped requestable errand (decision 0048): the operator's
-# {instruction} rides verbatim, and the refinement contract is this
-# template's own prose — rewrite it here and you own the variant.
-refine = """refine {plan} as {owner} (trellis runtime).
-
-Act as {owner}: refine {plan} — reshape its content, never execute it. The operator's instruction, verbatim: {instruction}
-
-{delegation}
-
-The runtime has already resolved you as the plan's owner and verified the plan is live and owned; the acting-role marker is already stamped (leave it alone); escalations go to {escalate_to}.
-
-The refinement contract: the write target is the plan artifact itself, plus any new plans a split produces — nothing else; never claim the plan, never advance its contexts:, never touch the solution or the problem space. New plans from a split are filed status: draft with this plan's owner:, sequenced with awaits:. Keep frontmatter valid; preserve status: unless the instruction says otherwise. The plan's automation class still decides how the edit lands; anything beyond the owner's authority is an escalation, not an improvisation. Report what changed, plans created by a split, and escalations raised.
 
 The procedure below is the trellis framework's commands/act.md, rendered into this prompt so no installed plugin is required; the domain root's trellis.toml and domain.md are authoritative over it where they differ.
 
