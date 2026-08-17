@@ -151,12 +151,12 @@ idle_grace_secs = 120
 # `trellis dispatch request <plan> "<instruction>" [--model M] [--effort E]`,
 # or the board's Errand menu.
 #
-# The first line of every template is deliberately per-session-unique — the
-# herdr backend proves a prompt landed by matching its opening against pane
-# scrollback. An instance that prefers the installed-plugin spelling sets a
-# one-liner back — e.g. act = "/trellis:act {owner} advance {plan} …" — and
-# everything renders as before; the daemon always supplies every placeholder
-# and the template chooses which to name.
+# The first line of every template names what the session is for, which is
+# what an operator sees at the top of the pane when they attach. An instance
+# that prefers the installed-plugin spelling sets a one-liner back — e.g.
+# act = "/trellis:act {owner} advance {plan} …" — and everything renders as
+# before; the daemon always supplies every placeholder and the template
+# chooses which to name.
 [prompts]
 act = """{plan} — dispatched act as {owner} (trellis runtime).
 

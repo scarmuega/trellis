@@ -12,6 +12,21 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 `## [x.y.z]` section here and gets a matching `vx.y.z` git tag.
 `cli/tests/lockstep.rs` fails the build on a half-done one.
 
+## [0.24.1] - 2026-08-17
+
+### Fixed
+
+- **`template/runtime.toml` still described the prompt-echo needle.** The
+  `[prompts]` section explained that a template's first line is
+  "deliberately per-session-unique" because the herdr backend "proves a
+  prompt landed by matching its opening against pane scrollback" — a
+  mechanism 0.24.0 deleted. The kernel's own copy of that comment was
+  corrected in the same release; the template's was missed, and the template
+  is what every scaffolded root copies, so the stale explanation propagated
+  into instances. The first line still names what the session is for — that
+  is what an operator reads at the top of a pane they attach to — which is
+  now what the comment says.
+
 ## [0.24.0] - 2026-08-17
 
 ### Removed
