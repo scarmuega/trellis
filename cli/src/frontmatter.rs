@@ -238,6 +238,56 @@ impl Frontmatter {
     pub fn parsed(&self) -> bool {
         self.doc.is_some()
     }
+
+    /// Every declared field, shape preserved — what the author wrote, not
+    /// what a consumer went looking for. Key order is the serializer's
+    /// (alphabetical), not the document's: a rendering order is the view's
+    /// decision, and this is the data.
+    ///
+    /// The typed accessors above each answer one question a caller already
+    /// knew to ask, which is right for the kernel and wrong for a surface
+    /// that must render a field nobody has heard of. Unparsed frontmatter
+    /// yields `None` rather than a line-scanned guess: the lenient fallbacks
+    /// exist so one known key still resolves when the block is malformed,
+    /// and inventing a shape for every key on that path would put fiction in
+    /// a view (lint item 6 owns the malformed block).
+    pub fn fields(&self) -> Option<serde_json::Value> {
+        let hash = self.doc.as_ref()?.as_hash()?;
+        let mut out = serde_json::Map::new();
+        for (k, v) in hash {
+            if let Some(key) = yaml_to_string(k) {
+                out.insert(key, yaml_to_json(v));
+            }
+        }
+        Some(serde_json::Value::Object(out))
+    }
+}
+
+/// A YAML node as JSON, so a field's declared shape survives the trip to a
+/// consumer that cannot know the schema in advance. Dates and other
+/// unquoted scalars land as the strings they were written as — the tree's
+/// own vocabulary, never a reformatted one.
+fn yaml_to_json(y: &Yaml) -> serde_json::Value {
+    match y {
+        Yaml::String(s) => s.clone().into(),
+        Yaml::Integer(i) => (*i).into(),
+        Yaml::Boolean(b) => (*b).into(),
+        Yaml::Real(r) => r
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or_else(|| r.clone().into()),
+        Yaml::Array(items) => items.iter().map(yaml_to_json).collect(),
+        Yaml::Hash(h) => serde_json::Value::Object(
+            h.iter()
+                .filter_map(|(k, v)| yaml_to_string(k).map(|k| (k, yaml_to_json(v))))
+                .collect(),
+        ),
+        // `key:` with nothing after it, and the alias/tag forms the tree
+        // never uses.
+        _ => serde_json::Value::Null,
+    }
 }
 
 #[cfg(test)]

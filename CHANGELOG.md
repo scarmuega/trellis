@@ -14,6 +14,37 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ## [Unreleased]
 
+### Changed
+
+- **The board renders what the author declared, not a hand-picked five.**
+  `/api/artifacts/` served only `facts` — the kernel's computed projection,
+  per-kind and compiled in — so of a plan's twelve declared keys the drawer
+  showed five and dropped `contexts:`, `metrics:`, `subdomains:`,
+  `decisions:`, `tags:`, and `pr:` behind "full page ↗" and a run-together
+  paragraph of raw frontmatter. A domain adds fields (rule 4), so a surface
+  that renders only what this build expects goes stale the moment an instance
+  declares something new. `Frontmatter::fields()` now serializes every
+  declared key with its shape preserved, served alongside `facts` as
+  `frontmatter` — the two are kept separate because neither contains the
+  other: one is what the kernel computed, one is what the author wrote. The
+  board picks a component per field *type*, with the model's own fields named
+  in a dictionary and everything else assigned by value shape, falling back to
+  read-only text; a mandate's nested `authority:` renders as indented text and
+  a `scope:` glob is deliberately not linked, since it addresses a set rather
+  than an artifact.
+- **Escalation records read as records, not YAML.** An escalation is body
+  content — a fenced `yaml` block under `## Escalations` (spec/runtime.md) —
+  and rendered as a code block it buried the one line that matters, `asks:`,
+  between a date and a paragraph of evidence. The fence is now intercepted and
+  drawn as a card in place: the ask first, the ceremony as chrome, the long
+  `attempted:`/`blocked:` narration folded away, amber while open and neutral
+  once resolved. The parser is deliberately the kernel's own
+  (`EscalationRecord::from_fence`) rather than a real YAML load, so the card
+  and `trellis escalate list` cannot show two different strings.
+- The frontmatter block is stripped from the rendered body on both surfaces:
+  with the fields shown properly above it, it was the same data twice, the
+  second time unreadable.
+
 ## [0.22.2] - 2026-08-16
 
 The changes below follow the first transcript audit of the dispatch

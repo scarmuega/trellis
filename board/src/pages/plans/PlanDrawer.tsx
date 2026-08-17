@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, FlipError } from "../../lib/api";
+import { markdownComponents, withoutFrontmatter } from "../../lib/markdown";
+import { FrontmatterFields } from "../../lib/fields";
 
 // Preset instructions for the shipped `refine` errand — UI sugar; the errand
 // accepts any instruction, and other errands get the custom box.
@@ -339,7 +341,6 @@ function Chip({ label, value }: { label: string; value: string }) {
 
 export default function PlanDrawer() {
   const { rel, open, close } = usePlanDrawer();
-
   useEffect(() => {
     if (!rel) return;
     const onKey = (e: KeyboardEvent) => {
@@ -357,7 +358,10 @@ export default function PlanDrawer() {
 
   if (!rel) return null;
   const facts = (data?.facts ?? {}) as Record<string, unknown>;
-  const awaits = Array.isArray(facts.awaits) ? (facts.awaits as string[]) : [];
+  const frontmatter = (data?.frontmatter ?? {}) as Record<string, unknown>;
+  // Derived readings, which are not frontmatter and do not belong in its
+  // grid: the kernel computed them, nobody declared them.
+  const derived = ["effective_class", "held", "dwell_days", "open_escalations"] as const;
 
   return (
     <>
@@ -366,42 +370,15 @@ export default function PlanDrawer() {
         <header className="flex items-start justify-between gap-4 border-b border-neutral-100 px-5 py-4">
           <div className="min-w-0">
             <p className="truncate font-mono text-xs text-neutral-400">{rel}</p>
+            {/* The header carries what the kernel computed; what the author
+                declared is the grid below, field by field. */}
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <StatusMenu
-                rel={rel}
-                current={
-                  typeof facts.status === "string" ? facts.status : undefined
-                }
-              />
-              {["owner", "type", "complexity", "effective_class"].map(
-                (k) =>
-                  typeof facts[k] === "string" ? (
-                    <Chip key={k} label={k.replace("_", " ")} value={String(facts[k])} />
-                  ) : null,
+              {derived.map((k) =>
+                facts[k] !== null && facts[k] !== undefined && facts[k] !== 0 ? (
+                  <Chip key={k} label={k.replace(/_/g, " ")} value={String(facts[k])} />
+                ) : null,
               )}
-              {typeof facts.held === "string" ? (
-                <Chip label="held" value={String(facts.held)} />
-              ) : null}
-              {/* Why an active plan can have no session on it: its taker
-                  handed off and the next move is a human's. */}
-              {typeof facts.handoff === "string" ? (
-                <Chip label="parked" value={String(facts.handoff)} />
-              ) : null}
             </div>
-            {awaits.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
-                <span>awaits</span>
-                {awaits.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => open(t)}
-                    className="rounded bg-sky-50 px-2 py-0.5 font-mono text-sky-700 hover:bg-sky-100"
-                  >
-                    {t.replace(/^plans\//, "").replace(/\.md$/, "")}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           <div className="flex shrink-0 items-center gap-3">
             {facts.status !== "retired" && <ActMenu rel={rel} />}
@@ -425,9 +402,33 @@ export default function PlanDrawer() {
           {isPending && <p className="text-sm text-neutral-500">Loading {rel}…</p>}
           {error && <p className="text-sm text-red-600">{String(error)}</p>}
           {data && (
-            <div className="prose prose-sm prose-neutral max-w-none">
-              <Markdown remarkPlugins={[remarkGfm]}>{data.text}</Markdown>
-            </div>
+            <>
+              <div className="mb-5 rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2.5">
+                <FrontmatterFields
+                  frontmatter={frontmatter}
+                  onOpenPlan={open}
+                  overrides={{
+                    // Status is a verb here, not a value: the same guarded
+                    // flips the CLI's lifecycle commands perform.
+                    status: (
+                      <StatusMenu
+                        rel={rel}
+                        current={
+                          typeof frontmatter.status === "string"
+                            ? frontmatter.status
+                            : undefined
+                        }
+                      />
+                    ),
+                  }}
+                />
+              </div>
+              <div className="prose prose-sm prose-neutral max-w-none">
+                <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {withoutFrontmatter(data.text)}
+                </Markdown>
+              </div>
+            </>
           )}
         </div>
       </aside>

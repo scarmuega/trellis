@@ -783,12 +783,20 @@ fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> st
                     );
                 };
                 let facts = facts::artifact(&tree, &git, &derived, rel, today);
+                // `facts` is the computed projection — the derivations a
+                // caller cannot recompute (effective class, dwell, holds) —
+                // and answers only questions the kernel knew to ask.
+                // `frontmatter` is what the author declared, every key, shape
+                // preserved, so a surface can render a field this binary has
+                // never heard of. Both, because neither contains the other.
+                let frontmatter = a.fm.as_ref().and_then(|fm| fm.fields());
                 return json(
                     request,
                     &serde_json::json!({
                         "path": a.rel,
                         "kind": format!("{:?}", a.kind).to_lowercase(),
                         "facts": facts,
+                        "frontmatter": frontmatter,
                         "text": a.text,
                     }),
                 );

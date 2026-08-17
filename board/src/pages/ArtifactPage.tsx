@@ -3,6 +3,8 @@ import { useParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "../lib/api";
+import { markdownComponents, withoutFrontmatter } from "../lib/markdown";
+import { FrontmatterFields } from "../lib/fields";
 
 export default function ArtifactPage() {
   const { "*": rel = "" } = useParams();
@@ -17,9 +19,14 @@ export default function ArtifactPage() {
 
   return (
     <article className="mx-auto max-w-3xl">
-      <p className="mb-4 font-mono text-xs text-neutral-400">{data.path}</p>
+      <p className="mb-3 font-mono text-xs text-neutral-400">{data.path}</p>
+      <div className="mb-6 rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2.5">
+        <FrontmatterFields frontmatter={(data.frontmatter ?? {}) as Record<string, unknown>} />
+      </div>
       <div className="prose prose-neutral max-w-none">
-        <Markdown remarkPlugins={[remarkGfm]}>{data.text}</Markdown>
+        <Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {withoutFrontmatter(data.text)}
+        </Markdown>
       </div>
     </article>
   );

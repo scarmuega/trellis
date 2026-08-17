@@ -39,7 +39,12 @@ export interface OrgRole {
 export interface Artifact {
   path: string;
   kind: string;
+  // The kernel's computed projection — derivations a caller cannot
+  // recompute (effective class, dwell, holds).
   facts: Record<string, unknown> | null;
+  // What the author declared, every key, shape preserved — so a field this
+  // build has never heard of still renders.
+  frontmatter: Record<string, unknown> | null;
   text: string;
 }
 

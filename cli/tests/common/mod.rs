@@ -58,6 +58,15 @@ fn copy_layer(src: &Path, dest: &Path) {
         if rel.as_os_str().is_empty() {
             continue;
         }
+        // A fixture is what the layer declares, never what the machine left
+        // lying in it. `.DS_Store` is ignored by most developers' *global*
+        // gitignore, so it is invisible to `git status`, absent from a fresh
+        // checkout, and — copied in here — silently becomes one more
+        // git-ignored path for the scope census to count. That reads as a
+        // kernel bug on one machine and passes everywhere else.
+        if entry.file_name() == ".DS_Store" {
+            continue;
+        }
         let target = dest.join(rel);
         if entry.file_type().is_dir() {
             std::fs::create_dir_all(&target).unwrap();
