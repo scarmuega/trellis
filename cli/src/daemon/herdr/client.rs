@@ -13,6 +13,7 @@
 //! breaks this client; only a version bump does, and says so.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,55 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 /// carries one request — but a counter costs nothing and reads better in a
 /// wire capture than a constant.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// What can go wrong at this wire, as three facts a caller can branch on
+/// rather than a sentence a caller has to grep.
+///
+/// The distinction that matters is the first one: a server that cannot be
+/// reached is a fact about the *fleet* — every pane it was carrying is
+/// equally unobservable, and the pool counts those passes before writing
+/// anything off. A refusal is a fact about one *request*, and carries
+/// herdr's own code so `agent_not_ready` and `agent_pane_busy` can be
+/// retried by name.
+#[derive(Debug)]
+pub enum HerdrError {
+    /// The socket could not be reached at all — no server, or it hung up.
+    Unreachable(String),
+    /// Herdr answered with a structured error.
+    Refused { code: String, message: String },
+    /// Herdr answered with something this client cannot read.
+    Protocol(String),
+}
+
+impl HerdrError {
+    /// Herdr's own error code, when it gave one.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            HerdrError::Refused { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
+    /// Whether the server itself is unreachable, as opposed to having
+    /// answered with a refusal.
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, HerdrError::Unreachable(_))
+    }
+}
+
+impl fmt::Display for HerdrError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HerdrError::Unreachable(what) => write!(f, "cannot reach herdr {what}"),
+            HerdrError::Refused { code, message } => write!(f, "herdr refused: {code}: {message}"),
+            HerdrError::Protocol(what) => write!(f, "herdr {what}"),
+        }
+    }
+}
+
+impl std::error::Error for HerdrError {}
+
+pub type Result<T> = std::result::Result<T, HerdrError>;
 
 pub struct Client {
     socket: PathBuf,
@@ -87,21 +137,21 @@ impl Client {
     /// Ping and hold the server to this client's protocol pin. The startup
     /// gate: everything after it may assume the wire means what this file
     /// thinks it means.
-    pub fn handshake(&self) -> anyhow::Result<Pong> {
+    pub fn handshake(&self) -> Result<Pong> {
         let pong: Pong = self.parse(self.request("ping", json!({}), TIMEOUT)?)?;
         if pong.protocol != PROTOCOL {
-            anyhow::bail!(
-                "herdr at {} speaks protocol {} but this trellis was built against {} — \
+            return Err(HerdrError::Protocol(format!(
+                "at {} speaks protocol {} but this trellis was built against {} — \
                  update whichever is older",
                 self.socket.display(),
                 pong.protocol,
                 PROTOCOL
-            );
+            )));
         }
         Ok(pong)
     }
 
-    pub fn notification_show(&self, title: &str, body: Option<&str>) -> anyhow::Result<()> {
+    pub fn notification_show(&self, title: &str, body: Option<&str>) -> Result<()> {
         self.request(
             "notification.show",
             json!({ "title": title, "body": body, "sound": "request" }),
@@ -112,7 +162,7 @@ impl Client {
 
     /// Create a workspace and return its id with its root pane's — the pane a
     /// session's agent starts in.
-    pub fn workspace_create(&self, cwd: &Path, label: &str) -> anyhow::Result<(String, String)> {
+    pub fn workspace_create(&self, cwd: &Path, label: &str) -> Result<(String, String)> {
         let result = self.request(
             "workspace.create",
             json!({ "cwd": cwd.display().to_string(), "label": label, "focus": false }),
@@ -123,7 +173,7 @@ impl Client {
         Ok((id, pane))
     }
 
-    pub fn workspace_close(&self, workspace_id: &str) -> anyhow::Result<()> {
+    pub fn workspace_close(&self, workspace_id: &str) -> Result<()> {
         self.request(
             "workspace.close",
             json!({ "workspace_id": workspace_id }),
@@ -134,11 +184,7 @@ impl Client {
 
     /// Stamp identity tokens on a pane, so a restarted daemon can tell its
     /// own sessions from everything else herdr is showing.
-    pub fn pane_report_tokens(
-        &self,
-        pane_id: &str,
-        tokens: &[(&str, &str)],
-    ) -> anyhow::Result<()> {
+    pub fn pane_report_tokens(&self, pane_id: &str, tokens: &[(&str, &str)]) -> Result<()> {
         let map: serde_json::Map<String, Value> = tokens
             .iter()
             .map(|(k, v)| (k.to_string(), Value::String(v.to_string())))
@@ -160,7 +206,7 @@ impl Client {
         pane_id: &str,
         args: &[String],
         timeout: Duration,
-    ) -> anyhow::Result<AgentInfo> {
+    ) -> Result<AgentInfo> {
         let result = self.request(
             "agent.start",
             json!({
@@ -179,7 +225,7 @@ impl Client {
 
     /// Submit a prompt and return immediately; completion is `agent_get`'s to
     /// observe, on the daemon's own clock.
-    pub fn agent_prompt(&self, target: &str, text: &str) -> anyhow::Result<AgentInfo> {
+    pub fn agent_prompt(&self, target: &str, text: &str) -> Result<AgentInfo> {
         let result = self.request(
             "agent.prompt",
             json!({ "target": target, "text": text }),
@@ -188,45 +234,26 @@ impl Client {
         self.agent(result)
     }
 
-    pub fn agent_get(&self, target: &str) -> anyhow::Result<AgentInfo> {
+    pub fn agent_get(&self, target: &str) -> Result<AgentInfo> {
         let result = self.request("agent.get", json!({ "target": target }), TIMEOUT)?;
         self.agent(result)
     }
 
-    /// Block until the agent settles into one of `until`. What `wait_all`
-    /// leans on, so the socket timeout stretches to cover the wait.
-    pub fn agent_wait(
-        &self,
-        target: &str,
-        until: &[&str],
-        timeout: Duration,
-    ) -> anyhow::Result<AgentInfo> {
-        let result = self.request(
-            "agent.wait",
-            json!({
-                "target": target,
-                "until": until,
-                "timeout_ms": timeout.as_millis() as u64,
-            }),
-            timeout + TIMEOUT,
-        )?;
-        self.agent(result)
-    }
-
-    pub fn agent_list(&self) -> anyhow::Result<Vec<AgentInfo>> {
+    pub fn agent_list(&self) -> Result<Vec<AgentInfo>> {
         let result = self.request("agent.list", json!({}), TIMEOUT)?;
         let agents = result
             .get("agents")
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("herdr's agent list names no agents field"))?;
-        Ok(serde_json::from_value(agents)?)
+            .ok_or_else(|| HerdrError::Protocol("agent list names no agents field".into()))?;
+        serde_json::from_value(agents)
+            .map_err(|e| HerdrError::Protocol(format!("sent an unreadable agent list: {e}")))
     }
 
     /// The agent's screen as an operator would see it, ANSI stripped — what
     /// stands in for a log file when the session ran in a pane instead of
     /// behind one. `visible` rather than `recent`: a TUI agent's story is on
     /// its alternate screen, not in the scrollback behind it.
-    pub fn agent_read(&self, target: &str, lines: u32) -> anyhow::Result<String> {
+    pub fn agent_read(&self, target: &str, lines: u32) -> Result<String> {
         let result = self.request(
             "agent.read",
             json!({ "target": target, "source": "visible", "lines": lines }),
@@ -237,68 +264,92 @@ impl Client {
 
     /// The `agent` field every agent-shaped response carries, whatever its
     /// type tag.
-    fn agent(&self, result: Value) -> anyhow::Result<AgentInfo> {
+    fn agent(&self, result: Value) -> Result<AgentInfo> {
         let agent = result
             .get("agent")
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("herdr's response names no agent"))?;
-        Ok(serde_json::from_value(agent)?)
+            .ok_or_else(|| HerdrError::Protocol("response names no agent".into()))?;
+        serde_json::from_value(agent)
+            .map_err(|e| HerdrError::Protocol(format!("sent an unreadable agent: {e}")))
     }
 
-    fn parse<T: serde::de::DeserializeOwned>(&self, result: Value) -> anyhow::Result<T> {
-        Ok(serde_json::from_value(result)?)
+    fn parse<T: serde::de::DeserializeOwned>(&self, result: Value) -> Result<T> {
+        serde_json::from_value(result)
+            .map_err(|e| HerdrError::Protocol(format!("sent an unreadable answer: {e}")))
     }
 
     /// One connection, one line out, one line back. Returns the `result`
     /// value; a herdr-side error becomes an `Err` carrying its code and
     /// message.
-    fn request(&self, method: &str, params: Value, timeout: Duration) -> anyhow::Result<Value> {
-        let stream = UnixStream::connect(&self.socket).map_err(|e| {
-            anyhow::anyhow!(
-                "cannot reach herdr at {}: {e} — is the herdr server running?",
+    fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+        // Everything up to a well-formed answer is a fact about the server,
+        // not about the request: a socket that will not open, a write that
+        // will not land, a read that times out mid-line all mean the same
+        // thing to the pool — this pane cannot be observed right now.
+        let unreachable = |e: std::io::Error| {
+            HerdrError::Unreachable(format!(
+                "at {}: {e} — is the herdr server running?",
                 self.socket.display()
-            )
-        })?;
-        stream.set_read_timeout(Some(timeout))?;
-        stream.set_write_timeout(Some(TIMEOUT))?;
+            ))
+        };
+        let stream = UnixStream::connect(&self.socket).map_err(unreachable)?;
+        stream
+            .set_read_timeout(Some(timeout))
+            .map_err(unreachable)?;
+        stream
+            .set_write_timeout(Some(TIMEOUT))
+            .map_err(unreachable)?;
 
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed).to_string();
         let line = json!({ "id": id, "method": method, "params": params }).to_string();
         let mut writer = &stream;
-        writeln!(writer, "{line}")?;
-        writer.flush()?;
+        writeln!(writer, "{line}").map_err(unreachable)?;
+        writer.flush().map_err(unreachable)?;
 
         let mut reply = String::new();
-        BufReader::new(&stream).read_line(&mut reply)?;
+        BufReader::new(&stream)
+            .read_line(&mut reply)
+            .map_err(unreachable)?;
         if reply.trim().is_empty() {
-            anyhow::bail!("herdr closed the connection without answering {method}");
+            return Err(HerdrError::Unreachable(format!(
+                "at {}: it closed the connection without answering {method}",
+                self.socket.display()
+            )));
         }
         let reply: Value = serde_json::from_str(&reply)
-            .map_err(|e| anyhow::anyhow!("herdr sent a line that is not JSON: {e}"))?;
+            .map_err(|e| HerdrError::Protocol(format!("sent a line that is not JSON: {e}")))?;
         if let Some(error) = reply.get("error") {
-            let code = error.get("code").and_then(Value::as_str).unwrap_or("?");
-            let message = error.get("message").and_then(Value::as_str).unwrap_or("?");
-            anyhow::bail!("herdr refused {method}: {code}: {message}");
+            return Err(HerdrError::Refused {
+                code: error
+                    .get("code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?")
+                    .to_string(),
+                message: error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?")
+                    .to_string(),
+            });
         }
-        reply
-            .get("result")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("herdr answered {method} with neither result nor error"))
+        reply.get("result").cloned().ok_or_else(|| {
+            HerdrError::Protocol(format!("answered {method} with neither result nor error"))
+        })
     }
 }
 
 /// A string at a path into a JSON value, with the path in the error — the
 /// difference between "herdr changed" and an hour of printf.
-fn string_at(value: &Value, path: &[&str]) -> anyhow::Result<String> {
+fn string_at(value: &Value, path: &[&str]) -> Result<String> {
     let mut at = value;
     for key in path {
         at = at
             .get(key)
-            .ok_or_else(|| anyhow::anyhow!("herdr's response names no {}", path.join(".")))?;
+            .ok_or_else(|| HerdrError::Protocol(format!("response names no {}", path.join("."))))?;
     }
     at.as_str()
         .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("herdr's {} is not a string", path.join(".")))
+        .ok_or_else(|| HerdrError::Protocol(format!("{} is not a string", path.join("."))))
 }
 
 #[cfg(test)]

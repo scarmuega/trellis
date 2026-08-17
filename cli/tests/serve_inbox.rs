@@ -33,6 +33,7 @@ impl Daemon {
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -77,14 +78,12 @@ impl Drop for Daemon {
 /// A root whose sessions use the back-channel, with one ready plan to dispatch.
 fn asking_fixture() -> Fixture {
     let f = Fixture::healthy();
-    let harness = f.asking_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"--mcp-config\", \"{{mcp}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"--mcp-config\", \"{{mcp}}\"]\n"
-        ),
+    common::wire_herdr(
+        &f,
+        "",
+        "[prompts]\nact = \"{plan} mcp={mcp}\"\nritual = \"{ritual} mcp={mcp}\"\n\n",
+        &["working"],
+        Some(common::asking_session("does the table move?")),
     );
     f.write(
         "plans/split-billing.md",
@@ -177,7 +176,7 @@ fn progress_is_visible_while_the_session_runs_without_opening_its_log() {
 #[test]
 fn a_ritual_session_can_ask_too_which_is_why_the_board_is_not_the_contract() {
     let f = Fixture::healthy();
-    let harness = f.asking_harness();
+    let _harness = f.asking_harness();
     f.write(
         "rituals.md",
         "---\nprovenance: authored\nowner: org/founder\n---\n# Rituals\n\n\
@@ -189,14 +188,18 @@ fn a_ritual_session_can_ask_too_which_is_why_the_board_is_not_the_contract() {
     // board structurally cannot serve. Slots are raised because every session
     // here parks on its question until answered, and a starved ritual would
     // look like a channel that does not work.
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[scheduler]\nmax_concurrent = 8\n\n\
-             [harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"--mcp-config\", \"{{mcp}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"--mcp-config\", \"{{mcp}}\"]\n"
-        ),
+    // The pane works while the exchange happens and then settles, so the
+    // one-shot rituals pass has an end — a ritual has no plan to read a
+    // verdict from, so settling is all its completion is (decision 0061).
+    let mut statuses = vec!["working"; 25];
+    statuses.push("idle");
+    common::wire_herdr(
+        &f,
+        "",
+        "[scheduler]\nmax_concurrent = 8\n\n\
+         [prompts]\nact = \"{plan} mcp={mcp}\"\nritual = \"{ritual} mcp={mcp}\"\n\n",
+        &statuses,
+        Some(common::asking_session("does the table move?")),
     );
     // Rituals are their own one-shot process now (decision 0046): it opens
     // its own ephemeral channel, drains its sessions, and `trellis inbox`
@@ -206,6 +209,7 @@ fn a_ritual_session_can_ask_too_which_is_why_the_board_is_not_the_contract() {
         .current_dir(f.root())
         .env("TRELLIS_TODAY", ANCHOR)
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

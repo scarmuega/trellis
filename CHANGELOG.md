@@ -12,7 +12,71 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 `## [x.y.z]` section here and gets a matching `vx.y.z` git tag.
 `cli/tests/lockstep.rs` fails the build on a half-done one.
 
-## [Unreleased]
+## [0.24.0] - 2026-08-17
+
+### Removed
+
+- **The process backend, and with it the last place completion was an event.**
+  `[harness] backend`, `act_cmd`, and `ritual_cmd` are gone; every session is
+  an interactive agent in a herdr pane. All three keys are still parsed and
+  refused *by name* at startup, pointing at `[harness.herdr]` — an instance
+  that set one meant it. `--once`, cron, and CI now require a running herdr,
+  refused at startup when it is configured and dead (including under
+  `--dry-run`, which still handshakes).
+- **Every screen-reading heuristic in the herdr pool** (~400 lines): the
+  prompt-echo needle matched against 10,000 lines of scrollback, the
+  status-footer monitor count, the three-second blocking settle debounce, the
+  resubmission budget and its backoff, the `agent.wait` drain with its
+  hundred-round cap, and error classification by substring — including the
+  case that matched trellis's own message text. Each existed to manufacture a
+  completion event, and the event was never needed.
+
+### Changed
+
+- **Completion is read from the plan on disk, not from the pane**
+  (`decisions/0061-completion-is-a-verdict-on-disk.md`). A settled pane is a
+  question; the answer is the plan's own status. A verdict there — moved or
+  retired, blocked, passed on, or parked behind a declared `handoff:` —
+  retires the session. No verdict and the pane is a stall: after
+  `idle_grace_secs` it is *recycled*, the plan goes back to `ready`, and the
+  retry cooldown paces the next attempt. This was already the truth every
+  other surface used (0029, 0052, and the pool's own module doc said so); the
+  runtime simply stopped inferring it from a screen.
+- **A declared `handoff:` frees the session's slot.** The rule it replaces
+  (0052's armed-monitor scrape) held a slot indefinitely with no wall-clock
+  bound at all. Work that outlives a turn must now be declared with
+  `trellis plan handoff`; the act prompt says so.
+- **The retry cooldown runs from the conclusion, not the spawn.** A session
+  that stalls for hours and is then recycled would otherwise be re-dispatched
+  by the very next pass.
+- **A failed spawn now cools down**, having previously left no attempt stamp
+  and been retried immediately.
+- **`fire` orders claim → marker → state save → spawn.** The marker and the
+  errand stamp are what startup reconciliation needs to recognise an abandoned
+  claim; written after the spawn, a crash during `agent.start` (up to a
+  minute) left an `active` plan no reconcile would ever see. The window is now
+  two syscalls.
+- `state.json`'s `last_exit` becomes `last_outcome`, carrying the reason a
+  session ended (`verdict` | `settled` | `recycled` | `gone` | `server-lost` |
+  `detached` | `stopped`). The old field was written and read by nothing.
+- Herdr errors are typed (`Unreachable` | `Refused { code }` | `Protocol`), so
+  `agent_not_ready` and `agent_pane_busy` are retried by name and server loss
+  is counted once per pass for the fleet rather than once per pane.
+- `budget_enforced` is now constantly false: no backend can cap a session.
+  `{budget}` stays legal in prompts and refused in agent flags.
+
+### Added
+
+- `[harness.herdr] idle_grace_secs` (default 120): seconds a settled session
+  is granted before its plan is judged abandoned. Below 60 the daemon notes
+  that a slow turn boundary could read as a stall — noted, not refused.
+- `plan_ops::handoff`, the kernel reader both `relinquish` and the runtime's
+  disposition check now share.
+- The test suite's fake herdr gained a session hook: a closure that runs while
+  the daemon is blocked in `agent.prompt` and writes the plan the way a real
+  session would, so the plan-lifecycle scenarios now assert against the thing
+  actually under test. It also pins `HERDR_SOCKET_PATH` to a dead path, so no
+  test can reach the operator's own fleet.
 
 ### Changed
 

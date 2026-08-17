@@ -6,84 +6,93 @@
 
 mod common;
 
-use common::{Fixture, ANCHOR};
+use common::{FakeHerdr, Fixture, ANCHOR};
 
 // The subdomain keeps ready fixtures past the scan's mechanical readiness
 // precheck (decision 0045).
 const FM: &str =
     "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
-/// Records argv and claims the plan named in its first argument.
-fn claiming_fixture() -> Fixture {
+/// A herdr-backed fixture whose session leaves `verdict` — or, with `None`,
+/// claims its plan and walks away, which is the case the recycle rule exists
+/// for. `args` is the flag array, the placeholder surface these tests read.
+fn herdr_fixture(
+    args: &str,
+    extra: &str,
+    verdict: Option<(&str, Option<&str>)>,
+    statuses: &[&str],
+) -> (Fixture, FakeHerdr) {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_acting(
+        socket.clone(),
+        statuses,
+        f.root(),
+        common::session(f.root(), verdict),
+    );
     f.write(
         "runtime.toml",
         &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"{{owner}}\", \"{{complexity}}\", \
-             \"{{model}}\", \"{{effort}}\", \"{{budget}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+            "{extra}{}act_args = [{args}]\nritual_args = [\"{{ritual}}\"]\n",
+            common::herdr_config(&socket)
         ),
     );
-    f
+    (f, herdr)
 }
 
-/// Records argv, claims the plan, and leaves the verdict a taker owes —
-/// `sh` run with `"$1"` naming the plan file.
-fn verdict_fixture(verdict: &str) -> Fixture {
-    let f = Fixture::healthy();
-    let harness = f.fake_harness_leaving("verdict-harness", verdict);
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
-    );
-    f
+/// Renders the placeholders a session is sized by, and leaves no verdict.
+fn claiming_fixture() -> (Fixture, FakeHerdr) {
+    herdr_fixture(
+        "\"{plan}\", \"{owner}\", \"{complexity}\", \"{model}\", \"{effort}\"",
+        "",
+        None,
+        &["working", "idle"],
+    )
 }
 
-/// Records argv and leaves every plan exactly as it found it.
-fn passive_fixture() -> Fixture {
-    let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[scheduler]\nmax_concurrent = 1\n\n\
-             [harness]\n\
-             act_cmd = [\"{harness}\", \"{{owner}}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
-    );
-    f
+/// Leaves the verdict a taker owes its plan.
+fn verdict_fixture(status: &str, handoff: Option<&str>) -> (Fixture, FakeHerdr) {
+    herdr_fixture(
+        "\"{plan}\"",
+        "",
+        Some((status, handoff)),
+        &["working", "idle"],
+    )
+}
+
+/// One slot, and every plan left exactly as it was found.
+fn passive_fixture() -> (Fixture, FakeHerdr) {
+    herdr_fixture(
+        "\"{owner}\", \"{plan}\"",
+        "[scheduler]\nmax_concurrent = 1\n\n",
+        None,
+        &["working", "idle"],
+    )
 }
 
 /// Which plans got a session, sorted — concurrent sessions finish in
 /// whatever order they finish, and the daemon promises nothing about it.
-fn dispatched(f: &Fixture) -> Vec<String> {
-    let mut plans: Vec<String> = f
-        .invocations()
+fn dispatched(h: &FakeHerdr) -> Vec<String> {
+    let mut plans: Vec<String> = h
+        .started_args()
         .into_iter()
-        .filter_map(|argv| argv.into_iter().find(|a| a.starts_with("plans/")))
+        .filter_map(|args| args.into_iter().find(|a| a.starts_with("plans/")))
         .collect();
     plans.sort();
     plans
 }
 
-/// The argv of the session that ran one plan.
-fn invocation_for(f: &Fixture, plan: &str) -> Vec<String> {
-    f.invocations()
+/// The flags of the session that ran one plan.
+fn invocation_for(h: &FakeHerdr, plan: &str) -> Vec<String> {
+    h.started_args()
         .into_iter()
-        .find(|argv| argv.first().map(String::as_str) == Some(plan))
-        .unwrap_or_else(|| panic!("no session ran {plan}; saw {:?}", f.invocations()))
+        .find(|args| args.first().map(String::as_str) == Some(plan))
+        .unwrap_or_else(|| panic!("no session for {plan}"))
 }
 
 #[test]
 fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -95,24 +104,17 @@ fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
     f.dispatch_once(ANCHOR, &[]);
 
     assert_eq!(
-        dispatched(&f),
+        dispatched(&herdr),
         vec!["plans/ship-it.md", "plans/think-hard.md"]
     );
     assert_eq!(
-        invocation_for(&f, "plans/ship-it.md"),
-        vec![
-            "plans/ship-it.md",
-            "founder",
-            "standard",
-            "opus",
-            "high",
-            "10"
-        ],
+        invocation_for(&herdr, "plans/ship-it.md"),
+        vec!["plans/ship-it.md", "founder", "standard", "opus", "high"],
         "an unmarked plan takes the standard session"
     );
     assert_eq!(
-        &invocation_for(&f, "plans/think-hard.md")[2..],
-        ["deep", "fable", "xhigh", "25"],
+        &invocation_for(&herdr, "plans/think-hard.md")[2..],
+        ["deep", "fable", "xhigh"],
         "the deep tier gets the deep session"
     );
 }
@@ -123,7 +125,7 @@ fn every_ready_plan_gets_one_session_sized_by_its_complexity() {
 /// from inside its run, which is the only moment it can be seen.
 #[test]
 fn the_daemon_stamps_the_acting_role_marker_around_each_session() {
-    let f = claiming_fixture();
+    let (f, _herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -151,39 +153,34 @@ fn the_daemon_stamps_the_acting_role_marker_around_each_session() {
 
 #[test]
 fn the_session_map_is_the_bindings_tuning_point() {
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\ncomplexity: mechanical\n---\n# Ship\n"),
     );
     f.dispatch_once(ANCHOR, &["--map", "mechanical=haiku:low:1"]);
-    assert_eq!(&f.invocations()[0][3..], ["haiku", "low", "1"]);
+    assert_eq!(&herdr.started_args()[0][3..], ["haiku", "low"]);
 }
 
 #[test]
 fn sessions_configured_in_runtime_toml_override_the_defaults() {
-    let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[sessions]\nstandard = \"sonnet:medium:2\"\n\n\
-             [harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"{{model}}\", \"{{effort}}\", \"{{budget}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
+    let (f, herdr) = herdr_fixture(
+        "\"{plan}\", \"{model}\", \"{effort}\"",
+        "[sessions]\nstandard = \"sonnet:medium:2\"\n\n",
+        None,
+        &["working", "idle"],
     );
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
     f.dispatch_once(ANCHOR, &[]);
-    assert_eq!(&f.invocations()[0][1..], ["sonnet", "medium", "2"]);
+    assert_eq!(&herdr.started_args()[0][1..], ["sonnet", "medium"]);
 }
 
 #[test]
 fn a_held_plan_stays_ready_and_is_never_dispatched() {
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/waits.md",
         &format!(
@@ -192,7 +189,7 @@ fn a_held_plan_stays_ready_and_is_never_dispatched() {
     );
     let out = f.dispatch_once(ANCHOR, &[]);
 
-    assert!(dispatched(&f).is_empty());
+    assert!(dispatched(&herdr).is_empty());
     assert!(out.contains("holding plans/waits.md"), "{out}");
     assert!(
         f.read("plans/waits.md").contains("status: ready"),
@@ -202,9 +199,7 @@ fn a_held_plan_stays_ready_and_is_never_dispatched() {
 
 #[test]
 fn a_claimed_plan_leaves_the_queue_which_is_what_makes_dispatch_idempotent() {
-    let f = verdict_fixture(
-        "sed 's/^status: active$/status: retired/' \"$1\" > \"$1.v\" && mv \"$1.v\" \"$1\"",
-    );
+    let (f, herdr) = verdict_fixture("retired", None);
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -214,7 +209,7 @@ fn a_claimed_plan_leaves_the_queue_which_is_what_makes_dispatch_idempotent() {
 
     // A new day, so the scan is due again — and finds nothing to do.
     f.dispatch_once("2026-08-04", &[]);
-    assert_eq!(dispatched(&f).len(), 1, "not dispatched twice");
+    assert_eq!(dispatched(&herdr).len(), 1, "not dispatched twice");
 }
 
 #[test]
@@ -222,14 +217,14 @@ fn a_session_that_ends_without_a_verdict_hands_its_plan_back_to_the_queue() {
     // The claiming harness is the failure this exists for: it takes the
     // plan and walks away. `active` with nobody holding it is a state no
     // scan reads and no tick retries — the plan would strand there.
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
     );
     let out = f.dispatch_once(ANCHOR, &[]);
 
-    assert_eq!(dispatched(&f), ["plans/ship-it.md"]);
+    assert_eq!(dispatched(&herdr), ["plans/ship-it.md"]);
     assert!(
         f.read("plans/ship-it.md").contains("status: ready"),
         "abandoned active plans go back to ready, not stranded:\n{out}"
@@ -241,9 +236,7 @@ fn a_session_that_ends_without_a_verdict_hands_its_plan_back_to_the_queue() {
 fn a_plan_parked_on_a_handoff_stays_active_and_out_of_the_queue() {
     // The taker left a proposal for its owner to rule on: the work is real,
     // it is simply not the runtime's to advance.
-    let f = verdict_fixture(
-        "awk '{print} /^status: active$/{print \"handoff: https://forge/pr/7\"}' \"$1\" > \"$1.v\" && mv \"$1.v\" \"$1\"",
-    );
+    let (f, _herdr) = verdict_fixture("active", Some("https://forge/pr/7"));
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -258,20 +251,20 @@ fn a_plan_parked_on_a_handoff_stays_active_and_out_of_the_queue() {
 
 #[test]
 fn a_ready_plan_with_no_owner_is_skipped_with_a_warning() {
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/ownerless.md",
         "---\nprovenance: authored\nstatus: ready\ntype: initiative\n---\n# Ownerless\n",
     );
     let out = f.dispatch_once(ANCHOR, &[]);
 
-    assert!(dispatched(&f).is_empty());
+    assert!(dispatched(&herdr).is_empty());
     assert!(out.contains("declares no owner"), "{out}");
 }
 
 #[test]
 fn the_concurrency_cap_defers_work_and_one_pass_drains_it() {
-    let f = passive_fixture(); // one slot, and a harness that claims nothing
+    let (f, herdr) = passive_fixture(); // one slot, and a harness that claims nothing
     for slug in ["alpha", "beta"] {
         f.write(
             &format!("plans/{slug}.md"),
@@ -285,7 +278,7 @@ fn the_concurrency_cap_defers_work_and_one_pass_drains_it() {
         "the cap was reached: {out}"
     );
     assert_eq!(
-        dispatched(&f),
+        dispatched(&herdr),
         vec!["plans/alpha.md", "plans/beta.md"],
         "and --once kept passing until the due set was drained — a cron entry \
          must not leave a day's work unstarted because the cap is two"
@@ -294,23 +287,19 @@ fn the_concurrency_cap_defers_work_and_one_pass_drains_it() {
 
 #[test]
 fn a_drained_pass_never_exceeds_the_cap_at_once() {
-    let f = passive_fixture();
-    // A harness that fails if a sibling is already running: the marker is
-    // taken for the life of the session and released on exit.
-    std::fs::write(
-        f.root().join(".trellis/bin/harness"),
-        "#!/bin/sh\n\
-         dir=.trellis/runtime/argv\n\
-         mkdir -p \"$dir\"\n\
-         if ! mkdir .trellis/runtime/slot 2>/dev/null; then\n\
-         \x20 echo overlapped > \"$dir/violation-$$\"; exit 1\n\
-         fi\n\
-         for a in \"$@\"; do echo \"$a\"; done > \"$dir/$(date +%s)-$$\"\n\
-         sleep 1\n\
-         rmdir .trellis/runtime/slot\n\
-         exit 0\n",
-    )
-    .unwrap();
+    // `retain = "never"` so every retirement closes its workspace, which
+    // makes the concurrency readable straight off the wire.
+    let (f, herdr) = herdr_fixture(
+        "\"{plan}\"",
+        "[scheduler]\nmax_concurrent = 1\n\n",
+        Some(("retired", None)),
+        &["working", "idle"],
+    );
+    f.write("runtime.toml", &{
+        let mut t = f.read("runtime.toml");
+        t.push_str("retain = \"never\"\n");
+        t
+    });
     for slug in ["alpha", "beta", "gamma"] {
         f.write(
             &format!("plans/{slug}.md"),
@@ -319,16 +308,17 @@ fn a_drained_pass_never_exceeds_the_cap_at_once() {
     }
     f.dispatch_once(ANCHOR, &[]);
 
-    assert_eq!(dispatched(&f).len(), 3, "every plan ran");
-    assert!(
-        f.invocations().iter().all(|argv| argv != &["overlapped"]),
+    assert_eq!(dispatched(&herdr).len(), 3, "every plan ran");
+    assert_eq!(
+        herdr.peak_open(),
+        1,
         "draining runs passes back to back, never two sessions in one slot"
     );
 }
 
 #[test]
 fn a_dry_run_reports_the_dispatch_without_starting_it() {
-    let f = claiming_fixture();
+    let (f, _herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -348,33 +338,32 @@ fn a_dry_run_reports_the_dispatch_without_starting_it() {
 /// every tick, forever, at session prices.
 #[test]
 fn an_unclaimed_plan_cools_down_instead_of_respawning() {
-    let f = passive_fixture(); // never claims
+    let (f, herdr) = passive_fixture(); // never claims
     f.write(
         "plans/loopy.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Loopy\n"),
     );
     f.dispatch_once(ANCHOR, &[]);
-    assert_eq!(dispatched(&f).len(), 1);
+    assert_eq!(dispatched(&herdr).len(), 1);
 
     // Same day, moments later: the plan is still ready and its session is
     // gone — the cooldown, not the calendar, is what stops the respawn.
     let out = f.dispatch_once(ANCHOR, &[]);
-    assert_eq!(dispatched(&f).len(), 1, "no respawn inside the cooldown");
+    assert_eq!(
+        dispatched(&herdr).len(),
+        1,
+        "no respawn inside the cooldown"
+    );
     assert!(out.contains("cooling down"), "{out}");
 }
 
 #[test]
 fn the_cooldown_is_the_bindings_knob() {
-    let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[scheduler]\nretry_cooldown_secs = 0\n\n\
-             [harness]\n\
-             act_cmd = [\"{harness}\", \"{{owner}}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
+    let (f, herdr) = herdr_fixture(
+        "\"{owner}\", \"{plan}\"",
+        "[scheduler]\nretry_cooldown_secs = 0\n\n",
+        None,
+        &["working", "idle"],
     );
     f.write(
         "plans/loopy.md",
@@ -383,7 +372,7 @@ fn the_cooldown_is_the_bindings_knob() {
     f.dispatch_once(ANCHOR, &[]);
     f.dispatch_once(ANCHOR, &[]);
     assert_eq!(
-        dispatched(&f).len(),
+        dispatched(&herdr).len(),
         2,
         "cooldown zero: every pass may retry an unclaimed plan"
     );
@@ -398,7 +387,7 @@ fn the_cooldown_is_the_bindings_knob() {
 fn the_runtime_claims_the_plan_before_its_session_starts() {
     // This harness still claims, the way a session on the old contract
     // would. Its snapshot is taken first, so it reports what it was handed.
-    let f = claiming_fixture();
+    let (f, _herdr) = claiming_fixture();
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
@@ -421,11 +410,16 @@ fn the_runtime_claims_the_plan_before_its_session_starts() {
 #[test]
 fn a_spawn_that_fails_puts_the_claim_back() {
     let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    // A pane that never becomes a session: herdr takes the workspace and
+    // then refuses to start the agent in it.
+    let _herdr = FakeHerdr::start_refusing(socket.clone(), "agent_unsupported");
     f.write(
         "runtime.toml",
-        "[harness]\n\
-         act_cmd = [\".trellis/bin/not-a-harness\", \"{plan}\"]\n\
-         ritual_cmd = [\".trellis/bin/not-a-harness\", \"{ritual}\"]\n",
+        &format!(
+            "{}act_args = [\"{{plan}}\"]\n",
+            common::herdr_config(&socket)
+        ),
     );
     f.write(
         "plans/ship-it.md",
@@ -438,6 +432,10 @@ fn a_spawn_that_fails_puts_the_claim_back() {
         plan.contains("status: ready"),
         "a plan nothing is working on belongs in the queue: {plan:?}"
     );
+    assert!(
+        !f.root().join(".trellis/acting-role").exists(),
+        "and the marker goes back with the claim"
+    );
 }
 
 /// `--once` skipped the lock on the reading that one pass is harmless. It is
@@ -449,19 +447,33 @@ fn a_spawn_that_fails_puts_the_claim_back() {
 fn a_one_shot_pass_refuses_to_run_beside_a_live_dispatcher() {
     let f = Fixture::healthy();
     let bin = Fixture::bin_path();
-    let harness = f.fake_harness_leaving(
-        "reentrant",
-        &format!(
-            "\x20 \"{}\" dispatch run --once > \"$dir/../second-pass\" 2>&1\n",
-            bin.display()
-        ),
+    let socket = f.root().join(".trellis/herdr.sock");
+    // The second pass runs while the first is mid-spawn — the only moment a
+    // live dispatcher exists to contend with.
+    let root = f.root().to_path_buf();
+    let herdr = FakeHerdr::start_acting(
+        socket.clone(),
+        &["working", "idle"],
+        f.root(),
+        Box::new(move |_: &str, _: &std::path::Path| {
+            let out = std::process::Command::new(&bin)
+                .arg("dispatch")
+                .arg("run")
+                .arg("--once")
+                .current_dir(&root)
+                .env("TRELLIS_TODAY", ANCHOR)
+                .output()
+                .unwrap();
+            let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+            text.push_str(&String::from_utf8_lossy(&out.stderr));
+            std::fs::write(root.join(".trellis/runtime/second-pass"), text).unwrap();
+        }),
     );
     f.write(
         "runtime.toml",
         &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
+            "{}act_args = [\"{{plan}}\"]\n",
+            common::herdr_config(&socket)
         ),
     );
     f.write(
@@ -477,7 +489,7 @@ fn a_one_shot_pass_refuses_to_run_beside_a_live_dispatcher() {
         "a one-shot pass under a live dispatcher is refused: {refusal:?}"
     );
     assert_eq!(
-        dispatched(&f).len(),
+        dispatched(&herdr).len(),
         1,
         "and it dispatched nothing of its own"
     );
@@ -490,7 +502,7 @@ fn a_one_shot_pass_refuses_to_run_beside_a_live_dispatcher() {
 /// every line it drops is exactly such a plan, and it is handed back there.
 #[test]
 fn a_plan_whose_dispatcher_died_is_handed_back_at_startup() {
-    let f = claiming_fixture();
+    let (f, herdr) = claiming_fixture();
     f.write(
         "plans/orphaned.md",
         &format!("{FM}status: active\ntype: initiative\n---\n# Orphaned\n"),
@@ -512,8 +524,88 @@ fn a_plan_whose_dispatcher_died_is_handed_back_at_startup() {
         "{out}"
     );
     assert_eq!(
-        dispatched(&f),
+        dispatched(&herdr),
         vec!["plans/orphaned.md"],
         "and the same pass picks it back up"
     );
+}
+
+/// The budget is still computed and still rendered — it simply cannot be an
+/// argument, because an interactive session has nothing to enforce it with
+/// (decision 0043). A binding that wants the session to know its ceiling
+/// says so in the prompt, and that is all the number is now: a statement.
+#[test]
+fn the_budget_reaches_the_prompt_even_though_it_can_never_be_a_flag() {
+    let (f, herdr) = herdr_fixture(
+        "\"{plan}\"",
+        "[prompts]\nact = \"{plan} budget={budget} tier={complexity}\"\n\n",
+        None,
+        &["working", "idle"],
+    );
+    f.write(
+        "plans/think-hard.md",
+        &format!("{FM}status: ready\ntype: initiative\ncomplexity: deep\n---\n# Think\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+    assert_eq!(herdr.prompts(), ["plans/think-hard.md budget=25 tier=deep"]);
+}
+
+/// The recycle is not a dead end: the plan goes back to `ready`, the
+/// cooldown paces the retry, and the next attempt is a *fresh* pane. The
+/// first pane is left open on purpose (`retain = "on-failure"`) — it is the
+/// scene of the stall, and an operator may want to read it.
+#[test]
+fn a_recycled_plan_is_retried_in_a_pane_of_its_own() {
+    let (f, herdr) = herdr_fixture(
+        "\"{plan}\"",
+        "[scheduler]\nretry_cooldown_secs = 0\n\n",
+        None,
+        &["working", "idle"],
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+    f.dispatch_once(ANCHOR, &[]);
+
+    assert_eq!(
+        dispatched(&herdr).len(),
+        2,
+        "the plan came back and went out again"
+    );
+    let panes: Vec<String> = herdr
+        .params_for("agent.start")
+        .iter()
+        .map(|p| p["pane_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_ne!(panes[0], panes[1], "a retry is a new session, not a nudge");
+    assert!(
+        !herdr.calls().iter().any(|c| c == "workspace.close"),
+        "and the stalled pane stays up for attach"
+    );
+}
+
+/// The cooldown is paced from the conclusion, not the spawn. A session that
+/// stalls for a long time and is then recycled must not be re-dispatched by
+/// the very next pass just because its attempt stamp is old.
+#[test]
+fn the_cooldown_runs_from_the_recycle_not_the_spawn() {
+    let (f, herdr) = herdr_fixture(
+        "\"{plan}\"",
+        "[scheduler]\nretry_cooldown_secs = 900\n\n",
+        None,
+        &["working", "idle"],
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    f.dispatch_once(ANCHOR, &[]);
+    // The plan is back in the queue and readable as ready…
+    assert!(f.read("plans/ship-it.md").contains("status: ready"));
+    // …and still not re-dispatched, because the recycle restarted the clock.
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert_eq!(dispatched(&herdr).len(), 1, "{out}");
+    assert!(out.contains("cooling down"), "{out}");
 }

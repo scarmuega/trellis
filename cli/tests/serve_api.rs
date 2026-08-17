@@ -27,6 +27,7 @@ impl Daemon {
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -113,17 +114,10 @@ asks: decide whether the second region waits for restock capacity
 
 fn fixture() -> Fixture {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    // A harness that names no plugin checkout, so the daemon starts without
-    // one; nothing here is meant to actually run a session.
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
-    );
+    // Flags that name no plugin checkout, so the daemon starts without one;
+    // nothing here is meant to actually run a session.
+    // The server outlives this handle: the listener thread owns its socket.
+    common::wire_herdr(&f, "\"{plan}\"", "", &["working", "idle"], None);
     f.write(
         "plans/ship-it.md",
         &format!("{FM}status: ready\ntype: initiative\ncomplexity: deep\n---\n# Ship\n"),

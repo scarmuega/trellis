@@ -85,9 +85,11 @@ mandated next taker (`trellis plan pass` — a new `owner:` and `ready` in one
 guarded move, decision 0059), or declaring a
 `handoff:` leaves the plan
 claimed with nobody holding it — a state no scan reads and no tick retries, so
-the plan strands until a human notices. When such a session ends the runtime
-flips it back to **`ready`**, which is what the state already is: released, and
-nobody has taken it. The retry cooldown then bounds how fast it comes round
+the plan strands until a human notices. When such a session goes idle the
+runtime flips it back to **`ready`**, which is what the state already is:
+released, and nobody has taken it. *Goes idle*, not *exits*: the plan is what
+the runtime reads to decide a session is finished at all (decision 0061), so
+the verdict and the completion signal are the same fact, asked once. The retry cooldown then bounds how fast it comes round
 again. A plan carrying a `handoff:` is left alone — parked on a human, not
 abandoned by an agent — and so is one the session moved itself. This is not the
 runtime judging the work: it reads the same declared field the scan does and
@@ -206,7 +208,7 @@ approval gate, and nothing schedules or triggers from it (decision 0039).
 | service | binding |
 |---|---|
 | session | Claude Code at the domain root with the `trellis` plugin; plan authoring rides the harness's plan mode via `/trellis:plan` (`commands/plan.md`) and persists to `plans/`; plan-effectiveness review via `/trellis:focus` (`commands/focus.md`); plan refinement via `/trellis:refine` (`commands/refine.md`) — `act(owner, refinement)` over a plan's content, never its execution (decision 0048) |
-| act | `/trellis:act <role> [input]` (`commands/act.md`) interactively; headless, the dispatcher renders that same command file into the spawn prompt (decision 0050) — computed facts first, then the role's mandate and any local holder package rendered whole (decision 0058), the `{skills}` index (the owner's holder skills plus each `contexts:` home's, names and paths only, bodies read lazily; decision 0055), the procedure body after, its interactive-only spans stripped (one source, two renderings; decision 0058) — so the spawned session needs no installed plugin, and any harness that takes a prompt can carry it. A domain preferring the slash spelling restores it in `runtime.toml`'s `[prompts]`; `--plugin-root` swaps a live checkout in place of the embedded procedure text, and `--plugin-dir` remains the uninstalled-checkout option for the hooks and the interactive plane's invocable skills. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). With `[harness] backend = "herdr"`, sessions run instead as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decision 0043 records |
+| act | `/trellis:act <role> [input]` (`commands/act.md`) interactively; headless, the dispatcher renders that same command file into the spawn prompt (decision 0050) — computed facts first, then the role's mandate and any local holder package rendered whole (decision 0058), the `{skills}` index (the owner's holder skills plus each `contexts:` home's, names and paths only, bodies read lazily; decision 0055), the procedure body after, its interactive-only spans stripped (one source, two renderings; decision 0058) — so the spawned session needs no installed plugin, and any harness that takes a prompt can carry it. A domain preferring the slash spelling restores it in `runtime.toml`'s `[prompts]`; `--plugin-root` swaps a live checkout in place of the embedded procedure text, and `--plugin-dir` remains the uninstalled-checkout option for the hooks and the interactive plane's invocable skills. Where the template names `{mcp}`, the session is also handed a back-channel to the daemon that spawned it (decision 0041). Sessions run as interactive agents in herdr panes — attachable, visible, alive across a daemon restart, and budget-uncapped, the trade decisions 0043 and 0061 record |
 | schedule | split by what the gap means (decision 0046): `trellis dispatch run` is the continuous pull loop — every tick it polls the tree and spawns one act per dispatchable plan, no calendar gate, a retry cooldown as the crash-loop backstop; `trellis rituals` is one idempotent pass of the wall-clock work — fire what the cadences owe today, drain, exit — invoked by cron, launchd, or a hand, as often as they like; `trellis serve` carries no clock at all |
 | ingress | **unbound.** No event-driven plane ships: an outside event reaches the domain when a human brings it into a session. The daemon's HTTP surface is read-only by construction and is deliberately not a trigger door — a call that could invoke a role would be a plane with no mandate behind it. Requesting an errand over a plan already in the domain is not ingress: no event enters, and the mandate is the one the plan's `owner:` already declares (decisions 0029, 0048, 0051). An instance that needs a real ingress binds it and records the choice |
 | gate | plugin hooks (`hooks/hooks.json` → `trellis gate`, falling back to `hooks/gate.mjs` where the binary is absent): deterministic guards on Write/Edit — no hand-edits to `provenance: generated`, no edits to committed accepted decisions, frontmatter warning on new artifacts — plus branch protection + generated CODEOWNERS for core-class review |
@@ -399,18 +401,31 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   rides *over* the records through the channel-adapter seam in `trellis serve`
   (decision 0038); the adapter that ships is `[[channels]] kind = "herdr"`
   (decision 0043), and the record stays the system of record either way.
-- Under `backend = "herdr"` the per-session budget is unenforced —
-  `--max-budget-usd` works only with `--print` — so the complexity map's budget
-  leg is refused in those templates rather than silently ignored, and the bound
-  on a runaway session is the operator's attention. Completion is a settled
-  state, not an exit code: a session that settles having done nothing reads as
-  finished cleanly, and the plan's own status remains the truth that matters.
-  Two settles are read as still-running rather than finished — one whose prompt
-  never echoed into the pane (it is put back in), and one whose harness still
-  reports armed background monitors, since a monitor is a standing promise to
-  re-invoke the session. The second holds its slot indefinitely and shows as
-  `[waiting]`: nothing here bounds a session's wall-clock, because the work a
-  monitor is minding legitimately takes hours.
+- The per-session budget is unenforced — `--max-budget-usd` works only with
+  `--print`, and every session is an interactive pane (decision 0061) — so the
+  complexity map's budget leg is refused in agent flags rather than silently
+  ignored, and the bound on a runaway session is the operator's attention.
+  `{budget}` remains a legal *prompt* placeholder: a session may be told its
+  ceiling, and nothing holds it to one.
+- **Completion is read from the plan, not from the pane** (decision 0061).
+  There is no exit code: a settled pane is a question, and the answer is the
+  plan's own status on disk. A verdict there — moved or retired, blocked,
+  passed on, or parked behind a declared `handoff:` — retires the session. No
+  verdict and the pane is a stall: after `harness.herdr.idle_grace_secs` it is
+  *recycled* — the plan goes back to `ready` (`plan_ops::relinquish`), the
+  workspace closes, and the retry cooldown, re-stamped at the recycle, paces
+  the next attempt. A settle is believed at the second consecutive sighting,
+  so a dialog rendering mid-turn costs a tick rather than a workspace.
+- Work that outlives a turn must be *declared*. A session parking a long
+  build or a background monitor writes `trellis plan handoff`; the runtime
+  reads that off the plan and retires the pane, freeing the slot. Undeclared
+  background work is lost with the recycled session — the runtime infers
+  nothing from what the pane's status line says.
+- A prompt the agent drops at startup is not detected as such: it produces a
+  pane that did nothing, recovered as any stall is. For a plan that costs the
+  grace plus the cooldown; for a *ritual* — which has no artifact to read a
+  verdict from, so settling is its whole completion — it costs the run, until
+  the next cadence.
 - Herdr's `blocked` state is heuristic screen-matching unless herdr's own
   claude integration hook is installed (`herdr integration install claude`),
   and it is session-level only: it toasts and holds the slot, and never writes

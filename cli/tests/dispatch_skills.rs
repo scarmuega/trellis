@@ -5,27 +5,19 @@
 
 mod common;
 
-use common::{Fixture, ANCHOR};
+use common::{FakeHerdr, Fixture, ANCHOR};
 
 const FM: &str = "---\nprovenance: authored\nowner: org/founder\nsubdomains: [problem/outdoor-retail-channel.md]\n";
 
-fn fixture() -> Fixture {
+fn fixture() -> (Fixture, FakeHerdr) {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"{{prompt}}\"]\n"
-        ),
-    );
-    f
+    let herdr = common::wire_herdr(&f, "", "", &["working", "idle"], None);
+    (f, herdr)
 }
 
 #[test]
 fn an_act_prompt_indexes_skills_from_both_homes() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     // Identity-bound technique: no description frontmatter, so the H1 serves.
     f.write(
         "org/founder/holder/skills/door-outreach/README.md",
@@ -43,13 +35,13 @@ fn an_act_prompt_indexes_skills_from_both_homes() {
 
     f.dispatch_once(ANCHOR, &[]);
 
-    let argv = &f.invocations()[0];
+    let prompt = &herdr.prompts()[0];
     // The first line still discriminates (the herdr needle, decision 0050).
     assert_eq!(
-        argv[0],
+        prompt.lines().next().unwrap(),
         "plans/stock-doors.md — dispatched act as founder (trellis runtime)."
     );
-    let prompt = argv.join("\n");
+
     assert!(prompt.contains("## Skills"), "{prompt}");
     assert!(
         prompt.contains(
@@ -72,7 +64,7 @@ fn an_act_prompt_indexes_skills_from_both_homes() {
 
 #[test]
 fn a_ritual_prompt_carries_only_the_executors_holder_skills() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.write(
         "rituals.md",
         "---\nprovenance: authored\nowner: org/founder\n---\n# Rituals\n\n\
@@ -93,9 +85,12 @@ fn a_ritual_prompt_carries_only_the_executors_holder_skills() {
 
     f.rituals_once(ANCHOR, &[]);
 
-    let argv = &f.invocations()[0];
-    assert_eq!(argv[0], "lint sweep");
-    let prompt = argv[1..].join("\n");
+    let prompt = &herdr.prompts()[0];
+    assert_eq!(
+        prompt.lines().next().unwrap(),
+        "ritual lint sweep — executed by org/steward (trellis runtime)."
+    );
+    let prompt = prompt.clone();
     assert!(
         prompt
             .contains("- lint-sweep — Lint sweep → org/steward/holder/skills/lint-sweep/README.md"),
@@ -106,7 +101,7 @@ fn a_ritual_prompt_carries_only_the_executors_holder_skills() {
 
 #[test]
 fn no_skills_renders_nothing_and_the_spawn_still_succeeds() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.write(
         "plans/stock-doors.md",
         &format!("{FM}status: ready\ntype: initiative\ncontexts: [solution/kit-kitchen]\n---\n# Stock doors\n"),
@@ -114,8 +109,8 @@ fn no_skills_renders_nothing_and_the_spawn_still_succeeds() {
 
     f.dispatch_once(ANCHOR, &[]);
 
-    let argv = &f.invocations()[0];
-    let prompt = argv.join("\n");
+    let prompt = &herdr.prompts()[0];
+
     assert!(!prompt.contains("## Skills"), "{prompt}");
     // The rest of the prompt rendered in full around the empty value.
     assert!(prompt.contains("Bind to the domain root"), "{prompt}");

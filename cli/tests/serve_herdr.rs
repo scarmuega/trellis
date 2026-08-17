@@ -18,32 +18,20 @@ fn fake(f: &Fixture, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeH
     FakeHerdr::start(f.root().join(".trellis/herdr.sock"), statuses, agents)
 }
 
-/// Process backend with the claiming fake harness, plus the herdr channel.
+/// Sessions in panes, plus the same server wired as the escalation channel.
 fn channel_fixture(f: &Fixture, socket: &std::path::Path) {
-    let harness = f.fake_harness();
     f.write(
         "runtime.toml",
         &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n\n\
-             [[channels]]\n\
-             kind = \"herdr\"\n\
-             socket = \"{}\"\n",
+            "{}\n[[channels]]\nkind = \"herdr\"\nsocket = \"{}\"\n",
+            common::herdr_config(socket),
             socket.display()
         ),
     );
 }
 
 fn herdr_backend_fixture(f: &Fixture, socket: &std::path::Path) {
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\nbackend = \"herdr\"\n\n\
-             [harness.herdr]\nsocket = \"{}\"\n",
-            socket.display()
-        ),
-    );
+    f.write("runtime.toml", &common::herdr_config(socket));
 }
 
 const BLOCKED_WITH_RECORD: &str = "---\nprovenance: authored\nowner: org/founder\n\
@@ -91,7 +79,12 @@ fn a_configured_channel_with_no_herdr_behind_it_refuses_startup() {
 #[test]
 fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     let f = Fixture::healthy();
-    let herdr = fake(&f, &["idle"], Vec::new());
+    let herdr = FakeHerdr::start_acting(
+        f.root().join(".trellis/herdr.sock"),
+        &["working", "idle"],
+        f.root(),
+        common::session(f.root(), Some(("retired", None))),
+    );
     herdr_backend_fixture(&f, &herdr.socket);
     f.write(
         "plans/ship-it.md",
@@ -99,11 +92,12 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     );
 
     let out = f.dispatch_once(ANCHOR, &[]);
-    assert!(out.contains("herdr backend: fake"), "{out}");
+    assert!(out.contains("herdr: fake"), "{out}");
     assert!(out.contains("started act plans/ship-it.md"), "{out}");
 
     // The lifecycle, in order: a workspace, identity on its pane, the agent,
-    // the prompt, the wait, the scrollback, the cleanup.
+    // the prompt, the sightings, the scrollback, the cleanup. No agent.wait:
+    // nothing here waits on a screen state (decision 0061).
     let calls = herdr.calls();
     let position = |m: &str| {
         calls
@@ -114,9 +108,13 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     assert!(position("workspace.create") < position("pane.report_metadata"));
     assert!(position("pane.report_metadata") < position("agent.start"));
     assert!(position("agent.start") < position("agent.prompt"));
-    assert!(position("agent.prompt") < position("agent.wait"));
-    assert!(position("agent.wait") < position("agent.read"));
+    assert!(position("agent.prompt") < position("agent.get"));
+    assert!(position("agent.get") < position("agent.read"));
     assert!(position("agent.read") < position("workspace.close"));
+    assert!(
+        !calls.iter().any(|c| c == "agent.wait"),
+        "completion is read from the plan, never waited for on screen: {calls:?}"
+    );
 
     let start = &herdr.params_for("agent.start")[0];
     assert_eq!(start["kind"], "claude");
@@ -155,24 +153,29 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
 
     // The run is bookkept like any other, and the log holds the pane's tail.
     let state = f.state();
-    assert_eq!(state["runs"]["plan:plans/ship-it.md"]["last_exit"], 0);
+    assert_eq!(
+        state["runs"]["plan:plans/ship-it.md"]["last_outcome"], "verdict",
+        "the plan said what happened, so the session is done"
+    );
     let log = tokens["trellis_log"].as_str().unwrap();
     let text = f.read(&format!(".trellis/runtime/logs/{log}"));
     assert!(text.contains("# act plans/ship-it.md → org/founder"), "{text}");
     assert!(text.contains("fake scrollback tail"), "{text}");
 }
 
-/// Observed live (2026-08-14): a session that parks a background monitor and
-/// ends its turn settles `idle` while its work is still in motion — the
-/// monitor is a standing promise to re-invoke it. Reaping there retired a
-/// plan mid-flight and stranded it `active`.
+/// What replaced the footer scrape (decision 0061). A session that parks
+/// background work no longer proves it by what its status line says — it
+/// declares a `handoff:`, and the runtime reads that off the plan. The pane
+/// is then free to go, which is the gain: the old rule held the slot
+/// forever, with no clock on it at all.
 #[test]
-fn a_session_idle_with_live_monitors_is_not_finished() {
+fn a_session_that_declares_a_handoff_frees_its_slot_and_keeps_its_plan() {
     let f = Fixture::healthy();
-    let herdr = FakeHerdr::start_with_footer(
+    let herdr = FakeHerdr::start_acting(
         f.root().join(".trellis/herdr.sock"),
-        &["idle"],
-        "  ⏵⏵ auto mode on · 2 shells, 1 monitor · ctrl+t to hide tasks",
+        &["working", "idle"],
+        f.root(),
+        common::session(f.root(), Some(("active", Some("https://forge/pr/7")))),
     );
     herdr_backend_fixture(&f, &herdr.socket);
     f.write(
@@ -181,43 +184,32 @@ fn a_session_idle_with_live_monitors_is_not_finished() {
     );
 
     let out = f.dispatch_once(ANCHOR, &[]);
-    assert!(
-        out.contains("idle with background monitors armed — left running"),
-        "{out}"
+    assert!(out.contains("parked on https://forge/pr/7"), "{out}");
+
+    let plan = f.read("plans/ship-it.md");
+    assert!(plan.contains("status: active"), "{plan}");
+    assert!(plan.contains("handoff: https://forge/pr/7"), "{plan}");
+    assert_eq!(
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_outcome"], "verdict",
+        "a declared park is an answer, not a stall"
     );
     assert!(
-        !herdr.calls().contains(&"workspace.close".to_string()),
-        "a session still working keeps its pane: {:?}",
-        herdr.calls()
-    );
-    let shown = herdr.params_for("notification.show");
-    assert_eq!(shown.len(), 1, "{shown:?}");
-    assert!(
-        shown[0]["title"]
-            .as_str()
-            .unwrap()
-            .starts_with("session waiting:"),
-        "{shown:?}"
-    );
-    assert!(
-        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"].is_null(),
-        "no exit is reported for a session that never ended"
+        herdr.calls().iter().any(|c| c == "workspace.close"),
+        "and the pane goes: nobody is typing in it"
     );
 }
 
 /// Observed live: herdr accepts `agent.prompt` while Claude Code is still
 /// starting up and the injected text vanishes — the pane settles `idle` over
-/// an empty input. The pool must not read that as a finished turn; it puts
-/// the prompt back in.
+/// an empty input. There is no longer any machinery for this, and none is
+/// needed: a dropped prompt is a session that did nothing, which is exactly
+/// what an unaccounted-for plan already means. It is recycled, and the
+/// cooldown paces the retry (decision 0061).
 #[test]
-fn a_prompt_dropped_at_startup_is_resubmitted() {
+fn a_prompt_that_never_landed_is_just_a_session_that_did_nothing() {
     let f = Fixture::healthy();
-    let herdr = FakeHerdr::start_dropping(
-        f.root().join(".trellis/herdr.sock"),
-        &["idle"],
-        Vec::new(),
-        1,
-    );
+    // The session never writes anything — the shape a dropped prompt has.
+    let herdr = fake(&f, &["idle"], Vec::new());
     herdr_backend_fixture(&f, &herdr.socket);
     f.write(
         "plans/ship-it.md",
@@ -225,42 +217,18 @@ fn a_prompt_dropped_at_startup_is_resubmitted() {
     );
 
     let out = f.dispatch_once(ANCHOR, &[]);
-    assert!(out.contains("prompt was dropped at startup — resubmitted (1/2)"), "{out}");
-
-    let prompts = herdr.params_for("agent.prompt");
-    assert_eq!(prompts.len(), 2, "the drop, then the resubmission: {prompts:?}");
-    assert_eq!(prompts[0]["text"], prompts[1]["text"], "the same prompt goes back in");
-    assert_eq!(
-        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"], 0,
-        "the resubmitted turn is the run"
-    );
-}
-
-#[test]
-fn a_session_that_never_takes_its_prompt_is_written_off_not_declared_done() {
-    let f = Fixture::healthy();
-    let herdr = FakeHerdr::start_dropping(
-        f.root().join(".trellis/herdr.sock"),
-        &["idle"],
-        Vec::new(),
-        usize::MAX,
-    );
-    herdr_backend_fixture(&f, &herdr.socket);
-    f.write(
-        "plans/ship-it.md",
-        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
-    );
-
-    let out = f.dispatch_once(ANCHOR, &[]);
-    assert!(out.contains("prompt was never taken up — writing the session off"), "{out}");
-
     assert_eq!(
         herdr.params_for("agent.prompt").len(),
-        3,
-        "the drop, then the whole resubmission budget"
+        1,
+        "submitted once and never guessed at again"
     );
-    assert_ne!(
-        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"], 0,
+    assert!(out.contains("returned to ready"), "{out}");
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "the plan is back in the queue, which is the whole recovery"
+    );
+    assert_eq!(
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_outcome"], "recycled",
         "never bookkept as a success"
     );
     assert!(
@@ -299,7 +267,7 @@ fn an_adopted_session_holds_its_slot_and_is_never_spawned_twice() {
         "the adopted session is the session — nothing spawned: {calls:?}"
     );
     assert_eq!(
-        f.state()["runs"]["plan:plans/ship-it.md"]["last_exit"], 0,
+        f.state()["runs"]["plan:plans/ship-it.md"]["last_outcome"], "verdict",
         "and the drain settled it"
     );
 }
@@ -315,7 +283,7 @@ fn the_herdr_backend_with_no_herdr_behind_it_refuses_startup() {
         .unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("backend"), "{err}");
+    assert!(err.contains("drives sessions through herdr"), "{err}");
     assert!(err.contains("cannot reach herdr"), "{err}");
 }
 
@@ -325,15 +293,18 @@ fn a_parked_question_toasts_with_the_command_that_answers_it() {
     use std::time::{Duration, Instant};
 
     let f = Fixture::healthy();
-    let herdr = fake(&f, &[], Vec::new());
-    let harness = f.asking_harness();
+    let herdr = FakeHerdr::start_acting(
+        f.root().join(".trellis/herdr.sock"),
+        &["working"],
+        f.root(),
+        common::asking_session("does the table move?"),
+    );
     f.write(
         "runtime.toml",
         &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"--mcp-config\", \"{{mcp}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"--mcp-config\", \"{{mcp}}\"]\n\n\
+            "{}\n[prompts]\nact = \"{{plan}} mcp={{mcp}}\"\n\n\
              [[channels]]\nkind = \"herdr\"\nsocket = \"{}\"\n",
+            common::herdr_config(&herdr.socket),
             herdr.socket.display()
         ),
     );
@@ -349,6 +320,7 @@ fn a_parked_question_toasts_with_the_command_that_answers_it() {
         .current_dir(f.root())
         .env("TRELLIS_TODAY", common::ANCHOR)
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -402,5 +374,39 @@ fn a_dry_run_under_the_herdr_backend_reports_and_touches_nothing() {
     assert!(
         !calls.iter().any(|c| c != "ping" && c != "agent.list"),
         "a dry run only looked: {calls:?}"
+    );
+}
+
+/// The server dying takes its panes with it. That is one fact about the
+/// fleet, not one per session — but it is still an unaccounted end for every
+/// plan those panes were holding, so each goes back to the queue.
+#[test]
+fn a_herdr_that_dies_under_the_daemon_hands_its_plans_back() {
+    let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    // The server goes away the moment the session is under way, which is
+    // the window the write-off exists for.
+    let gone = socket.clone();
+    let herdr = FakeHerdr::start_acting(
+        socket,
+        &["working"],
+        f.root(),
+        Box::new(move |_: &str, _: &std::path::Path| {
+            let _ = std::fs::remove_file(&gone);
+        }),
+    );
+    herdr_backend_fixture(&f, &herdr.socket);
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+
+    assert!(out.contains("herdr is unreachable"), "{out}");
+    assert!(out.contains("writing its sessions off"), "{out}");
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "a plan whose pane is gone is nobody's: {out}"
     );
 }

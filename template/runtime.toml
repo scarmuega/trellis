@@ -40,24 +40,28 @@ retry_cooldown_secs = 900
 catchup = "once"
 
 [harness]
-# Who carries a running session (decision 0043). "process" — the daemon
-# spawns headless one-shot children itself: exit codes, budget caps, logs.
-# "herdr" — sessions run as interactive agents in herdr panes: attachable,
-# visible in the sidebar, alive across a daemon restart, and *budget-uncapped*
-# (--max-budget-usd only works with --print). Requires a running herdr
-# server; refused at startup if unreachable. See [harness.herdr] below.
-backend = "process"
-
-# argv arrays, never shell strings: a placeholder fills exactly one argument,
-# so nothing an artifact carries can become a shell word. Placeholders:
-# {prompt} {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
+# Sessions run as interactive agents in herdr panes (decisions 0043, 0061):
+# attachable, visible in the sidebar, and alive across a daemon restart.
+# Requires a running herdr server; refused at startup if unreachable —
+# configured-and-dead is wrong, not degraded.
+#
+# There is no second backend. The daemon used to spawn headless children
+# itself and read completion from their exit codes; it now reads completion
+# from the plan on disk, which is where the truth always was (decision 0061).
+# One consequence is priced in at the door: --max-budget-usd only works with
+# --print, so an interactive session is *budget-uncapped* and naming a budget
+# below is refused rather than silently unenforced.
+#
+# Agent *flags*, never a full command and never a shell string: herdr owns the
+# executable (kind), and the prompt is submitted to the running TUI rather
+# than carried in argv — so no {prompt} here, and nothing an artifact carries
+# can become a shell word. Placeholders:
+# {model} {effort} {budget} {plugin_dir} {root} {plan} {owner}
 # {ritual} {complexity} {mcp} {escalate_to} {automation} {instruction}
 # {delegation} {procedure} {executor} {skills} {mandate} {holder}. A second
-# harness (pi, Codex,
-# OpenCode) is
-# these two lines rewritten — Claude Code is the reference adapter, not a
+# agent kind is `kind` rewritten — Claude Code is the reference adapter, not a
 # hardcode, and since the default prompts are self-contained (decision 0050)
-# the second harness needs no plugin dialect of its own.
+# it needs no plugin dialect of its own.
 #
 # {mcp} is the session's back-channel: the daemon serves MCP on its own socket,
 # and a session handed the endpoint can ask a question and wait for an answer
@@ -77,7 +81,7 @@ backend = "process"
 # spawned session is this index, not the harness's own inventory — an
 # instance that also wants Claude Code's installed-skill noise suppressed
 # can add "--setting-sources", "" and "--settings",
-# '{"disableBundledSkills":true}' to act_cmd, at the price of every
+# '{"disableBundledSkills":true}' to act_args, at the price of every
 # settings-borne hook.
 #
 # {mandate} and {holder} are the acting role's mandate.md and (when the
@@ -103,26 +107,7 @@ backend = "process"
 # every PR draft by construction, and what actually bounds the session is the
 # role's mandate, the artifact's automation class, the provenance gate, and the
 # approval gate — never a flag list.
-act_cmd = [
-  "claude", "-p", "{prompt}",
-  "--permission-mode", "auto",
-  "--model", "{model}",
-  "--effort", "{effort}",
-  "--max-budget-usd", "{budget}",
-  "--mcp-config", "{mcp}",
-]
-ritual_cmd = [
-  "claude", "-p", "{prompt}",
-  "--permission-mode", "acceptEdits",
-  "--allowedTools", "Read", "Grep", "Glob", "Write", "Edit", "Bash(gh *)", "Bash(git *)",
-  "--max-budget-usd", "5",
-  "--mcp-config", "{mcp}",
-]
 
-# The herdr backend's own knobs; ignored under backend = "process". Agent
-# *flags*, not a full command: herdr owns the executable (kind), and the
-# prompt is submitted to the running TUI — so no {prompt} here, and no
-# {budget}, which is refused rather than silently unenforced.
 [harness.herdr]
 kind = "claude"
 # socket = "~/.config/herdr/herdr.sock"   # herdr's default; HERDR_SOCKET_PATH wins
@@ -136,12 +121,20 @@ ritual_args = [
   "--permission-mode", "acceptEdits",
   "--mcp-config", "{mcp}",
 ]
-# What a finished session's workspace does: "on-failure" keeps only the
-# blocked and lost ones on screen for attach; "always" | "never".
+# What a retired session's workspace does: "on-failure" keeps the scene of an
+# unaccounted end — recycled, or lost with its pane — on screen for attach,
+# and closes the ones whose plan says what happened; "always" | "never".
 retain = "on-failure"
 # What daemon shutdown does to running sessions: "detach" leaves them in
 # herdr and the next daemon adopts them; "stop" closes their workspaces.
 on_shutdown = "detach"
+# Seconds a settled session is granted before the runtime concludes its plan
+# was abandoned, hands it back to ready, and closes the pane (decision 0061).
+# This bounds a *stall*, never work: a session with something to say says it
+# in the plan — a verdict, or a `handoff:` for work that outlives the turn —
+# and either answer retires the pane at once, whatever this is set to. Below
+# 60s the daemon notes that a slow turn boundary could read as a stall.
+idle_grace_secs = 120
 
 # The trigger table (decisions 0051, 0060): the two prompts the runtime fires
 # on its own, name → template. "act" is what the dispatch loop fires per
@@ -167,7 +160,7 @@ on_shutdown = "detach"
 [prompts]
 act = """{plan} — dispatched act as {owner} (trellis runtime).
 
-Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), the plan is already claimed for you — it went ready → active as this session started, so never claim it again — and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. Your mandate and any local holder package are rendered below, so the procedure's read-the-mandate and adopt-the-holder steps are already done — a holder ref naming a plugin agent still adopts inline per the procedure. On an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail. End with a verdict, spelled as a command: retire it (`trellis plan retire {plan}`); block it (`trellis plan block {plan} --by {owner} --asks …`); where your mandate names a hand-off, pass it to the mandated next taker (`trellis plan pass {plan} --to <role>` — the mandate's spelling wins for the role); or — if you leave a proposal for its owner to rule on and no hand-off is mandated — park it on that proposal (`trellis plan handoff {plan} <pr>`). A plan left active with no handoff is returned to ready when your session ends, and dispatched again.
+Act as {owner}: advance {plan} toward its objective — make the next increment of progress within your authority. The runtime has pre-verified the mechanical readiness items and this plan's holds, the acting-role marker is already stamped (leave it alone), the plan is already claimed for you — it went ready → active as this session started, so never claim it again — and the change mechanics are computed: {automation}; core never lands, it is proposed. Evaluate only the judgment items. Your mandate and any local holder package are rendered below, so the procedure's read-the-mandate and adopt-the-holder steps are already done — a holder ref naming a plugin agent still adopts inline per the procedure. On an uncleared blocker `trellis plan block {plan} --by {owner} --asks …` (escalations go to {escalate_to}); write escalation records with `trellis escalate add`; leave a trail. End with a verdict, spelled as a command: retire it (`trellis plan retire {plan}`); block it (`trellis plan block {plan} --by {owner} --asks …`); where your mandate names a hand-off, pass it to the mandated next taker (`trellis plan pass {plan} --to <role>` — the mandate's spelling wins for the role); or — if you leave a proposal for its owner to rule on and no hand-off is mandated — park it on that proposal (`trellis plan handoff {plan} <pr>`). The runtime reads completion from the plan itself, not from your session: a plan left active with no handoff is returned to ready once you go idle, and dispatched again. That includes work you park in the background — a long build, a monitor, anything that outlives the turn: declare it with `trellis plan handoff` or it is lost with the session.
 
 {mandate}
 

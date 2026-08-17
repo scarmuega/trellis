@@ -34,8 +34,10 @@ pub struct Run {
     /// Unix seconds of the last spawn — what the dispatcher's retry cooldown
     /// reads, since a tight loop needs finer than a date.
     pub last_attempt_secs: Option<u64>,
-    /// Exit code of that session, once it has been reaped.
-    pub last_exit: Option<i32>,
+    /// How that session ended, once it has been concluded — the `Reason`
+    /// word (decision 0061). There is no exit code to record: a session is a
+    /// pane, and what became of the *work* is in the plan, not in a number.
+    pub last_outcome: Option<String>,
     /// Log path, relative to the runtime directory.
     pub last_log: Option<String>,
     /// Which `[prompts]` errand that session ran. What a finished session is
@@ -157,9 +159,16 @@ impl State {
         let run = self.runs.entry(key.to_string()).or_default();
         run.last_fired = Some(today.to_string());
         run.last_attempt_secs = Some(now_secs());
-        run.last_exit = None;
+        run.last_outcome = None;
         run.last_log = log;
         run.last_errand = Some(errand.to_string());
+    }
+
+    /// Attach the log name to an attempt already recorded. `fired` is
+    /// written *before* the spawn, so that a crash mid-spawn still leaves
+    /// the trail startup recovery reads; the log name only exists after.
+    pub fn set_log(&mut self, key: &str, log: String) {
+        self.runs.entry(key.to_string()).or_default().last_log = Some(log);
     }
 
     /// What the last session on this key was sent to do.
@@ -167,8 +176,20 @@ impl State {
         self.runs.get(key).and_then(|r| r.last_errand.as_deref())
     }
 
-    pub fn finished(&mut self, key: &str, exit: Option<i32>) {
-        self.runs.entry(key.to_string()).or_default().last_exit = Some(exit.unwrap_or(-1));
+    /// Record how a session ended.
+    ///
+    /// An end that leaves the plan unaccounted for also re-stamps the
+    /// attempt clock. The cooldown exists to pace *retries*, and the retry
+    /// begins when the plan comes back to the queue — not when the session
+    /// that stalled was first spawned, which may have been hours earlier.
+    /// Without this a recycled session is re-dispatched by the very next
+    /// pass, cooldown or no cooldown.
+    pub fn concluded(&mut self, key: &str, reason: super::session::Reason) {
+        let run = self.runs.entry(key.to_string()).or_default();
+        run.last_outcome = Some(reason.as_str().to_string());
+        if reason.is_failure() {
+            run.last_attempt_secs = Some(now_secs());
+        }
     }
 }
 
@@ -196,7 +217,10 @@ mod tests {
             today,
             Some("a.log".into()),
         );
-        state.finished(&key_ritual("conventions lint"), Some(0));
+        state.concluded(
+            &key_ritual("conventions lint"),
+            super::super::session::Reason::Verdict,
+        );
         state.save(dir.path()).unwrap();
 
         let read = State::load_rituals(dir.path());
@@ -205,8 +229,10 @@ mod tests {
             Some(today)
         );
         assert_eq!(
-            read.runs[&key_ritual("conventions lint")].last_exit,
-            Some(0)
+            read.runs[&key_ritual("conventions lint")]
+                .last_outcome
+                .as_deref(),
+            Some("verdict")
         );
         assert!(read.last_attempt_secs(&key_ritual("conventions lint")).is_some());
     }

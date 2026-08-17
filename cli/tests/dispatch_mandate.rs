@@ -6,25 +6,17 @@
 
 mod common;
 
-use common::{Fixture, ANCHOR};
+use common::{FakeHerdr, Fixture, ANCHOR};
 
-fn fixture() -> Fixture {
+fn fixture() -> (Fixture, FakeHerdr) {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"{{prompt}}\"]\n"
-        ),
-    );
-    f
+    let herdr = common::wire_herdr(&f, "", "", &["working", "idle"], None);
+    (f, herdr)
 }
 
 #[test]
 fn an_act_prompt_renders_the_owners_mandate_and_package() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.write(
         "org/coder/mandate.md",
         "---\nprovenance: authored\nowner: org/founder\npurpose: land the code-bearing plans\nescalate-to: org/founder\nholder: holder/\n---\n# Coder\n",
@@ -40,13 +32,13 @@ fn an_act_prompt_renders_the_owners_mandate_and_package() {
 
     f.dispatch_once(ANCHOR, &[]);
 
-    let argv = &f.invocations()[0];
+    let prompt = &herdr.prompts()[0];
     // The first line still discriminates (the herdr needle, decision 0050).
     assert_eq!(
-        argv[0],
+        prompt.lines().next().unwrap(),
         "plans/land-it.md — dispatched act as coder (trellis runtime)."
     );
-    let prompt = argv.join("\n");
+
     assert!(
         prompt.contains("## Mandate — org/coder/mandate.md"),
         "{prompt}"
@@ -73,7 +65,7 @@ fn an_act_prompt_renders_the_owners_mandate_and_package() {
 
 #[test]
 fn a_ref_holder_renders_no_package_and_the_procedure_arrives_stripped() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     // The skeleton founder's holder is a ref (a human, undeclared kind) —
     // nothing to inline; the procedure's holder branch stays authoritative.
     f.write(
@@ -83,7 +75,7 @@ fn a_ref_holder_renders_no_package_and_the_procedure_arrives_stripped() {
 
     f.dispatch_once(ANCHOR, &[]);
 
-    let prompt = f.invocations()[0].join("\n");
+    let prompt = &herdr.prompts()[0];
     assert!(
         prompt.contains("## Mandate — org/founder/mandate.md"),
         "{prompt}"
@@ -110,7 +102,7 @@ fn a_ref_holder_renders_no_package_and_the_procedure_arrives_stripped() {
 
 #[test]
 fn a_ritual_prompt_renders_the_executors_mandate() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.write(
         "rituals.md",
         "---\nprovenance: authored\nowner: org/founder\n---\n# Rituals\n\n\
@@ -125,9 +117,11 @@ fn a_ritual_prompt_renders_the_executors_mandate() {
 
     f.rituals_once(ANCHOR, &[]);
 
-    let argv = &f.invocations()[0];
-    assert_eq!(argv[0], "lint sweep");
-    let prompt = argv[1..].join("\n");
+    let prompt = &herdr.prompts()[0];
+    assert_eq!(
+        prompt.lines().next().unwrap(),
+        "ritual lint sweep — executed by org/steward (trellis runtime)."
+    );
     assert!(
         prompt.contains("## Mandate — org/steward/mandate.md"),
         "{prompt}"

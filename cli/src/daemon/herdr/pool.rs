@@ -1,68 +1,69 @@
-//! The herdr session backend: one workspace per session, an interactive
-//! agent in its root pane, the prompt submitted to the running TUI.
+//! The herdr session pool: one workspace per session, an interactive agent
+//! in its root pane, the prompt submitted to the running TUI.
 //!
-//! The lifecycle inverts the spawner's. A process exits and reports a code;
-//! an interactive agent settles — `working` back to `idle` — and the pool
-//! reads that settling as completion, one `agent.get` per session per tick.
-//! Exit codes are therefore a rendering: a settled turn reports 0, a session
-//! that vanished reports none, and the truth about the *plan* stays where it
-//! always was — in the status its taker flips on disk (decision 0029).
+//! **Completion is read from disk, not from the screen** (decision 0061). A
+//! pane going idle is not an event — it is a question, and the answer lives
+//! in the plan the session was sent to advance: a verdict there (retired,
+//! blocked, passed on, or parked behind a declared `handoff:`) means the
+//! session is done, and an idle pane still holding an unaccounted-for plan
+//! is a stall, graced and then recycled. The pool never reads a plan itself
+//! — it asks its caller, through `Disposition` — so the model stays the
+//! daemon's and the panes stay this file's.
 //!
-//! What this buys over the spawner: the session is a pane — attachable,
-//! visible in herdr's sidebar, and alive across a daemon restart, where
-//! `connect` re-adopts anything carrying this root's tokens. What it costs
-//! is recorded in decision 0043, the budget cap first among the costs.
+//! What that buys is the absence of a machine: no prompt-echo matching, no
+//! status-footer parsing, no settle debounce, no resubmission budget. Every
+//! one of those existed to manufacture a completion event this pool no
+//! longer needs, and each was a reading of another program's screen.
+//!
+//! What it costs is latency. A session whose prompt was dropped at startup
+//! looks exactly like one that stalled, and is recovered the same way —
+//! after the idle grace, and then the retry cooldown — rather than in the
+//! seconds a resubmission took. Decision 0061 takes that trade deliberately.
+//!
+//! The session is a pane: attachable, visible in herdr's sidebar, and alive
+//! across a daemon restart, where `connect` re-adopts anything carrying this
+//! root's tokens.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::client::{AgentInfo, Client};
 use crate::daemon::config::{HerdrHarness, OnShutdown, Retain, RuntimeConfig};
 use crate::daemon::note;
-use crate::daemon::spawn::{shell_quote, slug, timestamp, Finished, InFlightView};
+use crate::daemon::session::{
+    append_tail, shell_quote, slug, timestamp, Finished, InFlightView, Reason,
+};
 use crate::dates;
 
 /// How long `agent.start` may take to reach an interactive prompt.
 const START: Duration = Duration::from_secs(60);
 
-/// How long `drain` will wait out one session. Not infinite, deliberately:
-/// a `--once` pass that a harness can hang forever is a cron entry that
-/// never reports.
-const WAIT: Duration = Duration::from_secs(6 * 60 * 60);
+/// How long `drain` will wait out the fleet. Not infinite, deliberately: a
+/// `--once` pass that a harness can hang forever is a cron entry that never
+/// reports.
+const DRAIN_DEADLINE: Duration = Duration::from_secs(6 * 60 * 60);
 
-/// Ticks a submitted prompt may sit with no observed state change before the
-/// prompt is resubmitted — the TUI never took it.
-const SUBMIT_PATIENCE: u32 = 3;
+/// How often `drain` re-reads the fleet while waiting it out.
+const DRAIN_BEAT: Duration = Duration::from_secs(1);
 
-/// Times a dropped prompt is submitted again before the session is written
-/// off. Observed live: herdr accepts `agent.prompt` while Claude Code is
-/// still starting up, and the injected text vanishes — the pane settles
-/// `idle` over an empty input, indistinguishable by status alone from a turn
-/// that ran to completion between ticks.
-const RESUBMITS: u32 = 2;
+/// Consecutive idle sightings before a settle is acted on. Two rather than
+/// one, and paced by the caller's tick rather than by a sleep: a permission
+/// dialog rendered mid-turn reads `idle` for a beat before the classifier
+/// calls it `blocked`, and a session that writes its verdict and then keeps
+/// composing its report would otherwise be retired mid-sentence.
+const IDLE_STREAK: u32 = 2;
 
-/// What `drain` waits before putting a dropped prompt back in. The tick loop
-/// gets this spacing for free; a drain sees the startup idle within seconds
-/// of spawning, and resubmitting into the same startup window that dropped
-/// the first prompt would burn the whole budget on one dead zone.
-const RESUBMIT_BEAT: Duration = Duration::from_secs(10);
+/// Consecutive blocked sightings before the operator is told. Same reason,
+/// mirrored: the moment after a prompt is submitted can read `blocked` and
+/// settle into the turn a beat later, and a toast on the first sighting
+/// would cry wolf.
+const BLOCKED_STREAK: u32 = 2;
 
-/// Lines of scrollback read to verify a prompt was taken up. Deeper than the
-/// retirement snapshot: the echo sits at the top of a turn's transcript, and
-/// a turn that scrolled it past this window would read as never-started.
-const VERIFY_TAIL: u32 = 10_000;
-
-/// Lines of scrollback the harness's own status furniture occupies — the
-/// footer and the turn's closing line, where the live-background-work
-/// counters sit. Read narrowly on purpose: the same words higher up are a
-/// session's prose, not a claim about what is still running.
-const FOOTER_TAIL: u32 = 16;
-
-/// Consecutive ticks the herdr server may be unreachable before every session
-/// it was carrying is written off. The server dying kills its panes, so this
-/// is acknowledgment, not abandonment.
+/// Consecutive passes the herdr server may be unreachable before every
+/// session it was carrying is written off. The server dying kills its panes,
+/// so this is acknowledgment, not abandonment.
 const SERVER_PATIENCE: u32 = 3;
 
 /// A freshly started agent may take a beat to register as promptable —
@@ -71,29 +72,23 @@ const SERVER_PATIENCE: u32 = 3;
 const PROMPT_RETRIES: u32 = 20;
 const PROMPT_BACKOFF: Duration = Duration::from_millis(500);
 
-/// Blocked must be seen twice before it is believed. Observed live: the
-/// moment after a prompt is submitted can read `blocked` and settle into the
-/// turn a beat later — a toast on the first sighting would cry wolf.
-const BLOCKED_DEBOUNCE: Duration = Duration::from_secs(3);
-
 /// Lines of scrollback copied into the session's log at retirement.
 const TAIL: u32 = 500;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Phase {
-    /// Prompt submitted; no turn observed yet.
-    Submitted,
-    Working,
-    /// Blocked once; one more sighting makes it real.
-    BlockedPending,
-    /// Waiting at its own UI for a human. Holds its slot: the pressure on
-    /// capacity is real, and hiding it would misreport the fleet.
-    Blocked,
-    /// Settled at its prompt with background monitors still armed: the turn
-    /// ended, the session did not — a monitor is a standing promise to
-    /// re-invoke it when its condition fires. Holds its slot for the same
-    /// reason `Blocked` does, and for the same reason is never retired here.
-    Waiting,
+/// What the caller knows, from disk, about the task behind a session key.
+/// The pool asks this only about a pane it has just seen settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    /// The plan has been accounted for: moved, retired, blocked, passed on,
+    /// or parked behind a declared `handoff:`. A settled pane over one of
+    /// these is a finished session.
+    Verdict,
+    /// The plan is still claimed with no verdict. A settled pane over one of
+    /// these is a stall: graced, then recycled.
+    Held,
+    /// There is no plan behind this key — a ritual. Settling is all the
+    /// completion such a session has.
+    NoPlan,
 }
 
 struct Session {
@@ -103,18 +98,18 @@ struct Session {
     log: String,
     started: String,
     token: Option<String>,
-    phase: Phase,
-    /// `state_change_seq` when the prompt went in; a settle is only a finish
-    /// if the sequence moved past it.
-    seq_at_prompt: u64,
-    /// Ticks spent in `Submitted` with nothing observed.
-    submitted_ticks: u32,
-    /// What went in, kept for two jobs: proving it landed (its echo in the
-    /// scrollback) and submitting it again when it did not. Empty for an
-    /// adopted session, whose prompt predates this daemon.
-    prompt: String,
-    /// Resubmissions spent against `RESUBMITS`.
-    resubmits: u32,
+    /// Whether this session came from a previous daemon, which changes only
+    /// what the log lines say — an adopted pane is judged like any other.
+    adopted: bool,
+    /// When the pane was first seen settled in its current spell of idleness;
+    /// cleared the moment it works again.
+    idle_since: Option<Instant>,
+    /// Consecutive settled sightings, against `IDLE_STREAK`.
+    idle_streak: u32,
+    /// Consecutive blocked sightings, against `BLOCKED_STREAK`.
+    blocked_streak: u32,
+    /// Whether the blocked toast has already gone out for this spell.
+    toasted: bool,
 }
 
 impl Session {
@@ -123,6 +118,19 @@ impl Session {
     fn target(&self) -> &str {
         &self.pane_id
     }
+
+    /// A pane waiting at its own UI holds its slot: the pressure on capacity
+    /// is real, and hiding it would misreport the fleet.
+    fn is_blocked(&self) -> bool {
+        self.blocked_streak >= BLOCKED_STREAK
+    }
+
+    fn working(&mut self) {
+        self.idle_since = None;
+        self.idle_streak = 0;
+        self.blocked_streak = 0;
+        self.toasted = false;
+    }
 }
 
 pub struct HerdrPool {
@@ -130,10 +138,10 @@ pub struct HerdrPool {
     log_dir: PathBuf,
     cfg: HerdrHarness,
     max_concurrent: usize,
+    idle_grace: Duration,
     client: Client,
     in_flight: HashMap<String, Session>,
-    /// `--once`: each task at most once per pool lifetime (`spawn.rs` has the
-    /// argument).
+    /// `--once`: each task at most once per pool lifetime.
     ledger: Option<HashSet<String>>,
     /// Consecutive reap passes that could not reach herdr at all.
     unreachable_ticks: u32,
@@ -152,12 +160,10 @@ impl HerdrPool {
     ) -> anyhow::Result<HerdrPool> {
         let client = Client::new(cfg.socket.as_deref());
         let pong = client.handshake().map_err(|e| {
-            anyhow::anyhow!(
-                "harness.backend is \"herdr\" but {e:#} — start it, or set backend = \"process\""
-            )
+            anyhow::anyhow!("the runtime drives sessions through herdr but {e} — start it")
         })?;
         note(&format!(
-            "herdr backend: {} (protocol {}) at {}",
+            "herdr: {} (protocol {}) at {}",
             pong.version,
             pong.protocol,
             client.socket().display()
@@ -167,6 +173,7 @@ impl HerdrPool {
             log_dir: RuntimeConfig::runtime_dir(root).join("logs"),
             cfg: cfg.clone(),
             max_concurrent,
+            idle_grace: Duration::from_secs(cfg.idle_grace_secs),
             client,
             in_flight: HashMap::new(),
             ledger: None,
@@ -184,9 +191,9 @@ impl HerdrPool {
 
     /// Re-enter sessions a previous daemon left running (`on_shutdown =
     /// "detach"`). Identity is the tokens `spawn` stamps on the pane; a
-    /// session found working or blocked is busy again — the guard the
-    /// process backend never had across restarts — and one found settled is
-    /// collected by the first tick's reap.
+    /// session found here is busy again — the guard the runtime never had
+    /// across restarts — and one found settled is judged by the first pass
+    /// like any other.
     fn adopt(&mut self) -> anyhow::Result<()> {
         let root = self.root.display().to_string();
         for agent in self.client.agent_list()? {
@@ -219,17 +226,12 @@ impl HerdrPool {
                     // The previous daemon's channel died with it; an adopted
                     // session runs, but can no longer ask.
                     token: None,
-                    phase: match agent.agent_status.as_str() {
-                        // Confirmed by the next tick's own sighting.
-                        "blocked" => Phase::BlockedPending,
-                        _ => Phase::Working,
-                    },
-                    // Unknown, and unneeded: an adopted session already moved
-                    // past its prompt, so any settle is a finish.
-                    seq_at_prompt: 0,
-                    submitted_ticks: 0,
-                    prompt: String::new(),
-                    resubmits: 0,
+                    adopted: true,
+                    idle_since: None,
+                    idle_streak: 0,
+                    // Confirmed by this pass's own sighting, like any other.
+                    blocked_streak: u32::from(agent.agent_status == "blocked"),
+                    toasted: false,
                 },
             );
         }
@@ -254,10 +256,10 @@ impl HerdrPool {
             .iter()
             .map(|(key, s)| InFlightView {
                 key: key.clone(),
-                label: match s.phase {
-                    Phase::Blocked => format!("{} [blocked]", s.label),
-                    Phase::Waiting => format!("{} [waiting]", s.label),
-                    _ => s.label.clone(),
+                label: if s.is_blocked() {
+                    format!("{} [blocked]", s.label)
+                } else {
+                    s.label.clone()
                 },
                 log: s.log.clone(),
                 started: s.started.clone(),
@@ -272,9 +274,9 @@ impl HerdrPool {
     }
 
     /// Launch one session: a workspace at the root, identity tokens on its
-    /// pane, the agent started, the prompt submitted. Returns the log name,
-    /// like the spawner — the log starts as a header and receives the pane's
-    /// scrollback at retirement.
+    /// pane, the agent started, the prompt submitted. Returns the log name;
+    /// the log starts as a header and receives the pane's scrollback at
+    /// retirement.
     pub fn spawn(
         &mut self,
         key: &str,
@@ -300,7 +302,7 @@ impl HerdrPool {
 
         // Everything after the workspace exists tears it down on failure: a
         // half-started session left on screen would look like work.
-        let started = (|| -> anyhow::Result<AgentInfo> {
+        let started = (|| -> anyhow::Result<()> {
             self.client.pane_report_tokens(
                 &pane_id,
                 &[
@@ -314,57 +316,32 @@ impl HerdrPool {
             // with `agent_pane_busy` while its shell is still coming up —
             // the same startup seam `agent_not_ready` is on the prompt side.
             // Same medicine: retry over the backoff window before failing.
-            let running = {
-                let mut attempt = 0;
-                loop {
-                    match self.client.agent_start(
-                        &agent_name(key),
-                        &self.cfg.kind,
-                        &pane_id,
-                        args,
-                        START,
-                    ) {
-                        Err(e)
-                            if attempt < PROMPT_RETRIES
-                                && e.to_string().contains("agent_pane_busy") =>
-                        {
-                            attempt += 1;
-                            std::thread::sleep(PROMPT_BACKOFF);
-                        }
-                        other => break other?,
-                    }
+            retry_while("agent_pane_busy", || {
+                self.client
+                    .agent_start(&agent_name(key), &self.cfg.kind, &pane_id, args, START)
+            })?;
+            // The prompt is submitted once. If the TUI drops it — which a
+            // cold start can still do — the pane simply sits idle over a
+            // claimed plan, and the idle grace recovers it (decision 0061).
+            match retry_while("agent_not_ready", || {
+                self.client.agent_prompt(&pane_id, prompt)
+            }) {
+                Ok(_) => Ok(()),
+                Err(e) if e.code() == Some("agent_not_ready") => {
+                    note(&format!(
+                        "{label}: the agent never became promptable — the session will be \
+                         recycled once its idle grace runs out"
+                    ));
+                    Ok(())
                 }
-            };
-            let mut attempt = 0;
-            loop {
-                match self.client.agent_prompt(&pane_id, prompt) {
-                    Err(e) if e.to_string().contains("agent_not_ready") => {
-                        if attempt < PROMPT_RETRIES {
-                            attempt += 1;
-                            std::thread::sleep(PROMPT_BACKOFF);
-                            continue;
-                        }
-                        // Still not promptable — a concurrent cold start can
-                        // outlast the retries. The agent runs; hand the
-                        // session over with the prompt unplaced and let the
-                        // resubmission machinery put it in.
-                        note(&format!(
-                            "{label}: agent not promptable yet — the prompt will be resubmitted"
-                        ));
-                        break Ok(running);
-                    }
-                    other => break other,
-                }
+                Err(e) => Err(e.into()),
             }
         })();
 
-        let agent = match started {
-            Ok(agent) => agent,
-            Err(e) => {
-                let _ = self.client.workspace_close(&workspace_id);
-                return Err(e);
-            }
-        };
+        if let Err(e) = started {
+            let _ = self.client.workspace_close(&workspace_id);
+            return Err(e);
+        }
 
         writeln!(file, "# herdr workspace {workspace_id}, pane {pane_id}")?;
         if let Some(ledger) = &mut self.ledger {
@@ -379,39 +356,42 @@ impl HerdrPool {
                 log: log.clone(),
                 started: stamp,
                 token,
-                phase: Phase::Submitted,
-                seq_at_prompt: agent.state_change_seq,
-                submitted_ticks: 0,
-                prompt: prompt.to_string(),
-                resubmits: 0,
+                adopted: false,
+                idle_since: None,
+                idle_streak: 0,
+                blocked_streak: 0,
+                toasted: false,
             },
         );
         Ok(log)
     }
 
-    /// One `agent.get` per session: advance each little state machine,
-    /// collect the settled. Never blocks beyond the socket timeout.
-    pub fn reap(&mut self) -> Vec<Finished> {
+    /// One `agent.get` per session, judged against what `judge` reads from
+    /// disk. Never blocks beyond the socket timeout, and never sleeps.
+    pub fn reap(&mut self, judge: &dyn Fn(&str) -> Disposition) -> Vec<Finished> {
         let mut done = Vec::new();
         let mut unreachable = false;
 
         for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
             let session = self.in_flight.get_mut(&key).expect("still tracked");
-            let agent = match self.client.agent_get(session.target()) {
+            let sighting = self.client.agent_get(session.target());
+            let agent = match sighting {
                 Ok(agent) => agent,
-                Err(e) if is_unreachable(&e) => {
+                // The server being unobservable says nothing about this
+                // pane; it is counted once for the fleet, below.
+                Err(e) if e.is_unreachable() => {
                     unreachable = true;
                     continue;
                 }
                 // Herdr answered and does not know the pane: the session is
                 // gone — closed under us, or its workspace with it.
                 Err(_) => {
-                    done.push(self.finish(&key, None));
+                    done.push(self.finish(&key, Reason::Gone));
                     continue;
                 }
             };
-            if let Some(exit) = observe(session, &agent, &self.client) {
-                done.push(self.finish(&key, exit));
+            if let Some(reason) = observe(session, &agent, judge(&key), self.idle_grace) {
+                done.push(self.finish(&key, reason));
             }
         }
 
@@ -428,7 +408,7 @@ impl HerdrPool {
                     "herdr unreachable for {SERVER_PATIENCE} passes — writing its sessions off"
                 ));
                 for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
-                    done.push(self.finish(&key, None));
+                    done.push(self.finish(&key, Reason::ServerLost));
                 }
             }
         } else {
@@ -439,100 +419,58 @@ impl HerdrPool {
         done
     }
 
-    /// Block until every session settles — what `--once` owes its caller. A
-    /// session that settles `blocked` is not waited out: a drain pass has
-    /// nobody to unblock it, so it is announced, detached, and left running
-    /// for an operator with a terminal. One settled with background monitors
-    /// armed is detached the same way, for the mirror reason: it needs nobody,
-    /// and the clock it is waiting on is not the drain's to spend.
-    pub fn drain(&mut self) -> Vec<Finished> {
+    /// Wait the fleet out — what `--once` owes its caller. Sessions that
+    /// reach a verdict retire; sessions that stall are recycled once their
+    /// grace runs out; sessions blocked at their own UI are announced and
+    /// left running, because a drain has nobody to unblock them and the next
+    /// daemon adopts them.
+    pub fn drain(&mut self, judge: &dyn Fn(&str) -> Disposition) -> Vec<Finished> {
         let mut done = Vec::new();
-        for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
-            let target = self.in_flight[&key].pane_id.clone();
-            let mut rounds = 0;
-            'session: loop {
-                let settled = loop {
-                    match self.client.agent_wait(&target, &["idle", "done", "blocked"], WAIT) {
-                        // Blocked must survive the debounce to be believed —
-                        // the moment after submission can read blocked and
-                        // settle into the turn a beat later.
-                        Ok(agent) if agent.agent_status == "blocked" && rounds < 100 => {
-                            rounds += 1;
-                            std::thread::sleep(BLOCKED_DEBOUNCE);
-                            match self.client.agent_get(&target) {
-                                Ok(again) if again.agent_status == "blocked" => break Ok(again),
-                                Ok(_) => continue,
-                                Err(e) => break Err(e),
-                            }
-                        }
-                        other => break other,
-                    }
-                };
-                match settled {
-                    Ok(agent) if agent.agent_status == "blocked" => {
-                        let session = self.in_flight.remove(&key).expect("still tracked");
-                        note(&format!(
-                            "{} is blocked in herdr — left running; attach to unblock it",
-                            session.label
-                        ));
-                        let _ = self.client.notification_show(
-                            &format!("session blocked: {}", session.label),
-                            Some("left running — attach in herdr to unblock it"),
-                        );
-                    }
-                    // Settled with monitors still armed: the session will
-                    // resume itself, on a clock a drain has no business
-                    // waiting out — a monitor may be minding an hour-long
-                    // download. Announced and left running, like a blocked
-                    // one; the next daemon adopts it.
-                    Ok(_) if monitors_live(&self.in_flight[&key], &self.client) => {
-                        let session = self.in_flight.remove(&key).expect("still tracked");
-                        note(&format!(
-                            "{} is idle with background monitors armed — left running; \
-                             it resumes itself when one fires",
-                            session.label
-                        ));
-                        let _ = self.client.notification_show(
-                            &format!("session waiting: {}", session.label),
-                            Some("left running — a background monitor will resume it"),
-                        );
-                    }
-                    Ok(_) => {
-                        // A freshly spawned agent reads settled before it has
-                        // taken any prompt at all — the wait returns on the
-                        // startup idle, not a finished turn. Same seam the
-                        // tick path verifies: no echo, no finish.
-                        let session = self.in_flight.get_mut(&key).expect("still tracked");
-                        if session.phase == Phase::Submitted
-                            && !prompt_landed(session, &self.client)
-                        {
-                            // Let the startup window that dropped the first
-                            // prompt pass before spending another one.
-                            std::thread::sleep(RESUBMIT_BEAT);
-                            match resubmit(session, &self.client) {
-                                None => continue 'session,
-                                Some(exit) => done.push(self.finish(&key, exit)),
-                            }
-                        } else if settle_survives(session, &self.client) {
-                            done.push(self.finish(&key, Some(0)));
-                        } else {
-                            // Not settled after all — a dialog or a next
-                            // turn showed up in the debounce; wait it out.
-                            continue 'session;
-                        }
-                    }
-                    Err(_) => done.push(self.finish(&key, None)),
-                }
-                break 'session;
+        let deadline = Instant::now() + DRAIN_DEADLINE;
+        loop {
+            done.extend(self.reap(judge));
+            let waiting = self.in_flight.values().filter(|s| !s.is_blocked()).count();
+            if waiting == 0 || Instant::now() >= deadline {
+                break;
             }
+            std::thread::sleep(DRAIN_BEAT);
+        }
+        // Whatever is still here is blocked, or outlasted the deadline.
+        // Either way it keeps its marker line: it is running, and the next
+        // daemon adopts it rather than judging its plan abandoned.
+        for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
+            let session = self.in_flight.get(&key).expect("still tracked");
+            let (line, body) = if session.is_blocked() {
+                (
+                    format!(
+                        "{} is blocked in herdr — left running; attach to unblock it",
+                        session.label
+                    ),
+                    "left running — attach in herdr to unblock it",
+                )
+            } else {
+                (
+                    format!(
+                        "{} outlasted the drain — left running; the next daemon adopts it",
+                        session.label
+                    ),
+                    "left running — it outlasted a one-shot pass",
+                )
+            };
+            note(&line);
+            let _ = self.client.notification_show(
+                &format!("session left running: {}", session.label),
+                Some(body),
+            );
+            done.push(self.retire(&key, Reason::Detached));
         }
         done.sort_by(|a, b| a.key.cmp(&b.key));
         done
     }
 
     /// The shutdown half of the policy. `stop` closes every workspace and
-    /// reports the sessions as signalled; `detach` reports nothing and
-    /// leaves them for `adopt`.
+    /// reports the sessions as stopped; `detach` reports nothing and leaves
+    /// them for the next daemon's `adopt`.
     pub fn stop_all(&mut self) -> (usize, Vec<Finished>) {
         match self.cfg.on_shutdown {
             OnShutdown::Detach => {
@@ -548,7 +486,7 @@ impl HerdrPool {
             OnShutdown::Stop => {
                 let mut done = Vec::new();
                 for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
-                    done.push(self.finish_closing(&key, None, true));
+                    done.push(self.finish_closing(&key, Reason::Stopped, true));
                 }
                 done.sort_by(|a, b| a.key.cmp(&b.key));
                 (done.len(), done)
@@ -559,17 +497,24 @@ impl HerdrPool {
     /// Retire one session: snapshot its scrollback into the log, close or
     /// keep its workspace per `retain`, and hand back the `Finished` the
     /// daemon's bookkeeping expects.
-    fn finish(&mut self, key: &str, exit: Option<i32>) -> Finished {
+    fn finish(&mut self, key: &str, reason: Reason) -> Finished {
         let close = match self.cfg.retain {
             Retain::Always => false,
             Retain::Never => true,
-            // Keep the scene of a failure for attach; clear the clean ones.
-            Retain::OnFailure => exit == Some(0),
+            // Keep the scene of an unaccounted end for attach; clear the
+            // ones whose plan says what happened.
+            Retain::OnFailure => !reason.is_failure(),
         };
-        self.finish_closing(key, exit, close)
+        self.finish_closing(key, reason, close)
     }
 
-    fn finish_closing(&mut self, key: &str, exit: Option<i32>, close: bool) -> Finished {
+    /// Retire without closing anything — the session goes on running, and
+    /// the pool simply stops carrying it.
+    fn retire(&mut self, key: &str, reason: Reason) -> Finished {
+        self.finish_closing(key, reason, false)
+    }
+
+    fn finish_closing(&mut self, key: &str, reason: Reason, close: bool) -> Finished {
         let session = self.in_flight.remove(key).expect("finishing a tracked key");
         if !session.log.is_empty() {
             if let Ok(tail) = self.client.agent_read(&session.pane_id, TAIL) {
@@ -582,228 +527,92 @@ impl HerdrPool {
         Finished {
             key: key.to_string(),
             label: session.label,
-            exit,
+            reason,
             token: session.token,
         }
     }
 }
 
-/// Advance one session's phase from one observation. `Some(exit)` means it
-/// settled and should be retired.
-fn observe(session: &mut Session, agent: &AgentInfo, client: &Client) -> Option<Option<i32>> {
+/// Advance one session from one sighting. `Some(reason)` means it should be
+/// retired.
+///
+/// The whole rule, in one place: a pane that works is alive, a pane that is
+/// blocked holds its slot and says so once, and a pane that has settled is
+/// judged by the plan behind it — never by what is on its screen.
+fn observe(
+    session: &mut Session,
+    agent: &AgentInfo,
+    disposition: Disposition,
+    grace: Duration,
+) -> Option<Reason> {
     match agent.agent_status.as_str() {
         "working" => {
-            if session.phase == Phase::Waiting {
+            session.working();
+            None
+        }
+        "blocked" => {
+            session.idle_since = None;
+            session.idle_streak = 0;
+            session.blocked_streak += 1;
+            if session.is_blocked() && !session.toasted {
+                session.toasted = true;
                 note(&format!(
-                    "{}: a monitor fired — working again",
+                    "{} is blocked in herdr — attach to unblock it",
                     session.label
                 ));
             }
-            session.phase = Phase::Working;
-            session.submitted_ticks = 0;
             None
         }
-        // Blocked from any phase — including straight from submission, which
-        // is what a trust or permission dialog at startup looks like. Seen
-        // once it is pending; seen twice it is real, and toasts once.
-        "blocked" => {
-            match session.phase {
-                Phase::Blocked => {}
-                Phase::BlockedPending => {
-                    session.phase = Phase::Blocked;
+        "idle" | "done" => {
+            session.blocked_streak = 0;
+            session.toasted = false;
+            session.idle_streak += 1;
+            let since = *session.idle_since.get_or_insert_with(Instant::now);
+            if session.idle_streak < IDLE_STREAK {
+                return None;
+            }
+            match disposition {
+                // The plan says what happened. Nothing on the screen could
+                // add to that, so the session is done.
+                Disposition::Verdict => Some(Reason::Verdict),
+                // Nothing to read a verdict from: settling is the end.
+                Disposition::NoPlan if since.elapsed() >= grace => Some(Reason::Settled),
+                // Claimed, unaccounted for, and nobody is typing. Give it
+                // the grace, then hand the plan back.
+                Disposition::Held if since.elapsed() >= grace => {
                     note(&format!(
-                        "{} is blocked in herdr — attach to unblock it",
+                        "{}{} settled with its plan still claimed and no verdict — recycling it",
+                        if session.adopted { "adopted " } else { "" },
                         session.label
                     ));
-                    let _ = client.notification_show(
-                        &format!("session blocked: {}", session.label),
-                        Some("attach in herdr to unblock it"),
-                    );
+                    Some(Reason::Recycled)
                 }
-                _ => session.phase = Phase::BlockedPending,
+                _ => None,
             }
-            None
         }
-        // Idle is not done while the harness still reports armed monitors:
-        // the turn ended, the session did not. Checked before every other
-        // reading of a settle, including the prompt-echo one — a session with
-        // live monitors has taken a prompt by construction.
-        "idle" | "done" if monitors_live(session, client) => {
-            if session.phase != Phase::Waiting {
-                session.phase = Phase::Waiting;
-                note(&format!(
-                    "{}: idle with background monitors armed — waiting, not finished; \
-                     it re-invokes itself when one fires",
-                    session.label
-                ));
-            }
-            None
-        }
-        "idle" | "done" => match session.phase {
-            // A turn was seen, and it ended — if the settle is real.
-            // Observed live: a permission dialog rendered mid-turn can read
-            // `idle` for a beat before the classifier calls it `blocked`,
-            // and retiring on that beat closes the workspace over a waiting
-            // dialog. A settle counts only after it survives the debounce.
-            Phase::Working | Phase::Blocked | Phase::BlockedPending | Phase::Waiting => {
-                if settle_survives(session, client) {
-                    Some(Some(0))
-                } else {
-                    None
-                }
-            }
-            // Never seen working, and the sequence moved past the prompt.
-            // That is not proof of a turn: startup state flaps move the
-            // sequence too, and an agent that dropped the injection while
-            // still starting up settles exactly like one that finished
-            // between ticks. Only the prompt's echo in the pane tells them
-            // apart — and the settle still has to survive the debounce.
-            Phase::Submitted if agent.state_change_seq > session.seq_at_prompt => {
-                if !prompt_landed(session, client) {
-                    resubmit(session, client)
-                } else if settle_survives(session, client) {
-                    Some(Some(0))
-                } else {
-                    None
-                }
-            }
-            Phase::Submitted => submit_patience(session, client),
-        },
         // `unknown`, or a state this pin has never heard of: not an
-        // observation. A session mid-turn survives a detection gap; one that
-        // never started does not get to hide in it.
-        _ => match session.phase {
-            Phase::Submitted => submit_patience(session, client),
-            _ => None,
-        },
+        // observation, so no counter moves. The idle clock is only ever
+        // *reset* by working, so a pane that never resolves is still bounded
+        // by the grace it had already started spending.
+        _ => None,
     }
 }
 
-fn submit_patience(session: &mut Session, client: &Client) -> Option<Option<i32>> {
-    session.submitted_ticks += 1;
-    if session.submitted_ticks >= SUBMIT_PATIENCE {
-        return resubmit(session, client);
-    }
-    None
-}
-
-/// A settle believed once is a settle believed too early: re-read after the
-/// debounce and require it to still be settled. A dialog or a next turn
-/// showing up in the gap means the session is not done — the observation is
-/// discarded and the next tick classifies it properly (a dialog reads
-/// `blocked` by then, a turn `working`). On a read error, err toward not
-/// retiring: the session survives to the next tick.
-fn settle_survives(session: &Session, client: &Client) -> bool {
-    std::thread::sleep(BLOCKED_DEBOUNCE);
-    match client.agent_get(session.target()) {
-        Ok(again) => matches!(again.agent_status.as_str(), "idle" | "done"),
-        Err(_) => false,
-    }
-}
-
-/// Whether the harness still reports armed background monitors. Claude Code
-/// carries the count in its footer ("⏵⏵ auto mode on · 2 shells, 1 monitor")
-/// and in the turn's closing line ("· 2 shells, 1 monitor still running"),
-/// which is why only the footer window is read.
-///
-/// Background *shells* are deliberately not counted. A monitor is a promise
-/// to re-invoke the session; a shell is a process that may outlive the turn
-/// that started it — a dev server left running would hold a slot forever.
-///
-/// On a read error, err toward finishing: the session is judged exactly as it
-/// was before this check existed, rather than parked on an unreadable pane.
-fn monitors_live(session: &Session, client: &Client) -> bool {
-    match client.agent_read(session.target(), FOOTER_TAIL) {
-        Ok(tail) => monitors_in(&tail) > 0,
-        Err(_) => false,
-    }
-}
-
-/// The largest `N monitor(s)` count the text reports, zero if it names none.
-/// A hand parse rather than a pattern: the phrase is two tokens, and this
-/// runs once per settled session per tick.
-fn monitors_in(text: &str) -> u32 {
-    let mut most = 0;
-    for (at, _) in text.match_indices("monitor") {
-        let before = text[..at].trim_end_matches(' ');
-        let digits = before.trim_end_matches(|c: char| c.is_ascii_digit());
-        // "1 monitor", never "the monitor" — a bare word is prose.
-        if digits.len() == before.len() {
-            continue;
-        }
-        if let Ok(n) = before[digits.len()..].parse::<u32>() {
-            most = most.max(n);
-        }
-    }
-    most
-}
-
-/// Whether the pane carries the prompt's echo — the observable difference
-/// between a turn that ran and an injection the agent dropped. Matched on a
-/// prefix: the pane wraps long lines. An adopted session has no prompt to
-/// verify; its settle stays a finish.
-fn prompt_landed(session: &Session, client: &Client) -> bool {
-    if session.prompt.is_empty() {
-        return true;
-    }
-    match client.agent_read(&session.pane_id, VERIFY_TAIL) {
-        Ok(tail) => tail.contains(prompt_needle(&session.prompt)),
-        Err(_) => false,
-    }
-}
-
-/// Enough of the prompt to be unmistakable in scrollback, short enough to
-/// survive line wrapping at any plausible pane width. Cut at the first line
-/// before the character cut: the default prompts are multiline and open with
-/// a per-session-unique header (decision 0050), and a needle carrying a
-/// newline would never match wrapped scrollback.
-fn prompt_needle(prompt: &str) -> &str {
-    let first_line = prompt.split('\n').next().unwrap_or(prompt);
-    match first_line.char_indices().nth(24) {
-        Some((i, _)) => &first_line[..i],
-        None => first_line,
-    }
-}
-
-/// Put a dropped prompt back in, up to `RESUBMITS` times; past the budget the
-/// session is written off. On success the watermarks reset, so the next
-/// settle is judged against the new submission.
-fn resubmit(session: &mut Session, client: &Client) -> Option<Option<i32>> {
-    if session.resubmits >= RESUBMITS {
-        note(&format!(
-            "{}: prompt was never taken up — writing the session off",
-            session.label
-        ));
-        return Some(None);
-    }
-    session.resubmits += 1;
-    match client.agent_prompt(&session.pane_id, &session.prompt) {
-        Ok(agent) => {
-            note(&format!(
-                "{}: prompt was dropped at startup — resubmitted ({}/{RESUBMITS})",
-                session.label, session.resubmits
-            ));
-            session.seq_at_prompt = agent.state_change_seq;
-            session.submitted_ticks = 0;
-            None
-        }
-        // Not fatal, and not placed either: the agent is still starting up.
-        // The attempt still spends budget, so a pane that never becomes
-        // promptable runs out the same clock as one that keeps dropping.
-        Err(e) if e.to_string().contains("agent_not_ready") => {
-            note(&format!(
-                "{}: agent not promptable yet — will retry ({}/{RESUBMITS})",
-                session.label, session.resubmits
-            ));
-            session.submitted_ticks = 0;
-            None
-        }
-        Err(e) => {
-            note(&format!(
-                "{}: prompt was dropped and resubmission failed ({e:#}) — writing the session off",
-                session.label
-            ));
-            Some(None)
+/// Retry a herdr call while it keeps refusing with one named code. Both
+/// codes this guards are startup seams — a pane whose shell is still coming
+/// up, an agent that is not promptable yet — and both clear within seconds.
+fn retry_while<T>(
+    code: &str,
+    mut call: impl FnMut() -> super::client::Result<T>,
+) -> super::client::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match call() {
+            Err(e) if e.code() == Some(code) && attempt < PROMPT_RETRIES => {
+                attempt += 1;
+                std::thread::sleep(PROMPT_BACKOFF);
+            }
+            other => break other,
         }
     }
 }
@@ -826,49 +635,9 @@ fn agent_name(key: &str) -> String {
     name.trim_end_matches('-').to_string()
 }
 
-fn append_tail(path: &Path, tail: &str) -> std::io::Result<()> {
-    let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
-    writeln!(file, "\n# --- pane scrollback at retirement ---")?;
-    writeln!(file, "{tail}")
-}
-
-/// A connect failure, as opposed to herdr answering with a refusal.
-fn is_unreachable(e: &anyhow::Error) -> bool {
-    e.to_string().contains("cannot reach herdr")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A one-shot fake, the shape `client.rs` tests against: one scripted
-    /// reply per connection.
-    fn client(dir: &Path, replies: Vec<String>) -> Client {
-        use std::io::{BufRead, BufReader};
-        use std::os::unix::net::UnixListener;
-
-        let path = dir.join("herdr.sock");
-        let listener = UnixListener::bind(&path).unwrap();
-        std::thread::spawn(move || {
-            for reply in replies {
-                let Ok((stream, _)) = listener.accept() else {
-                    return;
-                };
-                let mut line = String::new();
-                let _ = BufReader::new(&stream).read_line(&mut line);
-                let id = serde_json::from_str::<serde_json::Value>(&line)
-                    .map(|r| r["id"].as_str().unwrap_or("?").to_string())
-                    .unwrap_or_default();
-                let mut writer = &stream;
-                let _ = writeln!(writer, "{}", reply.replace("{id}", &id));
-            }
-        });
-        Client::new(Some(path.to_str().unwrap()))
-    }
-
-    fn reads(text: &str) -> String {
-        format!(r#"{{"id":"{{id}}","result":{{"type":"pane_read","read":{{"text":"{text}"}}}}}}"#)
-    }
 
     fn session() -> Session {
         Session {
@@ -878,11 +647,11 @@ mod tests {
             log: String::new(),
             started: "2026-08-14T0000".into(),
             token: None,
-            phase: Phase::Working,
-            seq_at_prompt: 1,
-            submitted_ticks: 0,
-            prompt: "plans/x.md — dispatched act".into(),
-            resubmits: 0,
+            adopted: false,
+            idle_since: None,
+            idle_streak: 0,
+            blocked_streak: 0,
+            toasted: false,
         }
     }
 
@@ -898,77 +667,130 @@ mod tests {
         }
     }
 
-    /// The live failure: a settled pane whose harness still reports armed
-    /// monitors. Retiring here closed a workspace over work in flight.
+    const NOW: Duration = Duration::ZERO;
+
+    /// The core of decision 0061: the same settled pane means opposite
+    /// things depending on what the plan says, and nothing else is consulted.
     #[test]
-    fn an_idle_pane_with_armed_monitors_waits_instead_of_finishing() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let client = client(
-            dir.path(),
-            vec![reads("... 2 shells, 1 monitor still running")],
-        );
-        let mut session = session();
-
-        assert!(observe(&mut session, &sighting("idle"), &client).is_none());
-        assert_eq!(session.phase, Phase::Waiting);
-
-        // The monitor fires: back to work, and no read is spent to see it.
-        assert!(observe(&mut session, &sighting("working"), &client).is_none());
-        assert_eq!(session.phase, Phase::Working);
-    }
-
-    /// The same settle with nothing armed still finishes — the check adds a
-    /// reason to wait, never a reason to hang.
-    #[test]
-    fn an_idle_pane_with_nothing_armed_still_settles() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let client = client(
-            dir.path(),
-            vec![
-                reads("⏵⏵ auto mode on · ctrl+t to hide tasks"),
-                // What the settle debounce re-reads.
-                r#"{"id":"{id}","result":{"type":"agent_info","agent":{"pane_id":"p1","workspace_id":"w1","agent_status":"idle"}}}"#.to_string(),
-            ],
-        );
-        let mut session = session();
+    fn a_settled_pane_is_judged_by_its_plan_and_nothing_else() {
+        let mut done = session();
         assert_eq!(
-            observe(&mut session, &sighting("idle"), &client),
-            Some(Some(0))
+            observe(&mut done, &sighting("idle"), Disposition::Verdict, NOW),
+            None
+        );
+        assert_eq!(
+            observe(&mut done, &sighting("idle"), Disposition::Verdict, NOW),
+            Some(Reason::Verdict)
+        );
+
+        let mut stalled = session();
+        observe(&mut stalled, &sighting("idle"), Disposition::Held, NOW);
+        assert_eq!(
+            observe(&mut stalled, &sighting("idle"), Disposition::Held, NOW),
+            Some(Reason::Recycled)
         );
     }
 
+    /// One settled sighting is never enough: a dialog rendering mid-turn
+    /// reads idle for a beat, and retiring on that beat closed a workspace
+    /// over a waiting session (observed live, decision 0052).
     #[test]
-    fn the_footer_counts_monitors_and_ignores_everything_else() {
-        // The live footer that started this: a settled pane, work still in
-        // motion behind it.
+    fn one_idle_sighting_is_not_a_settle() {
+        let mut s = session();
         assert_eq!(
-            monitors_in("  ⏵⏵ auto mode on · 2 shells, 1 monitor · ctrl+t to hide tasks"),
-            1
+            observe(&mut s, &sighting("idle"), Disposition::Verdict, NOW),
+            None
         );
+        // …and work resumed in the gap puts the count back.
+        observe(&mut s, &sighting("working"), Disposition::Held, NOW);
+        assert_eq!(s.idle_streak, 0);
+        assert!(s.idle_since.is_none());
         assert_eq!(
-            monitors_in("✻ Brewed for 31m 28s · 2 shells, 1 monitor still running"),
-            1
+            observe(&mut s, &sighting("idle"), Disposition::Verdict, NOW),
+            None
         );
-        assert_eq!(monitors_in("· 12 monitors still running"), 12);
+    }
 
-        // Nothing armed: a plain finish, and prose that merely says the word.
-        assert_eq!(monitors_in("⏵⏵ auto mode on · 2 shells · ctrl+t"), 0);
+    /// A stall is graced; a verdict is not. The grace is there for work the
+    /// pane cannot show, and a plan that already says what happened needs no
+    /// such benefit of the doubt.
+    #[test]
+    fn the_grace_holds_a_stall_but_never_delays_a_verdict() {
+        let grace = Duration::from_secs(3600);
+        let mut stalled = session();
+        for _ in 0..5 {
+            assert_eq!(
+                observe(&mut stalled, &sighting("idle"), Disposition::Held, grace),
+                None,
+                "still inside its grace"
+            );
+        }
+        let mut settled = session();
+        observe(&mut settled, &sighting("idle"), Disposition::Verdict, grace);
         assert_eq!(
-            monitors_in("I will monitor the rollout and report back."),
-            0
+            observe(&mut settled, &sighting("idle"), Disposition::Verdict, grace),
+            Some(Reason::Verdict)
         );
-        assert_eq!(monitors_in("the monitor exited"), 0);
+    }
+
+    /// A ritual has no plan to read, so settling is all it has — but it is
+    /// still graced, because a dropped prompt looks the same as a fast run.
+    #[test]
+    fn a_ritual_settles_on_its_own_since_there_is_no_plan_to_read() {
+        let mut s = session();
+        observe(&mut s, &sighting("idle"), Disposition::NoPlan, NOW);
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), Disposition::NoPlan, NOW),
+            Some(Reason::Settled)
+        );
     }
 
     #[test]
-    fn the_needle_is_the_first_line_and_never_carries_a_newline() {
-        let prompt = "plans/x.md — dispatched act as coder (trellis runtime).\n\nAct as coder…";
-        let needle = prompt_needle(prompt);
-        assert!(!needle.contains('\n'), "{needle:?}");
-        assert!(prompt.starts_with(needle));
-        assert_eq!(needle.chars().count(), 24);
+    fn blocked_is_believed_twice_toasts_once_and_holds_its_slot() {
+        let mut s = session();
+        assert_eq!(
+            observe(&mut s, &sighting("blocked"), Disposition::Held, NOW),
+            None
+        );
+        assert!(!s.is_blocked(), "one sighting is a flap, not a block");
+        assert_eq!(
+            observe(&mut s, &sighting("blocked"), Disposition::Held, NOW),
+            None
+        );
+        assert!(s.is_blocked());
+        assert!(s.toasted);
+        // Still blocked, still holding, and the operator is not told twice.
+        observe(&mut s, &sighting("blocked"), Disposition::Held, NOW);
+        assert!(s.toasted);
+        // Unblocked by hand: the slot is working again and can toast afresh.
+        observe(&mut s, &sighting("working"), Disposition::Held, NOW);
+        assert!(!s.is_blocked());
+        assert!(!s.toasted);
+    }
 
-        assert_eq!(prompt_needle("short\nrest"), "short");
-        assert_eq!(prompt_needle("bare"), "bare");
+    /// A status this pin has never heard of is not an observation — but it
+    /// does not reset a grace already being spent, so a pane that goes
+    /// permanently unreadable is still recovered.
+    #[test]
+    fn an_unknown_status_moves_nothing_but_stops_no_clock() {
+        let mut s = session();
+        observe(&mut s, &sighting("idle"), Disposition::Held, NOW);
+        let since = s.idle_since;
+        assert_eq!(
+            observe(&mut s, &sighting("unknown"), Disposition::Held, NOW),
+            None
+        );
+        assert_eq!(s.idle_streak, 1, "unknown is not a settled sighting");
+        assert_eq!(s.idle_since, since, "…nor a reason to forget one");
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), Disposition::Held, NOW),
+            Some(Reason::Recycled)
+        );
+    }
+
+    #[test]
+    fn an_agent_name_is_herdr_legal_however_ugly_the_key() {
+        assert_eq!(agent_name("plan:plans/x.md"), "t-plan-plans-x-md");
+        assert!(agent_name(&"plan:plans/".repeat(20)).len() <= 32);
     }
 }

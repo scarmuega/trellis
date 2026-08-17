@@ -12,7 +12,6 @@
 //! A rule that belongs to the model belongs in the kernel, where the lockstep
 //! tests can hold it to the prose.
 
-pub mod backend;
 pub mod channels;
 pub mod client;
 pub mod config;
@@ -23,7 +22,7 @@ pub mod mcp;
 pub mod procedure;
 pub mod sched;
 pub mod server;
-pub mod spawn;
+pub mod session;
 pub mod state;
 pub mod tmpl;
 
@@ -34,9 +33,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-use self::backend::{Backend, Launch};
 use self::config::RuntimeConfig;
-use self::spawn::InFlightView;
+#[cfg(unix)]
+use self::herdr::pool::{Disposition, HerdrPool};
+use self::session::{Finished, InFlightView, Reason};
 use self::state::State;
 use crate::dates::{self, Date};
 use crate::dispatch::{self, SessionMap};
@@ -129,10 +129,13 @@ pub struct Shared {
     /// queue is memory only — a request is one-shot and best-effort, and the
     /// loop stays the only spawner.
     pub errands: Mutex<Vec<ErrandRequest>>,
-    /// Whether a session's budget cap is actually enforced, which the herdr
-    /// backend cannot do (`--max-budget-usd` only works with `--print`). The
-    /// errand route reports it: a number the operator reads as a ceiling,
-    /// with nothing holding it, is worse than saying so.
+    /// Whether a session's budget cap is actually enforced. Always false
+    /// since sessions became interactive panes (`--max-budget-usd` only
+    /// works with `--print`), and reported all the same: a number the
+    /// operator reads as a ceiling, with nothing holding it, is worse than
+    /// saying so. The field stays because the honest answer is worth a wire
+    /// field, and because a budget expression that works outside print mode
+    /// is one of 0043's named pull-triggers.
     pub budget_enforced: bool,
     /// Ask the loop to pass now without queueing anything. Set when a request
     /// is refused as in-flight: `status.in_flight` is only as fresh as the
@@ -315,7 +318,7 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         overlay_status: true,
         dispatches: false,
         errands: Mutex::new(Vec::new()),
-        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
+        budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     let _pidfile = Pidfile::claim(&root, SERVE_PIDFILE, "trellis serve")?;
@@ -381,7 +384,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         overlay_status: false,
         dispatches: true,
         errands: Mutex::new(Vec::new()),
-        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
+        budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // `--once` takes the same lock as the loop (decision 0053). It skipped
@@ -423,7 +426,8 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
     }
 
     let mut state = State::load_dispatch(&root);
-    let mut backend = Backend::connect(&root, &rt.cfg, opts.once, "plan:")?;
+    let mut backend = connect_pool(&root, &rt.cfg, opts.once, "plan:")?;
+    let judge = |key: &str| disposition(&rt.root, key);
 
     // A crash removed no marker lines and adopted sessions should keep
     // theirs: reconcile `.trellis/acting-role` against what is actually in
@@ -466,10 +470,8 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
             }
         };
         if opts.once {
-            for done in backend.drain() {
-                report_exit(&done);
-                state.finished(&done.key, done.exit);
-                retire(&rt, &state, &done);
+            for done in backend.drain(&judge) {
+                conclude(&rt, &mut state, &done);
             }
             // A single pass starts at most `max_concurrent` sessions, so a
             // due set larger than the cap would otherwise wait for a next
@@ -520,7 +522,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         overlay_status: false,
         dispatches: false,
         errands: Mutex::new(Vec::new()),
-        budget_enforced: cfg.harness.backend == config::BackendKind::Process,
+        budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
     // No channels: announcing newly-open records is the dispatcher's watch.
@@ -548,7 +550,8 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
     }
 
     let mut state = State::load_rituals(&root);
-    let mut backend = Backend::connect(&root, &rt.cfg, true, "ritual:")?;
+    let mut backend = connect_pool(&root, &rt.cfg, true, "ritual:")?;
+    let judge = |key: &str| disposition(&rt.root, key);
     if !rt.dry_run {
         let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
         if let Err(e) = marker::reconcile(&root, "ritual:", &live) {
@@ -564,10 +567,8 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
     loop {
         let outcome = rituals_pass(&rt, &mut state, &mut backend, first)?;
         first = false;
-        for done in backend.drain() {
-            report_exit(&done);
-            state.finished(&done.key, done.exit);
-            retire(&rt, &state, &done);
+        for done in backend.drain(&judge) {
+            conclude(&rt, &mut state, &done);
         }
         if outcome.deferred > 0 && outcome.started > 0 {
             continue;
@@ -662,7 +663,7 @@ fn sleep_until_tick_or_signal(tick_secs: u64, shared: &Shared) -> bool {
 /// stop something the daemon has to do on purpose. The herdr backend may be
 /// configured to detach instead — its sessions live in herdr, not under this
 /// process, and the next daemon adopts them.
-fn shutdown(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::Result<ExitCode> {
+fn shutdown(rt: &Runtime, state: &mut State, backend: &mut HerdrPool) -> anyhow::Result<ExitCode> {
     let (signalled, done) = backend.stop_all();
     if signalled > 0 {
         note(&format!(
@@ -670,9 +671,7 @@ fn shutdown(rt: &Runtime, state: &mut State, backend: &mut Backend) -> anyhow::R
         ));
     }
     for done in done {
-        report_exit(&done);
-        state.finished(&done.key, done.exit);
-        retire(rt, state, &done);
+        conclude(rt, state, &done);
     }
     if !rt.dry_run {
         state.save(&rt.root)?;
@@ -706,13 +705,11 @@ enum Outcome {
 fn dispatch_pass(
     rt: &Runtime,
     state: &mut State,
-    backend: &mut Backend,
+    backend: &mut HerdrPool,
     reported: &mut Reported,
 ) -> anyhow::Result<Pass> {
-    for done in backend.reap() {
-        report_exit(&done);
-        state.finished(&done.key, done.exit);
-        retire(rt, state, &done);
+    for done in backend.reap(&|key: &str| disposition(&rt.root, key)) {
+        conclude(rt, state, &done);
     }
 
     let tree = Tree::load(Root {
@@ -810,7 +807,6 @@ fn dispatch_pass(
             &format!("{ERRAND} {} → {}", req.plan, owner),
             &owner,
             &errand_prompt,
-            &rt.cfg.harness.act_cmd,
             &rt.cfg.harness.herdr.act_args,
             vars,
             today,
@@ -864,7 +860,6 @@ fn dispatch_pass(
             &format!("act {} → {}", item.plan, item.owner),
             &item.owner,
             &rt.cfg.prompts["act"],
-            &rt.cfg.harness.act_cmd,
             &rt.cfg.harness.herdr.act_args,
             vars,
             today,
@@ -934,13 +929,11 @@ fn dispatch_pass(
 fn rituals_pass(
     rt: &Runtime,
     state: &mut State,
-    backend: &mut Backend,
+    backend: &mut HerdrPool,
     first: bool,
 ) -> anyhow::Result<Pass> {
-    for done in backend.reap() {
-        report_exit(&done);
-        state.finished(&done.key, done.exit);
-        retire(rt, state, &done);
+    for done in backend.reap(&|key: &str| disposition(&rt.root, key)) {
+        conclude(rt, state, &done);
     }
 
     let tree = Tree::load(Root {
@@ -1000,7 +993,6 @@ fn rituals_pass(
             &format!("ritual {} ({})", due.task.name, due.task.executor),
             &due.task.executor,
             &rt.cfg.prompts["ritual"],
-            &rt.cfg.harness.ritual_cmd,
             &rt.cfg.harness.herdr.ritual_args,
             vars,
             today,
@@ -1043,14 +1035,13 @@ impl Pass {
 fn fire(
     rt: &Runtime,
     state: &mut State,
-    backend: &mut Backend,
+    backend: &mut HerdrPool,
     key: &str,
     errand: &str,
     label: &str,
     role: &str,
     prompt_template: &str,
-    argv_template: &[String],
-    herdr_args_template: &[String],
+    args_template: &[String],
     vars: tmpl::Vars,
     today: Date,
 ) -> Outcome {
@@ -1096,18 +1087,11 @@ fn fire(
         }
     };
 
-    // Both backends run from the same rendered prompt; they differ in who
-    // carries it. The process backend substitutes it into the argv, so it is
-    // one argument no matter what it contains; the herdr backend keeps it
-    // aside and submits it to the running agent.
-    let launch = match render(
-        backend.is_herdr(),
-        prompt_template,
-        argv_template,
-        herdr_args_template,
-        &vars,
-    ) {
-        Ok(launch) => launch,
+    // Herdr owns the executable and takes the prompt through its own
+    // channel, so what renders is a flag array and a prompt that is never
+    // substituted into anything.
+    let (args, prompt) = match render(prompt_template, args_template, &vars) {
+        Ok(rendered) => rendered,
         Err(e) => {
             note(&format!("{label}: {e:#}"));
             close();
@@ -1116,22 +1100,19 @@ fn fire(
     };
 
     if rt.dry_run {
-        if backend.is_herdr() {
-            note(&format!(
-                "would run {label} in herdr: {} {} ⇐ {}",
-                rt.cfg.harness.herdr.kind,
-                spawn::shell_quote(&launch.argv),
-                launch.prompt
-            ));
-        } else {
-            note(&format!(
-                "would run {label}: {}",
-                spawn::shell_quote(&launch.argv)
-            ));
-        }
+        note(&format!(
+            "would run {label} in herdr: {} {} ⇐ {}",
+            rt.cfg.harness.herdr.kind,
+            session::shell_quote(&args),
+            prompt
+        ));
         close();
         return Outcome::Started;
     }
+
+    // The order below is the crash story, and it is why these three writes
+    // are not in the order they read in.
+    //
     // Claimed before the session exists, not on its first turn (decision
     // 0053). Until now the flip was the taker's, which left minutes between
     // spawn and claim in which the plan still read `ready` and any scan —
@@ -1139,25 +1120,41 @@ fn fire(
     // it again. Two dispatchers did exactly that (observed live, 2026-08-14).
     let claimed = claim_to_dispatch(rt, key, errand);
 
-    match backend.spawn(key, label, &launch, token.clone()) {
+    // Then the marker and the fired stamp, both *before* the spawn, because
+    // between them they are what a later startup needs to recognise this
+    // claim as abandoned: `marker::reconcile` finds the line, and
+    // `relinquish_key` gates on the errand this records. Written after the
+    // spawn — as they were — a crash during `agent.start`, which can take a
+    // full minute, left an `active` plan that no reconcile would ever see.
+    // Now the exposure is the two syscalls between the claim and here.
+    if let Err(e) = marker::add(&rt.root, role, &today.to_string(), key) {
+        // Attribution, not a lock (decision 0045): the session finds it in
+        // place instead of spending a turn creating it. A failure is said,
+        // not fatal.
+        note(&format!("{label}: acting-role marker write failed: {e}"));
+    }
+    state.fired(key, errand, today, None);
+    if let Err(e) = state.save(&rt.root) {
+        note(&format!("{label}: could not record the attempt ({e:#})"));
+    }
+
+    match backend.spawn(key, label, &args, &prompt, token.clone()) {
         Ok(log) => {
             note(&format!("started {label} → logs/{log}"));
-            // The runtime stamps the acting-role marker (decision 0045): the
-            // session finds attribution in place instead of spending a turn
-            // creating it. Attribution, not a lock — a failure is said, not
-            // fatal.
-            if let Err(e) = marker::add(&rt.root, role, &today.to_string(), key) {
-                note(&format!("{label}: acting-role marker write failed: {e}"));
-            }
-            state.fired(key, errand, today, Some(log));
+            state.set_log(key, log);
             Outcome::Started
         }
         Err(e) => {
             note(&format!("{label}: {e:#}"));
             // Nothing started, so nothing holds the plan. A claim left
             // standing here is the strand `relinquish` exists to prevent,
-            // and no retire will ever come to undo it: a failed spawn never
-            // enters the backend.
+            // and no conclusion will ever come to undo it: a failed spawn
+            // never enters the pool. The fired stamp deliberately stays —
+            // an attempt was made, and the retry cooldown should pace the
+            // next one.
+            if let Err(e) = marker::remove(&rt.root, key) {
+                note(&format!("{label}: acting-role marker removal failed: {e}"));
+            }
             if let Some(path) = &claimed {
                 if let Err(e) =
                     crate::plan_ops::flip(path, &[PlanStatus::Active], PlanStatus::Ready)
@@ -1208,43 +1205,110 @@ fn claim_to_dispatch(rt: &Runtime, key: &str, errand: &str) -> Option<PathBuf> {
     }
 }
 
-/// Substitute the prompt first, then the command that carries it — so a
-/// prompt is one argument no matter what it contains. For herdr the argv is
-/// the agent's flags and the prompt rides alongside, unsubstituted into
-/// anything.
+/// The agent's flags and the prompt it will be handed, each substituted on
+/// its own. The prompt is never substituted *into* anything: herdr submits
+/// it to the running agent, so it is never an argument and never has to
+/// survive a quoting layer.
 fn render(
-    for_herdr: bool,
     prompt_template: &str,
-    argv_template: &[String],
-    herdr_args_template: &[String],
+    args_template: &[String],
     vars: &tmpl::Vars,
-) -> anyhow::Result<Launch> {
+) -> anyhow::Result<(Vec<String>, String)> {
     let prompt = tmpl::substitute("prompt", &[prompt_template.to_string()], vars)?
         .into_iter()
         .next()
         .expect("one element in, one out");
-    if for_herdr {
-        return Ok(Launch {
-            argv: tmpl::substitute("herdr args", herdr_args_template, vars)?,
-            prompt,
-        });
-    }
-    Ok(Launch {
-        argv: tmpl::substitute(
-            "command",
-            argv_template,
-            &vars.clone().set("prompt", prompt),
-        )?,
-        prompt: String::new(),
-    })
+    Ok((tmpl::substitute("herdr args", args_template, vars)?, prompt))
 }
 
-/// Close a finished session's back-channel. A question outstanding when its
-/// session exits goes with it: there is nobody left to receive the answer, and
-/// leaving it listed would invite an operator to answer into a void.
-fn retire(rt: &Runtime, state: &State, done: &spawn::Finished) {
+/// Open the session pool. Herdr carries every session (decision 0061), so a
+/// server that is configured-and-dead is a refusal at startup rather than a
+/// degraded run — the `{plugin_dir}` posture, applied to the one dependency
+/// the runtime now has.
+#[cfg(unix)]
+fn connect_pool(
+    root: &Path,
+    cfg: &RuntimeConfig,
+    once: bool,
+    key_prefix: &'static str,
+) -> anyhow::Result<HerdrPool> {
+    if cfg.harness.herdr.idle_grace_secs < config::SHORT_GRACE_SECS {
+        note(&format!(
+            "harness.herdr.idle_grace_secs is {}s — short enough that a slow turn boundary \
+             could read as a stall and be recycled",
+            cfg.harness.herdr.idle_grace_secs
+        ));
+    }
+    let pool = HerdrPool::connect(
+        root,
+        &cfg.harness.herdr,
+        cfg.scheduler.max_concurrent,
+        key_prefix,
+    )?;
+    Ok(if once { pool.once_per_task() } else { pool })
+}
+
+/// What the runtime knows, from disk, about the plan behind a session key —
+/// the whole of how a session's end is decided (decision 0061).
+///
+/// Read straight from the file rather than from the pass's tree snapshot:
+/// this is asked of a pane that has *just* settled, and the session's last
+/// act is usually the very write being judged. It is one small read per
+/// settled pane per tick.
+///
+/// The one soft edge is deliberate: frontmatter that will not parse reads as
+/// `Held`, so a session caught mid-write is never retired out from under
+/// itself. The grace still bounds it.
+#[cfg(unix)]
+fn disposition(root: &Path, key: &str) -> Disposition {
+    let Some(rel) = key.strip_prefix("plan:") else {
+        return Disposition::NoPlan;
+    };
+    let path = root.join(rel);
+    if !path.exists() {
+        // Retired into the terminal tier, or renamed: either way the session
+        // left a verdict and the plan is no longer at this address.
+        return Disposition::Verdict;
+    }
+    match crate::plan_ops::current_status(&path) {
+        Ok(PlanStatus::Active) => match crate::plan_ops::handoff(&path) {
+            // Parked on something declared, which is an answer — and one
+            // that frees the slot, because a pane waiting on a PR is a pane
+            // nobody is typing in.
+            Ok(Some(_)) => Disposition::Verdict,
+            _ => Disposition::Held,
+        },
+        Ok(_) => Disposition::Verdict,
+        Err(_) => Disposition::Held,
+    }
+}
+
+/// Everything a session's end owes the rest of the runtime: say so, record
+/// it, close the back-channel, drop the marker line, and hand back a plan
+/// nobody accounted for.
+///
+/// A `Detached` session is the exception at every step that touches the
+/// tree: it is still running, so its marker line stays and its plan is left
+/// alone — the next daemon adopts the pane and the line together.
+fn conclude(rt: &Runtime, state: &mut State, done: &Finished) {
+    match done.reason {
+        Reason::Verdict => note(&format!("finished {}", done.label)),
+        Reason::Settled => note(&format!("finished {}", done.label)),
+        Reason::Recycled => note(&format!(
+            "{} left its plan unaccounted for — handing it back",
+            done.label
+        )),
+        Reason::Gone => note(&format!("{} — its pane is gone", done.label)),
+        Reason::ServerLost => note(&format!("{} — herdr went away under it", done.label)),
+        Reason::Detached => note(&format!("{} — left running", done.label)),
+        Reason::Stopped => note(&format!("{} — stopped", done.label)),
+    }
+    state.concluded(&done.key, done.reason);
     if let Some(token) = &done.token {
         rt.shared.inbox.retire(token);
+    }
+    if done.reason == Reason::Detached {
+        return;
     }
     if let Err(e) = marker::remove(&rt.root, &done.key) {
         note(&format!(
@@ -1252,28 +1316,26 @@ fn retire(rt: &Runtime, state: &State, done: &spawn::Finished) {
             done.label
         ));
     }
-    relinquish(rt, state, done);
+    relinquish_key(rt, state, &done.key);
 }
 
 /// Hand an abandoned plan back to the queue. A session sent to advance a plan
-/// claims it `ready → active` and owes a verdict — retired, blocked, or a
-/// declared handoff. Ending with none of them leaves `active` with nobody
-/// holding it: no scan reads that, no tick retries it, and the plan strands
-/// until a human notices (observed live, 2026-08-14). `ready` is what the
-/// state actually is, so the runtime says so and the next pass picks it up.
+/// claims it `ready → active` and owes a verdict — retired, blocked, passed
+/// on, or a declared handoff. Ending with none of them leaves `active` with
+/// nobody holding it: no scan reads that, no tick retries it, and the plan
+/// strands until a human notices (observed live, 2026-08-14). `ready` is what
+/// the state actually is, so the runtime says so and the next pass picks it
+/// up.
 ///
-/// Only `act` sessions: the errand was "advance this plan". A refine session
-/// never claimed anything, and demoting a plan a human is driving would be
-/// the runtime overruling its operator.
-fn relinquish(rt: &Runtime, state: &State, done: &spawn::Finished) {
-    relinquish_key(rt, state, &done.key)
-}
-
-/// `relinquish` by key, so startup can hand back the plans of sessions this
-/// runtime stamped and can no longer account for (decision 0053). The key
-/// having carried a daemon marker line is what makes it ours to judge: an
+/// By key, so startup can hand back the plans of sessions this runtime
+/// stamped and can no longer account for (decision 0053). The key having
+/// carried a daemon marker line is what makes it ours to judge: an
 /// interactive claim writes the keyless two-line form and is never in this
 /// set.
+///
+/// Only `act` sessions: the errand was "advance this plan". An errand
+/// session never claimed anything, and demoting a plan a human is driving
+/// would be the runtime overruling its operator.
 fn relinquish_key(rt: &Runtime, state: &State, key: &str) {
     if rt.dry_run {
         return;
@@ -1303,14 +1365,6 @@ fn relinquish_key(rt: &Runtime, state: &State, key: &str) {
     }
 }
 
-fn report_exit(done: &spawn::Finished) {
-    match done.exit {
-        Some(0) => note(&format!("finished {}", done.label)),
-        Some(code) => note(&format!("finished {} — exit {code}", done.label)),
-        None => note(&format!("finished {} — killed by signal", done.label)),
-    }
-}
-
 /// The daemon's own log line. Stdout is the supervisor's to capture; session
 /// output goes to its own file.
 pub fn note(message: &str) {
@@ -1320,17 +1374,11 @@ pub fn note(message: &str) {
 /// Whether any template names a placeholder — asked of the ones the daemon
 /// must be able to *supply* before the first tick, so a template that names
 /// something unavailable is refused at startup rather than at the first
-/// spawn. Only the active backend's templates count: a `{plugin_dir}` in
-/// argv the herdr backend will never render should not refuse its startup.
+/// spawn.
 fn names(cfg: &RuntimeConfig, placeholder: &str) -> bool {
     let uses = |t: &[String]| t.iter().any(|e| e.contains(placeholder));
-    let harness = match cfg.harness.backend {
-        config::BackendKind::Process => uses(&cfg.harness.act_cmd) || uses(&cfg.harness.ritual_cmd),
-        config::BackendKind::Herdr => {
-            uses(&cfg.harness.herdr.act_args) || uses(&cfg.harness.herdr.ritual_args)
-        }
-    };
-    harness
+    uses(&cfg.harness.herdr.act_args)
+        || uses(&cfg.harness.herdr.ritual_args)
         || cfg.prompts.values().any(|p| p.contains(placeholder))
 }
 

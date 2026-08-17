@@ -11,7 +11,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use common::{Fixture, ANCHOR};
+use common::{FakeHerdr, Fixture, ANCHOR};
 
 /// A live daemon — the dispatcher (prints `channel on …`) or serve (prints
 /// `listening on …`), parameterized because the relay tests need both.
@@ -27,6 +27,7 @@ impl Daemon {
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -77,22 +78,14 @@ impl Drop for Daemon {
 
 /// A root with a draft plan to work on. Drafts are never scanned, so the
 /// only sessions these tests see are the ones they asked for.
-fn errand_fixture() -> Fixture {
+fn errand_fixture() -> (Fixture, FakeHerdr) {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
-    );
+    let herdr = common::wire_herdr(&f, "", "", &["working", "idle"], None);
     f.write(
         "plans/reshape-me.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n",
     );
-    f
+    (f, herdr)
 }
 
 fn errand(port: u16, slug: &str, instruction: &str) -> (u16, serde_json::Value) {
@@ -128,7 +121,7 @@ fn until<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
 
 #[test]
 fn an_errand_spawns_on_the_wake_and_carries_the_instruction() {
-    let f = errand_fixture();
+    let (f, herdr) = errand_fixture();
     let daemon = Daemon::dispatch(&f);
 
     let (code, outcome) = errand(daemon.port, "reshape-me", "split the scope");
@@ -146,14 +139,13 @@ fn an_errand_spawns_on_the_wake_and_carries_the_instruction() {
     // the prompt the harness got is the rendered framework procedure
     // (decision 0050): unique first line, instruction verbatim, the act body
     // it delegates to.
-    let argv = until("the errand session to start", || {
-        f.invocations().into_iter().next()
+    let prompt = until("the errand session to start", || {
+        herdr.prompts().into_iter().next()
     });
     assert_eq!(
-        argv[0],
+        prompt.lines().next().unwrap(),
         "errand on plans/reshape-me.md as founder (trellis runtime)."
     );
-    let prompt = argv.join("\n");
     assert!(prompt.contains("split the scope"), "{prompt}");
     assert!(prompt.contains("Bind to the domain root"), "{prompt}");
     // The framing carries the execution context an ask may need, unlike the
@@ -172,16 +164,14 @@ fn an_errand_spawns_on_the_wake_and_carries_the_instruction() {
 /// beats the plan's tier, and reaches the harness argv.
 #[test]
 fn model_and_effort_are_chosen_at_the_call() {
-    let f = errand_fixture();
-    // A harness command that echoes the two values back to us.
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{prompt}}\", \"{{model}}\", \"{{effort}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
+    let (f, _seed) = errand_fixture();
+    // Agent flags that echo the two values back to us.
+    let herdr = common::wire_herdr(
+        &f,
+        "\"{model}\", \"{effort}\"",
+        "",
+        &["working", "idle"],
+        None,
     );
     let daemon = Daemon::dispatch(&f);
 
@@ -197,12 +187,10 @@ fn model_and_effort_are_chosen_at_the_call() {
     assert_eq!(outcome["effort"], "xhigh");
     assert_eq!(outcome["complexity"], "standard", "the tier is still reported");
 
-    // The prompt is one argument carrying newlines, and the fake harness
-    // records a line per line — so the two trailing arguments are the tail.
-    let argv = until("the sized session to start", || {
-        f.invocations().into_iter().next()
+    let args = until("the sized session to start", || {
+        herdr.started_args().into_iter().next()
     });
-    assert_eq!(&argv[argv.len() - 2..], ["fable", "xhigh"], "{argv:?}");
+    assert_eq!(args, ["fable", "xhigh"], "{args:?}");
 }
 
 /// The gate that used to stop here (decision 0057): a declared-human holder
@@ -212,7 +200,7 @@ fn model_and_effort_are_chosen_at_the_call() {
 /// at act's never-impersonate branch.
 #[test]
 fn a_human_held_owner_is_delegation_not_a_refusal() {
-    let f = errand_fixture();
+    let (f, herdr) = errand_fixture();
     f.write(
         "org/founder/holder/ref.md",
         "---\nprovenance: authored\nowner: org/founder\nref: the founder, a human\nkind: human\n---\n# Holder\n",
@@ -224,10 +212,9 @@ fn a_human_held_owner_is_delegation_not_a_refusal() {
     assert_eq!(outcome["outcome"], "requested");
     assert_eq!(outcome["delegated"], true, "the route says so too");
 
-    let argv = until("the delegated session to start", || {
-        f.invocations().into_iter().next()
+    let prompt = until("the delegated session to start", || {
+        herdr.prompts().into_iter().next()
     });
-    let prompt = argv.join("\n");
     assert!(
         prompt.contains("delegated execution (act's holder branch, decision 0057)"),
         "the prompt names the disposition:\n{prompt}"
@@ -244,7 +231,7 @@ fn the_errand_prompt_carries_the_execution_context() {
     // because refinement was defined as never executing (0055, 0058). An
     // errand has no such definition — the instruction decides what it is —
     // so the framing hands over what any ask might need (decision 0060).
-    let f = errand_fixture();
+    let (f, herdr) = errand_fixture();
     f.write(
         "org/founder/holder/skills/door-outreach/README.md",
         "# Door outreach\n",
@@ -254,10 +241,9 @@ fn the_errand_prompt_carries_the_execution_context() {
     let (code, outcome) = errand(daemon.port, "reshape-me", "tighten the scope");
     assert_eq!(code, 200, "{outcome}");
 
-    let argv = until("the errand session to start", || {
-        f.invocations().into_iter().next()
+    let prompt = until("the errand session to start", || {
+        herdr.prompts().into_iter().next()
     });
-    let prompt = argv.join("\n");
     assert!(prompt.contains("## Skills"), "{prompt}");
     assert!(prompt.contains("door-outreach"), "{prompt}");
     assert!(prompt.contains("## Mandate"), "{prompt}");
@@ -265,7 +251,7 @@ fn the_errand_prompt_carries_the_execution_context() {
 
 #[test]
 fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
-    let f = errand_fixture();
+    let (f, herdr) = errand_fixture();
     f.write(
         "plans/shipped.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: retired\ntype: initiative\n---\n# Shipped\n",
@@ -293,7 +279,7 @@ fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
 
     std::thread::sleep(Duration::from_millis(600));
     assert!(
-        f.invocations().is_empty(),
+        herdr.prompts().is_empty(),
         "a refusal must never reach the spawner"
     );
 }
@@ -302,24 +288,8 @@ fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
 fn a_second_request_while_the_first_runs_is_refused() {
     let f = Fixture::healthy();
     // A harness that outlives both requests, so the first session is still
-    // in flight when the second ask arrives.
-    let rel = ".trellis/bin/slow";
-    let path = f.root().join(rel);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "#!/bin/sh\nsleep 5\nexit 0\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{rel}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{rel}\", \"{{ritual}}\"]\n"
-        ),
-    );
+    // in flight when the second ask arrives: a pane that never settles.
+    let _herdr = common::wire_herdr(&f, "", "", &["working"], None);
     f.write(
         "plans/reshape-me.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n",
@@ -344,7 +314,7 @@ fn a_second_request_while_the_first_runs_is_refused() {
 
 #[test]
 fn serve_relays_to_the_dispatcher_and_says_so_when_there_is_none() {
-    let f = errand_fixture();
+    let (f, herdr) = errand_fixture();
     let serve = Daemon::serve(&f);
 
     // No dispatcher yet: serve refuses to pretend, and names the fix.
@@ -361,7 +331,7 @@ fn serve_relays_to_the_dispatcher_and_says_so_when_there_is_none() {
     assert_eq!(code, 200, "{v}");
     assert_eq!(v["outcome"], "requested");
     until("the relayed errand to start", || {
-        f.invocations().into_iter().next()
+        herdr.prompts().into_iter().next()
     });
 
     // And a stopped dispatcher turns back into the 503, not a hang.
@@ -372,7 +342,7 @@ fn serve_relays_to_the_dispatcher_and_says_so_when_there_is_none() {
 
 #[test]
 fn every_other_non_get_stays_refused() {
-    let f = errand_fixture();
+    let (f, _herdr) = errand_fixture();
     let daemon = Daemon::dispatch(&f);
     for path in ["/api/plans", "/api/board", "/api/status", "/"] {
         let (code, _) = post(daemon.port, path, "{}");
@@ -382,7 +352,7 @@ fn every_other_non_get_stays_refused() {
 
 #[test]
 fn the_cli_requests_and_reports_the_outcome() {
-    let f = errand_fixture();
+    let (f, _herdr) = errand_fixture();
     f.write(
         "plans/shipped.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: retired\ntype: initiative\n---\n# Shipped\n",

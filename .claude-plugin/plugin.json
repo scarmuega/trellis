@@ -1,6 +1,6 @@
 {
   "name": "trellis",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "A domain-driven operating model for businesses run by humans and AI agents — skills, agents, and templates for operating Trellis domain repos.",
   "author": {
     "name": "Santiago Carmuega",

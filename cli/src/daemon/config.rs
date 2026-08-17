@@ -116,24 +116,12 @@ impl Default for Scheduler {
     }
 }
 
-/// Who carries a running session (decision 0043).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum BackendKind {
-    /// The daemon spawns headless one-shot children itself — the default,
-    /// and the only backend with exit codes and budget caps.
-    Process,
-    /// Sessions run as interactive agents in herdr panes: attachable,
-    /// visible, restart-durable — and budget-uncapped, which is the trade
-    /// 0043 records.
-    Herdr,
-}
-
 /// What a finished herdr session's workspace does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Retain {
-    /// Keep the scene of a failure for attach; close the clean ones.
+    /// Keep the scene of an unaccounted end — a recycled or lost session —
+    /// for attach; close the ones whose plan says what happened.
     OnFailure,
     Always,
     Never,
@@ -145,7 +133,7 @@ pub enum Retain {
 pub enum OnShutdown {
     /// Leave them running; the next daemon adopts them.
     Detach,
-    /// Close their workspaces, matching the process backend's stop.
+    /// Close their workspaces.
     Stop,
 }
 
@@ -163,7 +151,23 @@ pub struct HerdrHarness {
     pub ritual_args: Vec<String>,
     pub retain: Retain,
     pub on_shutdown: OnShutdown,
+    /// Seconds a settled session is granted before the runtime concludes its
+    /// plan was abandoned and hands it back (decision 0061).
+    ///
+    /// This is the one clock the disk-verdict rule needs, and it is bounding
+    /// a *stall*, not work: a session with something to say says it in the
+    /// plan — a verdict, or a declared `handoff:` for work that outlives the
+    /// turn — and either answer retires the pane immediately, whatever this
+    /// is set to. What the grace buys is the benefit of the doubt for a
+    /// session between turns.
+    pub idle_grace_secs: u64,
 }
+
+/// Below this, the grace is short enough that a slow turn boundary could be
+/// read as a stall. Noted at startup rather than refused: a tight loop is a
+/// legitimate thing to want, and guessing at what the operator meant is the
+/// habit decision 0061 exists to break.
+pub const SHORT_GRACE_SECS: u64 = 60;
 
 impl Default for HerdrHarness {
     fn default() -> Self {
@@ -189,78 +193,27 @@ impl Default for HerdrHarness {
             ]),
             retain: Retain::OnFailure,
             on_shutdown: OnShutdown::Detach,
+            idle_grace_secs: 120,
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// How sessions are run. There is one way — herdr panes (decision 0061) —
+/// so this is the herdr table plus the keys that used to choose, kept only
+/// long enough to tell an instance what became of them.
+#[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Harness {
-    /// Who carries sessions: "process" (default) or "herdr" (decision 0043).
-    pub backend: BackendKind,
-    /// The herdr backend's own knobs; ignored under "process".
+    /// The agent flags, socket, and session policy. Herdr owns the
+    /// executable (`kind`), and the prompt is submitted to the running TUI
+    /// rather than carried in argv.
     pub herdr: HerdrHarness,
-    /// argv for one `act` session. Claude Code is the reference adapter;
-    /// another harness is this array, rewritten.
-    ///
-    /// The defaults name no `{plugin_dir}`: the default prompts render the
-    /// act procedure into the prompt itself (decision 0050), so the spawned
-    /// session needs no installed plugin. `--plugin-dir {plugin_dir}` is
-    /// still how an instance points sessions at an uninstalled checkout's
-    /// hooks and skills — supplied with `--plugin-root` or
-    /// `CLAUDE_PLUGIN_ROOT`, which also swap the procedure source.
-    ///
-    /// They do name `{mcp}`: the session's back-channel, so it can ask a
-    /// question rather than block its plan (decision 0041). A harness that
-    /// does not speak MCP drops that pair of arguments and everything else
-    /// works — the channel is opt-in per binding, not a requirement of one.
-    pub act_cmd: Vec<String>,
-    /// argv for one ritual session.
-    pub ritual_cmd: Vec<String>,
-}
-
-impl Default for Harness {
-    fn default() -> Self {
-        let argv = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect();
-        Harness {
-            backend: BackendKind::Process,
-            herdr: HerdrHarness::default(),
-            act_cmd: argv(&[
-                "claude",
-                "-p",
-                "{prompt}",
-                "--permission-mode",
-                "auto",
-                "--model",
-                "{model}",
-                "--effort",
-                "{effort}",
-                "--max-budget-usd",
-                "{budget}",
-                "--mcp-config",
-                "{mcp}",
-            ]),
-            ritual_cmd: argv(&[
-                "claude",
-                "-p",
-                "{prompt}",
-                "--permission-mode",
-                "acceptEdits",
-                "--allowedTools",
-                "Read",
-                "Grep",
-                "Glob",
-                "Write",
-                "Edit",
-                "Bash(gh *)",
-                "Bash(git *)",
-                "--max-budget-usd",
-                "5",
-                "--mcp-config",
-                "{mcp}",
-            ]),
-        }
-    }
+    /// Removed with the process backend (decision 0061). Captured rather
+    /// than rejected as an unknown field so `validate` can say where the
+    /// setting went instead of where it was.
+    pub backend: Option<String>,
+    pub act_cmd: Option<Vec<String>>,
+    pub ritual_cmd: Option<Vec<String>>,
 }
 
 /// The bridge every default template ends on, ahead of `{procedure}`.
@@ -280,9 +233,8 @@ const PROCEDURE_BRIDGE: &str = "The procedure below is the trellis framework's \
 /// the moment it is wanted, so its content is the operator's instruction and
 /// its framing is `ERRAND_PROMPT`, which no config can name or override.
 ///
-/// Every default opens with a per-session-unique first line — the herdr
-/// backend proves delivery by matching the prompt's opening against pane
-/// scrollback, so the first line must discriminate.
+/// Every default opens with a line naming what the session is for, which is
+/// what an operator sees at the top of the pane when they attach.
 pub fn default_prompts() -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     map.insert(
@@ -310,8 +262,12 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              plan pass {{plan}} --to <role>` — the mandate's spelling wins for the \
              role); or — if you leave a proposal for its owner to rule on and no \
              hand-off is mandated — park it on that proposal (`trellis plan handoff \
-             {{plan}} <pr>`). A plan left active with no handoff is returned \
-             to ready when your session ends, and dispatched again.\n\
+             {{plan}} <pr>`). The runtime reads completion from the plan itself, \
+             not from your session: a plan left active with no handoff is returned \
+             to ready once you go idle, and dispatched again. That includes work \
+             you park in the background — a long build, a monitor, anything that \
+             outlives the turn: declare it with `trellis plan handoff` or it is \
+             lost with the session.\n\
              \n\
              {{mandate}}\n\
              \n\
@@ -442,14 +398,7 @@ impl RuntimeConfig {
     /// Everything worth refusing before the first tick rather than at the
     /// first spawn.
     pub fn validate(&self) -> anyhow::Result<()> {
-        if self.harness.act_cmd.is_empty() {
-            anyhow::bail!("harness.act_cmd is empty — there is no command to run a session with");
-        }
-        if self.harness.ritual_cmd.is_empty() {
-            anyhow::bail!("harness.ritual_cmd is empty — there is no command to run a ritual with");
-        }
-        tmpl::check("harness.act_cmd", &self.harness.act_cmd)?;
-        tmpl::check("harness.ritual_cmd", &self.harness.ritual_cmd)?;
+        self.validate_retired_keys()?;
         for (name, template) in &self.prompts {
             tmpl::check(&format!("prompts.{name}"), std::slice::from_ref(template))?;
         }
@@ -463,9 +412,7 @@ impl RuntimeConfig {
         if self.scheduler.max_concurrent == 0 {
             anyhow::bail!("scheduler.max_concurrent must be at least 1 — 0 spawns nothing");
         }
-        if self.harness.backend == BackendKind::Herdr {
-            self.validate_herdr()?;
-        }
+        self.validate_herdr()?;
         if let Some(c) = self.channels.iter().find(|c| c.kind != "herdr") {
             anyhow::bail!(
                 "channel kind '{}' has no adapter in this binding — \"herdr\" is the one \
@@ -478,8 +425,44 @@ impl RuntimeConfig {
         Ok(())
     }
 
-    /// What the herdr backend refuses before the first tick. The themes: the
-    /// prompt is not an argument there, and a budget would be a lie.
+    /// What a config that still chooses a backend is told. A refusal rather
+    /// than a shrug: these keys used to decide how every session ran, and an
+    /// instance that set one deliberately deserves to hear that the decision
+    /// is gone rather than watch it be ignored.
+    fn validate_retired_keys(&self) -> anyhow::Result<()> {
+        if let Some(backend) = &self.harness.backend {
+            if backend != "herdr" {
+                anyhow::bail!(
+                    "harness.backend = \"{backend}\" — the process backend was removed \
+                     (decision 0061): sessions run as interactive agents in herdr panes, and \
+                     completion is read from the plan on disk rather than from an exit code. \
+                     Drop the key and run a herdr server, or pin the previous release"
+                );
+            }
+        }
+        for (name, set) in [
+            ("act_cmd", self.harness.act_cmd.is_some()),
+            ("ritual_cmd", self.harness.ritual_cmd.is_some()),
+        ] {
+            if set {
+                anyhow::bail!(
+                    "harness.{name} was removed with the process backend (decision 0061) — \
+                     herdr owns the executable (harness.herdr.kind) and the prompt is \
+                     submitted to the running agent, so what is left to configure is flags: \
+                     move them to harness.herdr.{}",
+                    if name == "act_cmd" {
+                        "act_args"
+                    } else {
+                        "ritual_args"
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// What the harness refuses before the first tick. The themes: the
+    /// prompt is not an argument, and a budget would be a lie.
     fn validate_herdr(&self) -> anyhow::Result<()> {
         if self.harness.herdr.kind.is_empty() {
             anyhow::bail!("harness.herdr.kind is empty — there is no agent to start");
@@ -546,7 +529,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let cfg = RuntimeConfig::load(dir.path(), None).unwrap();
         assert_eq!(cfg.server.port, 7357);
-        assert_eq!(cfg.harness.act_cmd[0], "claude");
+        assert_eq!(cfg.harness.herdr.act_args[0], "--permission-mode");
         assert_eq!(cfg.scheduler.catchup, Catchup::Once);
     }
 
@@ -629,8 +612,6 @@ mod tests {
         assert!(!errand.contains("never claim the plan"));
     }
 
-
-
     #[test]
     fn the_act_verdict_clause_spells_every_exit_as_a_command() {
         // The transcript audit's lesson (decision 0059): a directive embedded
@@ -643,7 +624,6 @@ mod tests {
         assert!(act.contains("`trellis plan block {plan} --by {owner} --asks …`"));
     }
 
-
     #[test]
     fn a_prompt_template_still_catches_misspelled_placeholders() {
         let err = parse("[prompts]\nritual = \"{instrucion}\"\n").unwrap_err();
@@ -652,7 +632,7 @@ mod tests {
 
     #[test]
     fn a_misspelled_placeholder_is_caught_at_load() {
-        let err = parse("[harness]\nact_cmd = [\"claude\", \"{promt}\"]\n").unwrap_err();
+        let err = parse("[harness.herdr]\nact_args = [\"--model\", \"{modl}\"]\n").unwrap_err();
         assert!(err.to_string().contains("not a placeholder"), "{err}");
     }
 
@@ -672,9 +652,8 @@ mod tests {
     }
 
     #[test]
-    fn the_default_backend_is_process_and_herdr_has_defaults() {
+    fn the_harness_defaults_to_herdr_with_its_knobs() {
         let cfg = parse("").unwrap();
-        assert_eq!(cfg.harness.backend, BackendKind::Process);
         assert_eq!(cfg.harness.herdr.kind, "claude");
         assert_eq!(cfg.harness.herdr.retain, Retain::OnFailure);
         assert_eq!(cfg.harness.herdr.on_shutdown, OnShutdown::Detach);
@@ -682,50 +661,60 @@ mod tests {
     }
 
     #[test]
-    fn the_herdr_backend_parses_with_its_knobs() {
+    fn the_herdr_knobs_parse() {
         let cfg = parse(
-            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nretain = \"always\"\non_shutdown = \"stop\"\n",
+            "[harness.herdr]\nretain = \"always\"\non_shutdown = \"stop\"\nidle_grace_secs = 30\n",
         )
         .unwrap();
-        assert_eq!(cfg.harness.backend, BackendKind::Herdr);
         assert_eq!(cfg.harness.herdr.retain, Retain::Always);
         assert_eq!(cfg.harness.herdr.on_shutdown, OnShutdown::Stop);
+        assert_eq!(cfg.harness.herdr.idle_grace_secs, 30);
+    }
+
+    /// The keys that used to choose a backend are refused by name rather
+    /// than ignored: an instance that set one meant it.
+    #[test]
+    fn the_process_backend_is_refused_with_somewhere_to_go() {
+        let err = parse("[harness]\nbackend = \"process\"\n").unwrap_err();
+        assert!(err.to_string().contains("0061"), "{err}");
+        assert!(err.to_string().contains("herdr"), "{err}");
+
+        // …and naming the one that remains is merely redundant.
+        assert!(parse("[harness]\nbackend = \"herdr\"\n").is_ok());
+    }
+
+    #[test]
+    fn a_process_argv_is_refused_and_points_at_the_flags_table() {
+        for key in ["act_cmd", "ritual_cmd"] {
+            let err = parse(&format!("[harness]\n{key} = [\"claude\", \"-p\"]\n")).unwrap_err();
+            assert!(err.to_string().contains("0061"), "{err}");
+            assert!(err.to_string().contains("harness.herdr."), "{err}");
+        }
     }
 
     #[test]
     fn a_budget_under_the_herdr_backend_is_refused_as_unenforceable() {
-        let err = parse(
-            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"--max-budget-usd\", \"{budget}\"]\n",
-        )
-        .unwrap_err();
+        let err = parse("[harness.herdr]\nact_args = [\"--max-budget-usd\", \"{budget}\"]\n")
+            .unwrap_err();
         assert!(err.to_string().contains("--print"), "{err}");
         assert!(err.to_string().contains("0043"), "{err}");
     }
 
     #[test]
     fn print_mode_under_the_herdr_backend_is_refused() {
-        let err = parse(
-            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"-p\"]\n",
-        )
-        .unwrap_err();
+        let err = parse("[harness.herdr]\nact_args = [\"-p\"]\n").unwrap_err();
         assert!(err.to_string().contains("interactive"), "{err}");
     }
 
     #[test]
     fn a_prompt_placeholder_under_the_herdr_backend_is_refused() {
-        let err = parse(
-            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nritual_args = [\"{prompt}\"]\n",
-        )
-        .unwrap_err();
+        let err = parse("[harness.herdr]\nritual_args = [\"{prompt}\"]\n").unwrap_err();
         assert!(err.to_string().contains("submitted"), "{err}");
     }
 
     #[test]
     fn herdr_arg_templates_still_catch_misspelled_placeholders() {
-        let err = parse(
-            "[harness]\nbackend = \"herdr\"\n\n[harness.herdr]\nact_args = [\"{modle}\"]\n",
-        )
-        .unwrap_err();
+        let err = parse("[harness.herdr]\nact_args = [\"{modle}\"]\n").unwrap_err();
         assert!(err.to_string().contains("not a placeholder"), "{err}");
     }
 }

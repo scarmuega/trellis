@@ -98,6 +98,13 @@ pub fn set_handoff(path: &Path, reference: Option<&str>) -> anyhow::Result<()> {
     }
 }
 
+/// What an active plan is declared to be parked on, if anything. Empty is
+/// absent: a `handoff:` with nothing after it says no more than no key at
+/// all, and both mean the plan is still somebody's to advance.
+pub fn handoff(path: &Path) -> anyhow::Result<Option<String>> {
+    Ok(fmedit::get(path, HANDOFF)?.filter(|h| !h.trim().is_empty()))
+}
+
 /// What a plan was left in when the session dispatched to advance it ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Relinquished {
@@ -126,7 +133,7 @@ pub fn relinquish(path: &Path) -> anyhow::Result<Relinquished> {
     if current != PlanStatus::Active {
         return Ok(Relinquished::Untouched(current));
     }
-    if let Some(handoff) = fmedit::get(path, HANDOFF)?.filter(|h| !h.trim().is_empty()) {
+    if let Some(handoff) = handoff(path)? {
         return Ok(Relinquished::Parked(handoff));
     }
     fmedit::set_scalar(path, "status", PlanStatus::Ready.as_str(), false)?;

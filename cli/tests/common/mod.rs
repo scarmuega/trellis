@@ -150,7 +150,13 @@ impl Fixture {
         let mut cmd = assert_cmd::Command::cargo_bin("trellis").unwrap();
         cmd.current_dir(self.root())
             .env("TRELLIS_TODAY", ANCHOR)
-            .env_remove("CLAUDE_PLUGIN_ROOT");
+            .env_remove("CLAUDE_PLUGIN_ROOT")
+            // Never the operator's own herdr: a fixture that configures no
+            // socket must fail to connect, not drive the real fleet.
+            .env(
+                "HERDR_SOCKET_PATH",
+                self.root().join(".trellis/no-herdr.sock"),
+            );
         cmd
     }
 
@@ -421,67 +427,116 @@ exit 9
 
 /// A hermetic herdr server: a `UnixListener` speaking the NDJSON protocol,
 /// one request per connection like the real one, recording every request and
-/// answering `agent.get`/`agent.wait` from a scripted status sequence. The
-/// herdr socket is config the same way the harness is, so a fake server is a
-/// test helper the same way `fake_harness` is.
+/// answering `agent.get` from a scripted status sequence. The herdr socket is
+/// config the same way the agent kind is, so a fake server is a test helper
+/// the same way a fixture root is.
+///
+/// Statuses are scripted **per pane**, because a recycled session is a second
+/// pane for the same key: one global queue would let the first attempt's
+/// script leak into the retry's.
+///
+/// `on_prompt` is how a test plays the session itself. It fires when the
+/// prompt lands, with the prompt text and the fixture root, and whatever it
+/// writes into the plan is what the daemon will read back as that session's
+/// verdict — which is the whole of how completion is decided (decision 0061).
 #[cfg(unix)]
 pub struct FakeHerdr {
     pub socket: PathBuf,
     requests: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    peak: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
+
+/// What a session does when its prompt arrives: `(prompt_text, root)`.
+#[cfg(unix)]
+pub type OnPrompt = Box<dyn Fn(&str, &Path) + Send>;
 
 #[cfg(unix)]
 impl FakeHerdr {
-    /// `statuses` feeds `agent.get`/`agent.wait`, front to back, sticking on
+    /// `statuses` feeds each pane's `agent.get`, front to back, sticking on
     /// the last; `agents` is what `agent.list` reports (adoption seeds).
     pub fn start(socket: PathBuf, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeHerdr {
-        Self::start_dropping(socket, statuses, agents, 0)
+        Self::start_full(socket, statuses, agents, PathBuf::new(), None, None)
     }
 
-    /// Like `start`, but every `agent.read` ends with `footer` — the harness's
-    /// own status furniture, where the live-background-work counters sit.
-    pub fn start_with_footer(socket: PathBuf, statuses: &[&str], footer: &str) -> FakeHerdr {
-        Self::start_full(socket, statuses, Vec::new(), 0, footer)
-    }
-
-    /// Like `start`, but the first `drops` prompts are accepted and then
-    /// swallowed — never echoed into `agent.read` — the way a live Claude
-    /// drops injected input while still starting up.
-    pub fn start_dropping(
+    /// A server whose sessions write their own verdicts: `on_prompt` runs
+    /// against `root` as each prompt lands.
+    pub fn start_acting(
         socket: PathBuf,
         statuses: &[&str],
-        agents: Vec<serde_json::Value>,
-        drops: usize,
+        root: &Path,
+        on_prompt: OnPrompt,
     ) -> FakeHerdr {
-        Self::start_full(socket, statuses, agents, drops, "")
+        Self::start_full(
+            socket,
+            statuses,
+            Vec::new(),
+            root.to_path_buf(),
+            Some(on_prompt),
+            None,
+        )
+    }
+
+    /// Like `start_acting`, but the hook is optional.
+    pub fn start_maybe_acting(
+        socket: PathBuf,
+        statuses: &[&str],
+        root: &Path,
+        on_prompt: Option<OnPrompt>,
+    ) -> FakeHerdr {
+        Self::start_full(
+            socket,
+            statuses,
+            Vec::new(),
+            root.to_path_buf(),
+            on_prompt,
+            None,
+        )
+    }
+
+    /// A server that refuses `agent.start` with `code` — a pane that never
+    /// becomes a session.
+    pub fn start_refusing(socket: PathBuf, code: &str) -> FakeHerdr {
+        Self::start_full(
+            socket,
+            &["idle"],
+            Vec::new(),
+            PathBuf::new(),
+            None,
+            Some(code.to_string()),
+        )
     }
 
     fn start_full(
         socket: PathBuf,
         statuses: &[&str],
         agents: Vec<serde_json::Value>,
-        drops: usize,
-        footer: &str,
+        root: PathBuf,
+        on_prompt: Option<OnPrompt>,
+        refuse_start: Option<String>,
     ) -> FakeHerdr {
         use serde_json::json;
+        use std::collections::{HashMap, VecDeque};
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        // A test may rewire its fixture to a differently-scripted server;
+        // the stale socket file would otherwise refuse the bind.
+        let _ = std::fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).unwrap();
         let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let record = std::sync::Arc::clone(&requests);
-        let mut statuses: std::collections::VecDeque<String> =
-            statuses.iter().map(|s| s.to_string()).collect();
-        let footer = footer.to_string();
+        let script: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+        let peak = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let peak_in = std::sync::Arc::clone(&peak);
 
         std::thread::spawn(move || {
             let mut counter = 0u64;
             let mut seq = 10u64;
-            let mut prompts_seen = 0usize;
-            // What agent.read hands back: the echo of every prompt that
-            // landed, the way a real pane's transcript carries them.
-            let mut scrollback = String::new();
+            let mut open = 0usize;
+            // One status queue per pane: a retry is a new pane and starts
+            // the script over.
+            let mut panes: HashMap<String, VecDeque<String>> = HashMap::new();
             loop {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
@@ -497,6 +552,14 @@ impl FakeHerdr {
                 let id = request["id"].as_str().unwrap_or("").to_string();
                 let method = request["method"].as_str().unwrap_or("");
                 let params = &request["params"];
+                let refuse = |code: &str, message: &str| {
+                    let mut writer = &stream;
+                    let _ = writeln!(
+                        writer,
+                        "{}",
+                        json!({"id": id, "error": {"code": code, "message": message}})
+                    );
+                };
 
                 let agent_at = |pane: &str, status: &str, seq: u64| {
                     json!({
@@ -506,21 +569,18 @@ impl FakeHerdr {
                         "interactive_ready": true,
                     })
                 };
-                let mut next_status = || {
-                    if statuses.len() > 1 {
-                        statuses.pop_front().unwrap()
-                    } else {
-                        statuses.front().cloned().unwrap_or_else(|| "idle".into())
-                    }
-                };
 
                 let result = match method {
                     "ping" => json!({"type": "pong", "version": "fake", "protocol": 19}),
-                    "notification.show" | "workspace.close" | "pane.report_metadata" => {
+                    "notification.show" | "pane.report_metadata" => json!({"type": "ok"}),
+                    "workspace.close" => {
+                        open = open.saturating_sub(1);
                         json!({"type": "ok"})
                     }
                     "workspace.create" => {
                         counter += 1;
+                        open += 1;
+                        peak_in.fetch_max(open, std::sync::atomic::Ordering::Relaxed);
                         json!({
                             "type": "workspace_created",
                             "workspace": {"workspace_id": format!("w{counter}")},
@@ -529,6 +589,10 @@ impl FakeHerdr {
                         })
                     }
                     "agent.start" => {
+                        if let Some(code) = &refuse_start {
+                            refuse(code, "fake herdr refuses to start this agent");
+                            continue;
+                        }
                         // The real server's name rule, enforced here so the
                         // hermetic tests catch what the live one refuses.
                         let name = params["name"].as_str().unwrap_or("");
@@ -538,10 +602,9 @@ impl FakeHerdr {
                                 c.is_ascii_lowercase() || c.is_ascii_digit() || "-_".contains(c)
                             });
                         if !legal {
-                            let mut writer = &stream;
-                            let _ = writeln!(
-                                writer,
-                                r#"{{"id":"{id}","error":{{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)"}}}}"#
+                            refuse(
+                                "invalid_agent_name",
+                                "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)",
                             );
                             continue;
                         }
@@ -551,34 +614,41 @@ impl FakeHerdr {
                         })
                     }
                     "agent.prompt" => {
-                        prompts_seen += 1;
-                        if prompts_seen > drops {
-                            scrollback.push_str(params["text"].as_str().unwrap_or(""));
-                            scrollback.push('\n');
+                        // The session, such as it is: whatever the test says
+                        // this prompt makes it write.
+                        if let Some(act) = &on_prompt {
+                            act(params["text"].as_str().unwrap_or(""), &root);
                         }
                         json!({
                             "type": "agent_prompted",
                             "agent": agent_at(params["target"].as_str().unwrap_or("p?"), "working", 2),
                         })
                     }
-                    "agent.get" | "agent.wait" => {
+                    "agent.get" => {
                         seq += 1;
-                        let status = next_status();
+                        let pane = params["target"].as_str().unwrap_or("p?").to_string();
+                        let queue = panes
+                            .entry(pane.clone())
+                            .or_insert_with(|| script.iter().cloned().collect());
+                        let status = if queue.len() > 1 {
+                            queue.pop_front().unwrap()
+                        } else {
+                            queue.front().cloned().unwrap_or_else(|| "idle".into())
+                        };
                         json!({
                             "type": "agent_info",
-                            "agent": agent_at(params["target"].as_str().unwrap_or("p?"), &status, seq),
+                            "agent": agent_at(&pane, &status, seq),
                         })
                     }
                     "agent.list" => json!({"type": "agent_list", "agents": agents}),
                     "agent.read" => json!({
                         "type": "pane_read",
-                        "read": {"text": format!("{scrollback}fake scrollback tail\n{footer}")},
+                        "read": {"text": "fake scrollback tail\n"},
                     }),
                     other => {
-                        let mut writer = &stream;
-                        let _ = writeln!(
-                            writer,
-                            r#"{{"id":"{id}","error":{{"code":"invalid_request","message":"fake herdr does not speak {other}"}}}}"#
+                        refuse(
+                            "invalid_request",
+                            &format!("fake herdr does not speak {other}"),
                         );
                         continue;
                     }
@@ -587,7 +657,11 @@ impl FakeHerdr {
                 let _ = writeln!(writer, "{}", json!({"id": id, "result": result}));
             }
         });
-        FakeHerdr { socket, requests }
+        FakeHerdr {
+            socket,
+            requests,
+            peak,
+        }
     }
 
     /// Method names, in arrival order.
@@ -600,6 +674,19 @@ impl FakeHerdr {
             .collect()
     }
 
+    /// The most workspaces open at once over the run — the concurrency the
+    /// cap is supposed to bound, read from the wire rather than inferred.
+    /// Only meaningful when retirement actually closes them (`retain =
+    /// "never"`).
+    pub fn peak_open(&self) -> usize {
+        self.peak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How many times one method was called.
+    pub fn count(&self, method: &str) -> usize {
+        self.calls().iter().filter(|m| *m == method).count()
+    }
+
     /// The params of every request for one method.
     pub fn params_for(&self, method: &str) -> Vec<serde_json::Value> {
         self.requests
@@ -610,6 +697,242 @@ impl FakeHerdr {
             .map(|r| r["params"].clone())
             .collect()
     }
+}
+
+/// The `[harness.herdr]` block a herdr-backed fixture needs: this socket,
+/// and by default no grace at all, so a settled pane is judged on the pass
+/// that sees it rather than two minutes later.
+#[cfg(unix)]
+pub fn herdr_config(socket: &Path) -> String {
+    format!(
+        "[harness.herdr]\nsocket = \"{}\"\nidle_grace_secs = 0\n",
+        socket.display()
+    )
+}
+
+/// Every `agent.start`'s rendered flag array, in arrival order — what the
+/// process backend's recorded argv used to be.
+#[cfg(unix)]
+impl FakeHerdr {
+    pub fn started_args(&self) -> Vec<Vec<String>> {
+        self.params_for("agent.start")
+            .iter()
+            .map(|p| {
+                p["args"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    /// Every prompt submitted, in arrival order.
+    pub fn prompts(&self) -> Vec<String> {
+        self.params_for("agent.prompt")
+            .iter()
+            .filter_map(|p| p["text"].as_str().map(str::to_string))
+            .collect()
+    }
+}
+
+/// The plan a dispatched prompt concerns. Every shipped prompt opens by
+/// naming it, which is how a session-shaped test hook knows which artifact
+/// the session it is standing in for was sent to advance.
+pub fn plan_in_prompt(prompt: &str) -> Option<String> {
+    prompt
+        .split_whitespace()
+        .next()
+        .filter(|t| t.ends_with(".md"))
+        .map(str::to_string)
+}
+
+/// A verdict written the way a session writes one: straight into the plan's
+/// frontmatter. `status` replaces the status line; `handoff` is appended
+/// when given.
+pub fn write_verdict(root: &Path, rel: &str, status: &str, handoff: Option<&str>) {
+    let path = root.join(rel);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let mut out = String::new();
+    let mut done = false;
+    for line in text.lines() {
+        if !done && line.starts_with("status:") {
+            out.push_str(&format!("status: {status}\n"));
+            if let Some(h) = handoff {
+                out.push_str(&format!("handoff: {h}\n"));
+            }
+            done = true;
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    std::fs::write(&path, out).unwrap();
+}
+
+/// Wire a fixture to a fake herdr and write its `runtime.toml`: `extra` goes
+/// in front (other tables), `args` is the agent flag array, and `on_prompt`
+/// is the session, if the test needs one to do anything.
+///
+/// The grace is zero, so a settled pane is judged on the pass that sees it
+/// rather than two minutes later — the tests are about the rule, not the
+/// clock.
+#[cfg(unix)]
+pub fn wire_herdr(
+    f: &Fixture,
+    args: &str,
+    extra: &str,
+    statuses: &[&str],
+    on_prompt: Option<OnPrompt>,
+) -> FakeHerdr {
+    wire_herdr_split(f, args, args, extra, statuses, on_prompt)
+}
+
+/// `wire_herdr` where the two errands take different flags — a ritual and an
+/// act render different variables, so a template that suits one can be
+/// unrenderable for the other.
+#[cfg(unix)]
+pub fn wire_herdr_split(
+    f: &Fixture,
+    act_args: &str,
+    ritual_args: &str,
+    extra: &str,
+    statuses: &[&str],
+    on_prompt: Option<OnPrompt>,
+) -> FakeHerdr {
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_maybe_acting(socket.clone(), statuses, f.root(), on_prompt);
+    f.write(
+        "runtime.toml",
+        &format!(
+            "{extra}{}act_args = [{act_args}]\nritual_args = [{ritual_args}]\n",
+            herdr_config(&socket)
+        ),
+    );
+    herdr
+}
+
+/// A stand-in for the session itself: it snapshots what the runtime handed
+/// it — the plan as it found it, and the acting-role marker while it runs —
+/// and then leaves `verdict`, if it was given one.
+///
+/// This runs in the test process, on the fake herdr's listener thread, while
+/// the daemon child is blocked in its own `agent.prompt` call. That is
+/// exactly the moment a real session starts, so it is the moment at which
+/// what the runtime handed over can be read (decision 0053).
+#[cfg(unix)]
+pub fn session(root: &Path, verdict: Option<(&str, Option<&str>)>) -> OnPrompt {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let root = root.to_path_buf();
+    let verdict = verdict.map(|(s, h)| (s.to_string(), h.map(str::to_string)));
+    Box::new(move |prompt: &str, _: &Path| {
+        let Some(rel) = plan_in_prompt(prompt) else {
+            return;
+        };
+        let dir = root.join(".trellis/runtime");
+        let _ = std::fs::create_dir_all(&dir);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let _ = std::fs::copy(root.join(&rel), dir.join(format!("plan-seen-{n}")));
+        let _ = std::fs::copy(
+            root.join(".trellis/acting-role"),
+            dir.join(format!("marker-seen-{n}")),
+        );
+        if let Some((status, handoff)) = &verdict {
+            write_verdict(&root, &rel, status, handoff.as_deref());
+        }
+    })
+}
+
+/// A session that uses its back-channel: it reports progress, asks a
+/// question, waits for the answer, and writes what it was told to
+/// `.trellis/runtime/answer`.
+///
+/// It reads the endpoint out of its own prompt, which is where a binding
+/// that wants the session to have one puts `{mcp}`. The whole exchange is
+/// plain HTTP against `/mcp/{token}`: the check that matters is the wire,
+/// not who speaks it.
+///
+/// The waiting happens on a thread of its own. This hook runs on the fake
+/// server's accept loop, and a session that blocked there would also block
+/// the daemon's next `agent.get` — which is a deadlock, not a test.
+#[cfg(unix)]
+pub fn asking_session(question: &str) -> OnPrompt {
+    let question = question.to_string();
+    Box::new(move |prompt: &str, root: &Path| {
+        let Some(url) = mcp_endpoint(prompt) else {
+            return;
+        };
+        let question = question.clone();
+        let root = root.to_path_buf();
+        std::thread::spawn(move || {
+            let post = |body: String| -> String {
+                let out = Command::new("curl")
+                    .args([
+                        "-sS",
+                        "-m",
+                        "10",
+                        "-H",
+                        "Content-Type: application/json",
+                        "-d",
+                    ])
+                    .arg(body)
+                    .arg(&url)
+                    .output()
+                    .unwrap();
+                String::from_utf8_lossy(&out.stdout).to_string()
+            };
+            post(r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"trellis_progress","arguments":{"note":"claimed and reading"}}}"#.to_string());
+            let asked = post(format!(
+                r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"trellis_ask","arguments":{{"question":"{question}","options":["moves with billing","stays in core"],"context":"plans/x.md"}}}}}}"#
+            ));
+            let Some(ticket) = asked
+                .split("ticket ")
+                .nth(1)
+                .and_then(|rest| rest.split_whitespace().next())
+            else {
+                return;
+            };
+            // The bounded wait, polled the way an agent willing to wait does.
+            for _ in 0..30 {
+                let got = post(format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"trellis_await","arguments":{{"ticket":"{ticket}"}}}}}}"#
+                ));
+                if let Some(answer) = got
+                    .split("answered: ")
+                    .nth(1)
+                    .and_then(|rest| rest.split('"').next())
+                {
+                    let dir = root.join(".trellis/runtime");
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = std::fs::write(dir.join("answer"), answer);
+                    return;
+                }
+            }
+        });
+    })
+}
+
+/// The MCP endpoint a session was handed, out of a prompt that names
+/// `{mcp}` — the same `--mcp-config` JSON a harness would be given.
+fn mcp_endpoint(prompt: &str) -> Option<String> {
+    let at = prompt.find("\"url\"")?;
+    let rest = &prompt[at..];
+    let open = rest.find("http")?;
+    let end = rest[open..].find('"')?;
+    Some(rest[open..open + end].to_string())
+}
+
+/// A session that claims its plan and walks away, leaving no verdict — the
+/// failure the recycle rule exists for.
+#[cfg(unix)]
+pub fn abandoning_session(root: &Path) -> OnPrompt {
+    session(root, None)
 }
 
 /// An `agent.list` entry as herdr would report a still-running trellis

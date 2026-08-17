@@ -199,7 +199,7 @@ impl Inbox {
             .get_mut(token)
             .ok_or_else(|| "this session is no longer open".to_string())?;
         session.progress.push(Note {
-            at: super::spawn::timestamp(crate::dates::today()),
+            at: super::session::timestamp(crate::dates::today()),
             note: note.to_string(),
         });
         let overflow = session.progress.len().saturating_sub(MAX_NOTES);
@@ -233,7 +233,7 @@ impl Inbox {
             question: question.to_string(),
             options,
             context,
-            asked: super::spawn::timestamp(crate::dates::today()),
+            asked: super::session::timestamp(crate::dates::today()),
             answer: None,
         });
         inner.tickets.insert(ticket.clone(), token.to_string());

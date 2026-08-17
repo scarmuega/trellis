@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{Fixture, ANCHOR};
+use common::{FakeHerdr, Fixture, ANCHOR};
 
 const RITUALS: &str = "---
 provenance: authored
@@ -20,43 +20,41 @@ owner: org/founder
 | incident review | on demand | org/founder | whatever the incident asks |
 ";
 
-fn fixture() -> Fixture {
+fn fixture() -> (Fixture, FakeHerdr) {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\", \"{{model}}\", \"{{effort}}\", \"{{budget}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\", \"{{prompt}}\"]\n"
-        ),
+    // The budget is no longer a flag anywhere (decision 0043's trade, now
+    // the only story): an interactive session has nothing to enforce it.
+    let herdr = common::wire_herdr_split(
+        &f,
+        "\"{plan}\"",
+        "\"{ritual}\"",
+        "",
+        &["working", "idle"],
+        None,
     );
-    f
+    (f, herdr)
 }
 
-fn rituals_run(f: &Fixture) -> Vec<String> {
-    f.invocations()
+/// Which rituals fired, read off the flags each session was started with.
+fn rituals_run(h: &FakeHerdr) -> Vec<String> {
+    h.started_args()
         .into_iter()
-        .filter_map(|argv| argv.first().cloned())
+        .filter_map(|args| args.first().cloned())
         .collect()
 }
 
 #[test]
 fn a_first_pass_fires_every_scheduled_row() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.rituals_once(ANCHOR, &[]);
 
-    assert_eq!(rituals_run(&f), vec!["conventions lint"]);
-    let argv = &f.invocations()[0];
-    // The prompt element line-splits in the harness's argv log; its first
-    // line is the discriminating header the default renders (decision 0050),
-    // and the procedure body follows in the same element.
+    assert_eq!(rituals_run(&herdr), vec!["conventions lint"]);
+    let prompt = &herdr.prompts()[0];
     assert_eq!(
-        argv[1],
+        prompt.lines().next().unwrap(),
         "ritual conventions lint — executed by org/steward (trellis runtime)."
     );
-    let prompt = argv[1..].join("\n");
     assert!(prompt.contains("read its row"), "{prompt}");
     assert!(prompt.contains("Bind to the domain root"), "{prompt}");
 
@@ -65,7 +63,10 @@ fn a_first_pass_fires_every_scheduled_row() {
         state["runs"]["ritual:conventions lint"]["last_fired"],
         ANCHOR
     );
-    assert_eq!(state["runs"]["ritual:conventions lint"]["last_exit"], 0);
+    assert_eq!(
+        state["runs"]["ritual:conventions lint"]["last_outcome"], "settled",
+        "a ritual leaves no artifact to read a verdict from: settling is its end"
+    );
     assert!(
         state["runs"].get("dispatch").is_none(),
         "dispatch has no calendar key — it is the dispatcher's loop (0046)"
@@ -74,12 +75,12 @@ fn a_first_pass_fires_every_scheduled_row() {
 
 #[test]
 fn a_row_already_fired_today_does_not_fire_again() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.rituals_once(ANCHOR, &[]);
-    let first = f.invocations().len();
+    let first = herdr.started_args().len();
     f.rituals_once(ANCHOR, &[]);
     assert_eq!(
-        f.invocations().len(),
+        herdr.started_args().len(),
         first,
         "a second pass changes nothing"
     );
@@ -87,26 +88,26 @@ fn a_row_already_fired_today_does_not_fire_again() {
 
 #[test]
 fn a_weekly_row_returns_on_its_cadence_and_not_before() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.rituals_once(ANCHOR, &[]);
     f.rituals_once("2026-08-09", &[]); // six days on: not yet
-    assert_eq!(rituals_run(&f), vec!["conventions lint"]);
+    assert_eq!(rituals_run(&herdr), vec!["conventions lint"]);
 
     f.rituals_once("2026-08-10", &[]); // seven days on
     assert_eq!(
-        rituals_run(&f),
+        rituals_run(&herdr),
         vec!["conventions lint", "conventions lint"]
     );
 }
 
 #[test]
 fn a_window_missed_while_the_daemon_was_down_fires_once_not_once_per_window() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.rituals_once(ANCHOR, &[]);
     // Two months later, after eight missed weekly windows.
     f.rituals_once("2026-10-05", &[]);
     assert_eq!(
-        rituals_run(&f),
+        rituals_run(&herdr),
         vec!["conventions lint", "conventions lint"],
         "one catch-up run, not eight"
     );
@@ -114,21 +115,24 @@ fn a_window_missed_while_the_daemon_was_down_fires_once_not_once_per_window() {
 
 #[test]
 fn catchup_skip_records_the_missed_window_without_running_it() {
-    let f = fixture();
-    let harness = ".trellis/bin/harness";
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[scheduler]\ncatchup = \"skip\"\n\n\
-             [harness]\n\
-             act_cmd = [\"{harness}\", \"{{plan}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
+    let f = Fixture::healthy();
+    f.write("rituals.md", RITUALS);
+    let herdr = common::wire_herdr_split(
+        &f,
+        "\"{plan}\"",
+        "\"{ritual}\"",
+        "[scheduler]\ncatchup = \"skip\"\n\n",
+        &["working", "idle"],
+        None,
     );
     f.rituals_once(ANCHOR, &[]);
     let out = f.rituals_once("2026-10-05", &[]);
 
-    assert_eq!(rituals_run(&f), vec!["conventions lint"], "nothing re-ran");
+    assert_eq!(
+        rituals_run(&herdr),
+        vec!["conventions lint"],
+        "nothing re-ran"
+    );
     assert!(out.contains("window missed"), "{out}");
     assert_eq!(
         f.rituals_state()["runs"]["ritual:conventions lint"]["last_fired"],
@@ -139,10 +143,10 @@ fn catchup_skip_records_the_missed_window_without_running_it() {
 
 #[test]
 fn a_cadence_with_no_day_count_never_fires_and_is_reported() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     f.rituals_once(ANCHOR, &[]);
     assert!(
-        !rituals_run(&f).contains(&"incident review".to_string()),
+        !rituals_run(&herdr).contains(&"incident review".to_string()),
         "'on demand' is not a schedule"
     );
     let state = f.rituals_state();
@@ -151,11 +155,11 @@ fn a_cadence_with_no_day_count_never_fires_and_is_reported() {
 
 #[test]
 fn a_dry_run_reports_the_command_and_changes_nothing() {
-    let f = fixture();
+    let (f, herdr) = fixture();
     let out = f.rituals_once(ANCHOR, &["--dry-run"]);
 
     assert!(out.contains("would run ritual conventions lint"), "{out}");
-    assert!(f.invocations().is_empty(), "nothing was spawned");
+    assert!(herdr.started_args().is_empty(), "nothing was spawned");
     assert_eq!(
         f.rituals_state(),
         serde_json::Value::Null,
@@ -167,6 +171,10 @@ fn a_dry_run_reports_the_command_and_changes_nothing() {
 fn the_default_config_needs_no_plugin_at_all() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
+    // Only the socket: everything else stays at its default.
+    let socket = f.root().join(".trellis/herdr.sock");
+    let _herdr = FakeHerdr::start(socket.clone(), &["idle"], Vec::new());
+    f.write("runtime.toml", &common::herdr_config(&socket));
     // No runtime.toml, no CLAUDE_PLUGIN_ROOT, no installed plugin: the
     // default prompt is self-contained — the procedure rendered from the
     // binary's embedded commands (decision 0050), no slash command to
@@ -195,16 +203,16 @@ fn a_template_naming_the_plugin_without_one_configured_refuses_to_start() {
     // Naming {plugin_dir} is how a domain operating against an uninstalled
     // checkout opts in; doing so without supplying one must refuse rather
     // than quietly run against whatever plugin the harness finds.
+    // No server needed: the placeholder is resolved before anything connects.
     f.write(
         "runtime.toml",
-        r#"[harness]
-ritual_cmd = ["claude", "--plugin-dir", "{plugin_dir}"]
-"#,
+        "[harness.herdr]\nritual_args = [\"--plugin-dir\", \"{plugin_dir}\"]\n",
     );
     let out = f
         .bin()
         .args(["rituals"])
         .env_remove("CLAUDE_PLUGIN_ROOT")
+        .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
         .output()
         .unwrap();
     assert!(!out.status.success());
@@ -219,26 +227,31 @@ fn an_instance_keeping_the_slash_spelling_renders_exactly_as_before() {
     // The migration story (decision 0050): the daemon always supplies every
     // placeholder; a prompt override that still names the plugin spelling
     // renders untouched, procedure and all unused.
+    let socket = f.root().join(".trellis/herdr.sock");
+    let _herdr = FakeHerdr::start(socket.clone(), &["idle"], Vec::new());
     f.write(
         "runtime.toml",
-        "[prompts]\nritual = \"/trellis:ritual {ritual}\"\n",
+        &format!(
+            "[prompts]\nritual = \"/trellis:ritual {{ritual}}\"\n\n{}",
+            common::herdr_config(&socket)
+        ),
     );
     let out = f.rituals_once(ANCHOR, &["--dry-run"]);
-    assert!(
-        out.contains("claude -p '/trellis:ritual conventions lint'"),
-        "{out}"
-    );
+    assert!(out.contains("⇐ /trellis:ritual conventions lint"), "{out}");
 }
 
 #[test]
 fn a_domain_may_still_point_its_sessions_at_a_checkout() {
     let f = Fixture::healthy();
     f.write("rituals.md", RITUALS);
+    let socket = f.root().join(".trellis/herdr.sock");
+    let _herdr = FakeHerdr::start(socket.clone(), &["idle"], Vec::new());
     f.write(
         "runtime.toml",
-        r#"[harness]
-ritual_cmd = ["claude", "-p", "{prompt}", "--plugin-dir", "{plugin_dir}"]
-"#,
+        &format!(
+            "{}ritual_args = [\"--plugin-dir\", \"{{plugin_dir}}\"]\n",
+            common::herdr_config(&socket)
+        ),
     );
     // A configured checkout must carry its commands (decision 0050): the
     // {procedure} source swaps to it, so a bare directory is refused.

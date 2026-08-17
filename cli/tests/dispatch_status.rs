@@ -25,6 +25,7 @@ impl Daemon {
             .current_dir(f.root())
             .env("TRELLIS_TODAY", ANCHOR)
             .env_remove("CLAUDE_PLUGIN_ROOT")
+            .env("HERDR_SOCKET_PATH", f.root().join(".trellis/no-herdr.sock"))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -116,15 +117,7 @@ fn status_of(f: &Fixture, rel: &str) -> String {
 /// makes the release gate observable, both at once.
 fn flipping_fixture() -> Fixture {
     let f = Fixture::healthy();
-    let harness = f.fake_harness();
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{harness}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{harness}\", \"{{ritual}}\"]\n"
-        ),
-    );
+    let _herdr = common::wire_herdr(&f, "", "", &["working", "idle"], None);
     f.write(
         "plans/still-drafting.md",
         "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Still drafting\n",
@@ -235,25 +228,9 @@ fn illegal_flips_speak_the_refusal_vocabulary() {
 #[test]
 fn a_flip_under_a_running_session_is_refused() {
     let f = flipping_fixture();
-    // A harness that outlives the check, so the refine session it carries is
-    // still in flight when the flip arrives.
-    let rel = ".trellis/bin/slow";
-    let path = f.root().join(rel);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "#!/bin/sh\nsleep 5\nexit 0\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    f.write(
-        "runtime.toml",
-        &format!(
-            "[harness]\n\
-             act_cmd = [\"{rel}\", \"{{prompt}}\"]\n\
-             ritual_cmd = [\"{rel}\", \"{{ritual}}\"]\n"
-        ),
-    );
+    // A pane that never settles, so the errand session it carries is still
+    // in flight when the flip arrives.
+    let _herdr = common::wire_herdr(&f, "", "", &["working"], None);
     let daemon = Daemon::dispatch(&f);
 
     let body = serde_json::json!({ "instruction": "split the scope" }).to_string();

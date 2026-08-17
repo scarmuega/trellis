@@ -38,7 +38,8 @@ impl Channel for HerdrChannel {
             record.to.as_deref().unwrap_or("?")
         );
         self.client
-            .notification_show(&title, record.asks.as_deref())
+            .notification_show(&title, record.asks.as_deref())?;
+        Ok(())
     }
 
     /// The ask channel's low-latency half: a parked question becomes a toast
@@ -50,6 +51,7 @@ impl Channel for HerdrChannel {
                 "{} — answer: trellis inbox answer {} <choice>",
                 pending.question, pending.ticket
             )),
-        )
+        )?;
+        Ok(())
     }
 }
