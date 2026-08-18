@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type PlanRow } from "../../lib/api";
+import { type PlanRow } from "../../lib/api";
+import { useDomain } from "../../lib/domain";
 import { usePlanDrawer } from "./PlanDrawer";
 
 function Card({ plan, onOpen }: { plan: PlanRow; onOpen: (rel: string) => void }) {
@@ -20,8 +21,9 @@ function Card({ plan, onOpen }: { plan: PlanRow; onOpen: (rel: string) => void }
 
 export default function BoardView() {
   const { open } = usePlanDrawer();
+  const { api, key } = useDomain();
   const { data, error, isPending } = useQuery({
-    queryKey: ["board"],
+    queryKey: key("board"),
     queryFn: api.board,
   });
 

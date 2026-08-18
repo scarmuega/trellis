@@ -13,6 +13,7 @@
 
 import type { ReactNode } from "react";
 import { Link } from "react-router";
+import { useDomain } from "./domain";
 
 /// The component vocabulary. A type is a rendering decision, not a schema:
 /// several fields share one, and an unknown field is assigned one by shape.
@@ -103,6 +104,7 @@ function Empty() {
 /// anything else opens its artifact page. An address carrying a `#fragment`
 /// links by its file part — the fragment names a section, not an artifact.
 function Refs({ value, onOpenPlan }: { value: string[]; onOpenPlan?: (rel: string) => void }) {
+  const { href } = useDomain();
   if (value.length === 0) return <Empty />;
   return (
     <span className="flex flex-wrap gap-1">
@@ -116,7 +118,7 @@ function Refs({ value, onOpenPlan }: { value: string[]; onOpenPlan?: (rel: strin
             {label(ref)}
           </button>
         ) : (
-          <Link key={ref} to={`/artifacts/${path}`} className={className}>
+          <Link key={ref} to={href(`artifacts/${path}`)} className={className}>
             {label(ref)}
           </Link>
         );
@@ -152,9 +154,10 @@ function Url({ value }: { value: string }) {
 }
 
 function Role({ value }: { value: string }) {
+  const { href } = useDomain();
   return (
     <Link
-      to={`/artifacts/org/${value.replace(/^org\//, "")}/mandate.md`}
+      to={href(`artifacts/org/${value.replace(/^org\//, "")}/mandate.md`)}
       className="rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-700 hover:bg-neutral-200"
     >
       {value}

@@ -1,12 +1,14 @@
 import { NavLink, Outlet } from "react-router";
 import PlanDrawer from "./PlanDrawer";
+import { useDomain } from "../../lib/domain";
 
 const views = [
-  { to: "/plans", label: "Board", end: true },
-  { to: "/plans/graph", label: "Graph", end: false },
+  { to: "plans", label: "Board", end: true },
+  { to: "plans/graph", label: "Graph", end: false },
 ];
 
 export default function PlansPage() {
+  const { href } = useDomain();
   return (
     <div>
       <div className="mb-4 flex items-center gap-4">
@@ -15,7 +17,7 @@ export default function PlansPage() {
           {views.map((v) => (
             <NavLink
               key={v.to}
-              to={v.to}
+              to={href(v.to)}
               end={v.end}
               className={({ isActive }) =>
                 isActive

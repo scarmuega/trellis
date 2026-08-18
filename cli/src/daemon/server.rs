@@ -35,6 +35,13 @@
 //! Handlers hold no cache: each recomputes from a fresh tree. The bind
 //! address defaults to loopback because the surface carries no authentication
 //! — exposing it is a deliberate act, and the config comment says so.
+//!
+//! The same reasoning bounds who may read this from a page. One domain is one
+//! root is one daemon (decision 0002), so a board that shows several is served
+//! from one origin and reads a daemon per domain, each on its own port: every
+//! call it makes is cross-origin (decision 0062). Loopback origins are
+//! answered, at any port. Every other origin gets what it got before this
+//! existed — a reply its browser refuses to hand it.
 
 use std::sync::Arc;
 
@@ -99,12 +106,80 @@ fn header(value: &str) -> Header {
     Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).expect("static header")
 }
 
-fn json(request: Request, value: &serde_json::Value) -> std::io::Result<()> {
+fn plain(name: &str, value: &str) -> Header {
+    Header::from_bytes(name.as_bytes(), value.as_bytes()).expect("a checked header")
+}
+
+/// Which origins may read this surface from a page of their own: loopback, at
+/// any port. A board on this machine is the case that needs it; the wider web
+/// is the case that must not have it.
+fn loopback_origin(origin: &str) -> bool {
+    let rest = match origin.split_once("://") {
+        Some(("http" | "https", rest)) => rest,
+        _ => return false,
+    };
+    // Shed the port. An IPv6 literal keeps its brackets, which is what tells
+    // its colons from the port's.
+    let host = match rest.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => host,
+        _ => rest,
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
+}
+
+/// A request, carrying the answer to "may the page that sent this read the
+/// reply?" all the way to wherever it is answered.
+///
+/// The permission is a header on the *response*, and this module has a great
+/// many exits. Deriving it once, here, is what makes it impossible to get
+/// right on one route and forget on another.
+struct Req {
+    inner: Request,
+    /// The `Origin` this reply may be read by — `None` when the request
+    /// carried none, or carried one this surface does not answer.
+    origin: Option<String>,
+}
+
+impl Req {
+    fn new(inner: Request) -> Self {
+        let origin = inner
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Origin"))
+            .map(|h| h.value.as_str().trim().to_string())
+            .filter(|o| loopback_origin(o));
+        Self { inner, origin }
+    }
+
+    fn method(&self) -> &Method {
+        self.inner.method()
+    }
+
+    fn url(&self) -> &str {
+        self.inner.url()
+    }
+
+    fn as_reader(&mut self) -> &mut dyn std::io::Read {
+        self.inner.as_reader()
+    }
+
+    fn respond<R: std::io::Read>(self, mut response: Response<R>) -> std::io::Result<()> {
+        if let Some(origin) = &self.origin {
+            response.add_header(plain("Access-Control-Allow-Origin", origin));
+            // The reply differs by who asked. A cache that missed this would
+            // hand one origin the permission granted to another.
+            response.add_header(plain("Vary", "Origin"));
+        }
+        self.inner.respond(response)
+    }
+}
+
+fn json(request: Req, value: &serde_json::Value) -> std::io::Result<()> {
     let body = serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".into());
     request.respond(Response::from_string(body).with_header(json_header()))
 }
 
-fn error(request: Request, code: u16, message: &str) -> std::io::Result<()> {
+fn error(request: Req, code: u16, message: &str) -> std::io::Result<()> {
     let body = serde_json::json!({ "error": message }).to_string();
     request.respond(
         Response::from_string(body)
@@ -113,7 +188,21 @@ fn error(request: Request, code: u16, message: &str) -> std::io::Result<()> {
     )
 }
 
+/// The preflight a browser sends ahead of the two POSTs, whose JSON content
+/// type puts them outside what it will send unasked. Only an origin this
+/// surface would answer anyway gets one; for any other, `OPTIONS` is just
+/// another verb that is not a read.
+fn preflight(request: Req) -> std::io::Result<()> {
+    request.respond(
+        Response::empty(204)
+            .with_header(plain("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
+            .with_header(plain("Access-Control-Allow-Headers", "Content-Type"))
+            .with_header(plain("Access-Control-Max-Age", "600")),
+    )
+}
+
 fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
+    let request = Req::new(request);
     let url = request.url().to_string();
     let (path, query) = match url.split_once('?') {
         Some((p, q)) => (p, q),
@@ -146,6 +235,9 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
                 return status_flip(request, shared, &slug);
             }
         }
+    }
+    if request.method() == &Method::Options && request.origin.is_some() {
+        return preflight(request);
     }
     if request.method() != &Method::Get {
         return error(request, 405, "this surface is read-only");
@@ -218,7 +310,7 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
 }
 
 /// `POST /mcp/{token}` — one JSON-RPC message from a running session.
-fn session_call(mut request: Request, shared: &Shared, token: &str) -> std::io::Result<()> {
+fn session_call(mut request: Req, shared: &Shared, token: &str) -> std::io::Result<()> {
     if !shared.inbox.known(token) {
         // Not an auth check — the token is attribution. An unknown one means
         // the session it belonged to is over.
@@ -239,7 +331,7 @@ fn session_call(mut request: Request, shared: &Shared, token: &str) -> std::io::
 
 /// `POST /api/sessions/{ticket}/answer` — the reply, from `trellis inbox` or
 /// the board. Body is `{"answer": "..."}`, or the bare text.
-fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Result<()> {
+fn answer(mut request: Req, shared: &Shared, ticket: &str) -> std::io::Result<()> {
     let mut body = String::new();
     if let Err(e) = request.as_reader().read_to_string(&mut body) {
         return error(request, 400, &format!("cannot read the request body: {e}"));
@@ -272,7 +364,7 @@ fn answer(mut request: Request, shared: &Shared, ticket: &str) -> std::io::Resul
 /// the dispatch loop runs — the handler validates mechanically and enqueues;
 /// the loop is the only spawner. Serve answers the same path purely as a
 /// relay to the dispatcher's socket.
-fn errand(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
+fn errand(mut request: Req, shared: &Shared, slug: &str) -> std::io::Result<()> {
     let mut body = String::new();
     if let Err(e) = request.as_reader().read_to_string(&mut body) {
         return error(request, 400, &format!("cannot read the request body: {e}"));
@@ -437,7 +529,7 @@ fn errand(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<
 /// guard, same readiness gate on release, same hold check on claim — so who
 /// may flip stays the invoker's mandate, not this tool's business
 /// (plan_ops). Honored where the dispatch loop runs; serve relays.
-fn status_flip(mut request: Request, shared: &Shared, slug: &str) -> std::io::Result<()> {
+fn status_flip(mut request: Req, shared: &Shared, slug: &str) -> std::io::Result<()> {
     let mut body = String::new();
     if let Err(e) = request.as_reader().read_to_string(&mut body) {
         return error(request, 400, &format!("cannot read the request body: {e}"));
@@ -486,7 +578,7 @@ fn status_flip(mut request: Request, shared: &Shared, slug: &str) -> std::io::Re
             Ok(s) => s,
             Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),
         };
-        let refuse = |request: Request, code: u16, outcome: &str, message: String| {
+        let refuse = |request: Req, code: u16, outcome: &str, message: String| {
             let body = serde_json::json!({
                 "plan": rel,
                 "outcome": outcome,
@@ -671,7 +763,7 @@ fn plan_census(
 
 /// Everything that reads the domain. One tree load per request, shared by
 /// whichever projection the path asked for.
-fn tree_backed(request: Request, shared: &Shared, path: &str, query: &str) -> std::io::Result<()> {
+fn tree_backed(request: Req, shared: &Shared, path: &str, query: &str) -> std::io::Result<()> {
     let (tree, git, derived, today) = match snapshot(&shared.root) {
         Ok(s) => s,
         Err(e) => return error(request, 500, &format!("cannot read the root: {e}")),

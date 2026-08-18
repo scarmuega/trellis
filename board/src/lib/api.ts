@@ -1,6 +1,10 @@
 // Client for the read-only surface of `trellis serve`.
 // Shapes mirror what the daemon serializes; fields the UI does not use yet
 // are left open via index signatures rather than exhaustively typed.
+//
+// One client per domain, built over that domain's origin (decision 0062):
+// the board is a singleton over many daemons, each sovereign on its own port,
+// so there is no single API to hardcode a path against.
 
 export interface PlanRow {
   plan: string;
@@ -48,9 +52,9 @@ export interface Artifact {
   text: string;
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path}: ${res.status} ${await res.text()}`);
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -118,18 +122,23 @@ export class FlipError extends Error {
   }
 }
 
-export const api = {
-  status: () => getJson<DaemonStatus>("/api/status"),
-  board: () => getJson<Board>("/api/board"),
-  plans: () => getJson<PlanRow[]>("/api/plans"),
-  plan: (slug: string) => getJson<Record<string, unknown>>(`/api/plans/${slug}`),
+/// The client for one domain, over the origin its daemon listens on. Every
+/// path below is the same one the CLI's own reader uses; only the origin
+/// changes, which is the whole difference between one domain and the next.
+export function createApi(origin: string) {
+  const at = (path: string) => `${origin}${path}`;
+  return {
+  status: () => getJson<DaemonStatus>(at("/api/status")),
+  board: () => getJson<Board>(at("/api/board")),
+  plans: () => getJson<PlanRow[]>(at("/api/plans")),
+  plan: (slug: string) => getJson<Record<string, unknown>>(at(`/api/plans/${slug}`)),
   escalations: (all = false) =>
-    getJson<Escalation[]>(`/api/escalations${all ? "?all=1" : ""}`),
-  dispatch: () => getJson<Record<string, unknown>>("/api/dispatch"),
-  org: () => getJson<OrgRole[]>("/api/org"),
-  artifact: (rel: string) => getJson<Artifact>(`/api/artifacts/${rel}`),
+    getJson<Escalation[]>(at(`/api/escalations${all ? "?all=1" : ""}`)),
+  dispatch: () => getJson<Record<string, unknown>>(at("/api/dispatch")),
+  org: () => getJson<OrgRole[]>(at("/api/org")),
+  artifact: (rel: string) => getJson<Artifact>(at(`/api/artifacts/${rel}`)),
   view: async (name: string): Promise<string> => {
-    const res = await fetch(`/api/views/${name}`);
+    const res = await fetch(at(`/api/views/${name}`));
     if (!res.ok) throw new Error(`view ${name}: ${res.status}`);
     return res.text();
   },
@@ -143,7 +152,7 @@ export const api = {
     size?: { model?: string; effort?: string },
   ): Promise<ErrandOutcome> => {
     const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
-    const res = await fetch(`/api/plans/${encodeURIComponent(slug)}/errand`, {
+    const res = await fetch(at(`/api/plans/${encodeURIComponent(slug)}/errand`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ instruction, ...size }),
@@ -162,7 +171,7 @@ export const api = {
     force = false,
   ): Promise<FlipOutcome> => {
     const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
-    const res = await fetch(`/api/plans/${encodeURIComponent(slug)}/status`, {
+    const res = await fetch(at(`/api/plans/${encodeURIComponent(slug)}/status`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, force }),
@@ -176,9 +185,12 @@ export const api = {
     return body;
   },
   answer: (ticket: string, answer: string) =>
-    fetch(`/api/sessions/${encodeURIComponent(ticket)}/answer`, {
+    fetch(at(`/api/sessions/${encodeURIComponent(ticket)}/answer`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answer }),
     }),
-};
+  };
+}
+
+export type Api = ReturnType<typeof createApi>;

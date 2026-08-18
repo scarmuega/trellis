@@ -308,7 +308,12 @@ artifact's automation class. The one non-read it answers besides 0041's
 answer route is the errand request (decisions 0048, 0051), and only as a
 relay to the dispatcher's socket — serve itself spawns nothing, and answers
 503 when no dispatcher runs. It binds loopback by default, carries no authentication,
-and may be down without stopping anything. The other non-read it relays is
+and may be down without stopping anything. For the same reason it bounds who
+may read it from a page: a board showing several domains is served from one
+origin and reads a daemon per domain, each on its own port, so every call it
+makes is cross-origin (decision 0062). Loopback origins are answered, at any
+port; every other origin gets what it got before — a reply its browser refuses
+to hand it. The other non-read it relays is
 the status flip (decision 0049): `POST /api/plans/{slug}/status` performs, on
 the dispatcher's socket, exactly the guarded lifecycle move `trellis plan
 release | claim | unblock | retire` performs — readiness gates release (with

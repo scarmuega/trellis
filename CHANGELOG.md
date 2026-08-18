@@ -12,6 +12,30 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 `## [x.y.z]` section here and gets a matching `vx.y.z` git tag.
 `cli/tests/lockstep.rs` fails the build on a half-done one.
 
+## [Unreleased]
+
+### Added
+
+- **The board is one window onto many domains**
+  (`decisions/0062-the-board-is-one-window-onto-many-domains.md`). A domain is
+  a sovereign root with its own daemon on its own port, so working across a
+  portfolio meant one board per domain and a restart to switch. The board is
+  now a singleton: a narrow left rail lists every configured domain, the slug
+  rides in the path (`/d/{slug}/plans`), and each domain's API client is built
+  over that domain's own origin. Nothing is aggregated — the rail switches, it
+  does not merge, and decision 0002 is untouched. The list of domains is the
+  operator's, not any domain's, so it lives outside every root at
+  `~/.trellis/board.toml`; an entry names a domain by `root` (the endpoint is
+  read from that root's live `serve.addr`, falling back to its `runtime.toml`)
+  or by an explicit `url`. `TRELLIS_API` and the dev-server proxy are gone.
+- **`trellis serve` answers loopback origins.** A board on one origin reading a
+  daemon on another is cross-origin by construction, so the surface now sends
+  `Access-Control-Allow-Origin`, echoing the request's origin and only when its
+  host is `localhost`, `127.0.0.1` or `[::1]`, at any port — plus the preflight
+  the two POST routes need. Every other origin gets exactly what it got before.
+  Same reasoning as the loopback bind default; no `Allow-Credentials`, and no
+  `runtime.toml` key, so no root needs editing.
+
 ## [0.24.1] - 2026-08-17
 
 ### Fixed

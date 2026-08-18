@@ -56,11 +56,14 @@ impl Daemon {
         Daemon { child, port }
     }
 
-    fn request(&self, method: &str, path: &str) -> (u16, String) {
+    /// The whole exchange — status, header block, body. `extra` is appended to
+    /// the request head verbatim, which is how a test sends an `Origin` and
+    /// reads what came back before the body.
+    fn exchange(&self, method: &str, path: &str, extra: &str) -> (u16, String, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
         write!(
             stream,
-            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{extra}\r\n"
         )
         .unwrap();
         let mut raw = Vec::new();
@@ -73,7 +76,18 @@ impl Daemon {
             .and_then(|l| l.split_whitespace().nth(1))
             .and_then(|c| c.parse().ok())
             .expect("a status line");
-        (code, body.to_string())
+        (code, head.to_lowercase(), body.to_string())
+    }
+
+    fn request(&self, method: &str, path: &str) -> (u16, String) {
+        let (code, _, body) = self.exchange(method, path, "");
+        (code, body)
+    }
+
+    /// The head of the reply handed to a page at `origin`.
+    fn reply_to(&self, method: &str, path: &str, origin: &str) -> (u16, String) {
+        let (code, head, _) = self.exchange(method, path, &format!("Origin: {origin}\r\n"));
+        (code, head)
     }
 
     fn get(&self, path: &str) -> (u16, String) {
@@ -351,6 +365,70 @@ fn the_server_reports_itself_and_overlays_the_dispatchers_snapshot() {
         status["dispatch_running"], false,
         "the --once pass exited; the server says so instead of pretending"
     );
+}
+
+/// One domain is one daemon (decision 0002), so a board showing several reads
+/// one port per domain from a single origin of its own (decision 0062). That
+/// only works if this surface says the reply may be read.
+#[test]
+fn a_page_on_this_machine_may_read_the_surface() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let (code, head) = d.reply_to("GET", "/api/board", "http://localhost:5173");
+    assert_eq!(code, 200);
+    assert!(
+        head.contains("access-control-allow-origin: http://localhost:5173"),
+        "{head}"
+    );
+    // The permission differs by who asked, so a cache must not reuse it.
+    assert!(head.contains("vary: origin"), "{head}");
+
+    let (_, head) = d.reply_to("GET", "/api/board", "http://127.0.0.1:7359");
+    assert!(
+        head.contains("access-control-allow-origin: http://127.0.0.1:7359"),
+        "a different loopback port is still this machine: {head}"
+    );
+}
+
+/// The bind address defaults to loopback because there is no authentication
+/// here. A page from the wider web gets the same treatment.
+#[test]
+fn a_page_from_the_wider_web_may_not() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    for origin in [
+        "https://evil.example",
+        "http://127.0.0.1.evil.example",
+        "http://192.168.1.9:5173",
+        "null",
+    ] {
+        let (code, head) = d.reply_to("GET", "/api/board", origin);
+        assert_eq!(code, 200, "the reply is served; the browser refuses it");
+        assert!(
+            !head.contains("access-control-allow-origin"),
+            "{origin} was answered: {head}"
+        );
+    }
+}
+
+/// The two POSTs carry JSON, which is outside what a browser will send
+/// unasked — so it asks first, and a refused preflight is a dead Act menu.
+#[test]
+fn the_preflight_for_the_posts_is_answered_only_for_this_machine() {
+    let f = fixture();
+    let d = Daemon::start(&f);
+    let (code, head) = d.reply_to("OPTIONS", "/api/plans/x/status", "http://localhost:5173");
+    assert_eq!(code, 204);
+    assert!(head.contains("access-control-allow-methods"), "{head}");
+    assert!(head.contains("post"), "{head}");
+    assert!(
+        head.contains("access-control-allow-headers: content-type"),
+        "{head}"
+    );
+
+    let (code, head) = d.reply_to("OPTIONS", "/api/plans/x/status", "https://evil.example");
+    assert_eq!(code, 405, "an unanswered origin gets the read-only refusal");
+    assert!(!head.contains("access-control-allow"), "{head}");
 }
 
 #[test]

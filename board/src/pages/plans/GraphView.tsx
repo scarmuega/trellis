@@ -14,7 +14,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import ELK from "elkjs/lib/elk.bundled.js";
-import { api, type PlanRow } from "../../lib/api";
+import { type PlanRow } from "../../lib/api";
+import { useDomain } from "../../lib/domain";
 
 // Node identity is the plan's live address (spec rule 13), which is what an
 // awaits edge names whichever side of the terminal tier its target sits on.
@@ -122,7 +123,8 @@ async function layout(rows: PlanRow[]): Promise<{ nodes: Node[]; edges: Edge[] }
 
 export default function GraphView() {
   const { open } = usePlanDrawer();
-  const { data, error } = useQuery({ queryKey: ["plans"], queryFn: api.plans });
+  const { api, key } = useDomain();
+  const { data, error } = useQuery({ queryKey: key("plans"), queryFn: api.plans });
   const [graph, setGraph] = useState<{ nodes: Node[]; edges: Edge[] }>({
     nodes: [],
     edges: [],

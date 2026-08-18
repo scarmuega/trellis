@@ -2,14 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "../lib/api";
+import { useDomain } from "../lib/domain";
 import { markdownComponents, withoutFrontmatter } from "../lib/markdown";
 import { FrontmatterFields } from "../lib/fields";
 
 export default function ArtifactPage() {
   const { "*": rel = "" } = useParams();
+  const { api, key } = useDomain();
   const { data, error, isPending } = useQuery({
-    queryKey: ["artifact", rel],
+    queryKey: key("artifact", rel),
     queryFn: () => api.artifact(rel),
     enabled: rel.length > 0,
   });

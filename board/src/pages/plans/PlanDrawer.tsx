@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, FlipError, type ErrandOutcome } from "../../lib/api";
+import { FlipError, type ErrandOutcome } from "../../lib/api";
+import { useDomain } from "../../lib/domain";
 import { markdownComponents, withoutFrontmatter } from "../../lib/markdown";
 import { FrontmatterFields } from "../../lib/fields";
 
@@ -25,6 +26,7 @@ function ErrandMenu({
   onRequested: (outcome: ErrandOutcome) => void;
 }) {
   const queryClient = useQueryClient();
+  const { api, key } = useDomain();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [model, setModel] = useState("");
@@ -32,7 +34,7 @@ function ErrandMenu({
   const [error, setError] = useState<string | null>(null);
 
   const { data: status } = useQuery({
-    queryKey: ["status"],
+    queryKey: key("status"),
     queryFn: api.status,
     refetchInterval: 10_000,
   });
@@ -60,7 +62,7 @@ function ErrandMenu({
       setText("");
       setError(null);
       onRequested(outcome);
-      queryClient.invalidateQueries({ queryKey: ["status"] });
+      queryClient.invalidateQueries({ queryKey: key("status") });
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -148,8 +150,9 @@ function ErrandStatus({
   outcome: ErrandOutcome;
   onDismiss: () => void;
 }) {
+  const { api, key } = useDomain();
   const { data: status } = useQuery({
-    queryKey: ["status"],
+    queryKey: key("status"),
     queryFn: api.status,
     refetchInterval: 5_000,
   });
@@ -244,13 +247,14 @@ const STATUS_CHIP: Record<string, string> = {
 /// release the readiness gate refuses offers the same --force the CLI does.
 function StatusMenu({ rel, current }: { rel: string; current?: string }) {
   const queryClient = useQueryClient();
+  const { api, key } = useDomain();
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [notReady, setNotReady] = useState<string | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const { data: status } = useQuery({
-    queryKey: ["status"],
+    queryKey: key("status"),
     queryFn: api.status,
     refetchInterval: 10_000,
   });
@@ -272,9 +276,9 @@ function StatusMenu({ rel, current }: { rel: string; current?: string }) {
     onSuccess: (outcome) => {
       setNotReady(null);
       show(true, `${outcome.from} → ${outcome.to}`);
-      for (const key of ["artifact", "board", "plans", "status"]) {
+      for (const what of ["artifact", "board", "plans", "status"]) {
         queryClient.invalidateQueries({
-          queryKey: key === "artifact" ? ["artifact", rel] : [key],
+          queryKey: what === "artifact" ? key("artifact", rel) : key(what),
         });
       }
     },
@@ -387,6 +391,7 @@ function Chip({ label, value }: { label: string; value: string }) {
 
 export default function PlanDrawer() {
   const { rel, open, close } = usePlanDrawer();
+  const { api, key, href } = useDomain();
   const [errand, setErrand] = useState<ErrandOutcome | null>(null);
 
   // The status row belongs to the plan it was requested on, not to the
@@ -403,7 +408,7 @@ export default function PlanDrawer() {
   }, [rel, close]);
 
   const { data, error, isPending } = useQuery({
-    queryKey: ["artifact", rel],
+    queryKey: key("artifact", rel),
     queryFn: () => api.artifact(rel!),
     enabled: !!rel,
   });
@@ -445,7 +450,7 @@ export default function PlanDrawer() {
               />
             )}
             <Link
-              to={`/artifacts/${rel}`}
+              to={href(`artifacts/${rel}`)}
               className="text-xs text-neutral-400 hover:text-neutral-900"
               title="Open as full page"
             >
