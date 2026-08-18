@@ -135,6 +135,18 @@ on_shutdown = "detach"
 # and either answer retires the pane at once, whatever this is set to. Below
 # 60s the daemon notes that a slow turn boundary could read as a stall.
 idle_grace_secs = 120
+# Seconds a freshly started agent has to become promptable before the spawn is
+# given up (decision 0063). Herdr refuses the prompt until its agent can take
+# input; this bounds that wait, which normally ends in about three seconds and
+# never here. What it sizes is the worst cold start this machine produces: a
+# big repository, a slow MCP endpoint, a harness competing with your own
+# sessions for the CPU. A spawn that gives up starts nothing and hands the plan
+# back to ready, so undershooting costs the dispatch a whole
+# retry_cooldown_secs; overshooting costs nothing. Confirming that an accepted
+# prompt actually became a turn — an agent can take the injection and drop it —
+# is a short window of its own per submission, on top of this rather than
+# inside it, so a slow start still has something left to catch a drop with.
+prompt_deadline_secs = 120
 
 # The trigger table (decisions 0051, 0060): the two prompts the runtime fires
 # on its own, name → template. "act" is what the dispatch loop fires per

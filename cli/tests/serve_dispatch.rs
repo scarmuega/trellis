@@ -438,6 +438,55 @@ fn a_spawn_that_fails_puts_the_claim_back() {
     );
 }
 
+/// The prompt is the session. Herdr refuses `agent.prompt` with
+/// `agent_not_ready` until its agent can take input, and 0.24.0 treated a
+/// window that ran out as a success: the pane stayed up running an agent
+/// nobody had told anything, over a plan marked `active`, until the idle
+/// grace and then the cooldown had been spent on a session that could not
+/// have done any work (observed live on a dogfooding root, 2026-08-17).
+/// A prompt that cannot be placed is now a spawn that failed.
+#[test]
+fn an_agent_that_never_takes_the_prompt_fails_the_spawn() {
+    let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_never_promptable(socket.clone());
+    f.write(
+        "runtime.toml",
+        &format!(
+            "{}act_args = [\"{{plan}}\"]\n",
+            common::herdr_config(&socket)
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+    let out = f.dispatch_once(ANCHOR, &[]);
+
+    assert!(
+        out.contains("never became promptable"),
+        "the failure says which seam it was: {out}"
+    );
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "a plan nobody was told to work on belongs in the queue"
+    );
+    assert!(
+        !f.root().join(".trellis/acting-role").exists(),
+        "and the marker goes back with the claim"
+    );
+    assert!(
+        herdr.calls().iter().any(|c| c == "workspace.close"),
+        "the pane comes down: an agent that was never prompted is not a \
+         session to attach to: {:?}",
+        herdr.calls()
+    );
+    assert!(
+        !f.state()["runs"]["plan:plans/ship-it.md"]["last_fired"].is_null(),
+        "the attempt is stamped, so the cooldown paces the next one"
+    );
+}
+
 /// `--once` skipped the lock on the reading that one pass is harmless. It is
 /// not: a pass scans the same plans, spawns into the same slots, and writes
 /// the same state file, so one-shot beside a daemon is the two-dispatchers

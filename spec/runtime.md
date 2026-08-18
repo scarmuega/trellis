@@ -426,11 +426,17 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   reads that off the plan and retires the pane, freeing the slot. Undeclared
   background work is lost with the recycled session — the runtime infers
   nothing from what the pane's status line says.
-- A prompt the agent drops at startup is not detected as such: it produces a
-  pane that did nothing, recovered as any stall is. For a plan that costs the
-  grace plus the cooldown; for a *ritual* — which has no artifact to read a
-  verdict from, so settling is its whole completion — it costs the run, until
-  the next cadence.
+- **Delivery is confirmed, not assumed** (decision 0063). Placing the prompt
+  is a precondition of a session existing, not an attempt made on the way to
+  one. The runtime waits for herdr to report the pane promptable — by asking,
+  never by retrying the submission, which holds a launching agent down — then
+  submits, then confirms the prompt became a turn, reading herdr's own
+  `agent_status` and never the pane. A prompt that started no turn is
+  submitted again; one that never does fails the *spawn*, so the workspace
+  comes down, the plan goes back to `ready`, and `retry_cooldown_secs` paces
+  the next attempt. The wait is bounded by
+  `harness.herdr.prompt_deadline_secs`. Only a session that actually ran can
+  reach the recycle path, so `recycled` means what it says.
 - Herdr's `blocked` state is heuristic screen-matching unless herdr's own
   claude integration hook is installed (`herdr integration install claude`),
   and it is session-level only: it toasts and holds the slot, and never writes

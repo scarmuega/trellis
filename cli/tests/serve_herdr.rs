@@ -120,8 +120,9 @@ fn the_herdr_backend_runs_a_session_as_a_workspace_pane() {
     assert_eq!(start["kind"], "claude");
     assert_eq!(start["pane_id"], "p1");
     assert_eq!(
-        start["name"], "t-plan-plans-ship-it-md",
-        "a herdr-legal name: lowercase, no dots, ≤32 chars"
+        start["name"], "t-p1-plan-plans-ship-it-md",
+        "a herdr-legal name: lowercase, no dots, ≤32 chars — and led by the \
+         pane, so a retained workspace's agent cannot hold the next one's name"
     );
     let args: Vec<&str> = start["args"]
         .as_array()
@@ -199,16 +200,17 @@ fn a_session_that_declares_a_handoff_frees_its_slot_and_keeps_its_plan() {
     );
 }
 
-/// Observed live: herdr accepts `agent.prompt` while Claude Code is still
-/// starting up and the injected text vanishes — the pane settles `idle` over
-/// an empty input. There is no longer any machinery for this, and none is
-/// needed: a dropped prompt is a session that did nothing, which is exactly
-/// what an unaccounted-for plan already means. It is recycled, and the
-/// cooldown paces the retry (decision 0061).
+/// Observed live, twice over: herdr accepts `agent.prompt` and the injected
+/// text vanishes into a start that was not finished assembling itself — the
+/// pane sits `idle` at an empty composer over a claimed plan. Delivery is
+/// therefore confirmed rather than assumed (decision 0063): a prompt that
+/// starts no turn is submitted again, and one that never starts a turn fails
+/// the spawn. `prompt_deadline_secs = 0` in the fixture is the degenerate
+/// budget — one submission, one look — so this asserts the give-up end.
 #[test]
-fn a_prompt_that_never_landed_is_just_a_session_that_did_nothing() {
+fn a_prompt_that_starts_no_turn_is_not_a_session() {
     let f = Fixture::healthy();
-    // The session never writes anything — the shape a dropped prompt has.
+    // A pane that stays idle: the shape a dropped prompt has.
     let herdr = fake(&f, &["idle"], Vec::new());
     herdr_backend_fixture(&f, &herdr.socket);
     f.write(
@@ -217,23 +219,56 @@ fn a_prompt_that_never_landed_is_just_a_session_that_did_nothing() {
     );
 
     let out = f.dispatch_once(ANCHOR, &[]);
-    assert_eq!(
-        herdr.params_for("agent.prompt").len(),
-        1,
-        "submitted once and never guessed at again"
-    );
-    assert!(out.contains("returned to ready"), "{out}");
+    assert!(out.contains("never became a turn"), "{out}");
     assert!(
         f.read("plans/ship-it.md").contains("status: ready"),
         "the plan is back in the queue, which is the whole recovery"
     );
-    assert_eq!(
-        f.state()["runs"]["plan:plans/ship-it.md"]["last_outcome"], "recycled",
-        "never bookkept as a success"
+    assert!(
+        !f.state()["runs"]["plan:plans/ship-it.md"]["last_fired"].is_null(),
+        "the attempt is stamped, so the cooldown paces the next one"
     );
     assert!(
-        !herdr.calls().iter().any(|c| c == "workspace.close"),
-        "retain = on-failure keeps the scene for attach"
+        herdr.calls().iter().any(|c| c == "workspace.close"),
+        "and the pane goes: an agent nobody told anything is not a session \
+         to attach to: {:?}",
+        herdr.calls()
+    );
+}
+
+/// The other end of the same rule: a prompt the agent drops is submitted
+/// again, and a session that takes the second one is a session like any
+/// other — the whole point of confirming rather than assuming.
+#[test]
+fn a_dropped_prompt_is_submitted_again_and_the_session_runs() {
+    let f = Fixture::healthy();
+    let herdr = FakeHerdr::start_dropping_the_first_prompt(
+        f.root().join(".trellis/herdr.sock"),
+        &["working", "idle"],
+        f.root(),
+        common::session(f.root(), Some(("retired", None))),
+    );
+    // A real budget, so the second submission has a window to land in.
+    f.write(
+        "runtime.toml",
+        &common::herdr_config(&herdr.socket)
+            .replace("prompt_deadline_secs = 0", "prompt_deadline_secs = 30"),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert!(out.contains("submitting it again"), "{out}");
+    assert_eq!(
+        herdr.params_for("agent.prompt").len(),
+        2,
+        "the second submission is what the session ran on"
+    );
+    assert!(
+        f.read("plans/ship-it.md").contains("status: retired"),
+        "and it ran: the verdict is on the plan"
     );
 }
 

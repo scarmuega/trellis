@@ -107,12 +107,27 @@ pub struct AgentInfo {
     pub agent_status: String,
     #[serde(default)]
     pub state_change_seq: u64,
+    /// Whether herdr will take a prompt for this pane. Both halves matter and
+    /// herdr omits each when false: it is promptable when it is
+    /// `interactive_ready` *and* no longer `launch_pending` — a pane whose
+    /// agent is still launching refuses `agent.prompt` while reporting an
+    /// interactive prompt box on screen.
     #[serde(default)]
     pub interactive_ready: bool,
+    #[serde(default)]
+    pub launch_pending: bool,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub tokens: BTreeMap<String, String>,
+}
+
+impl AgentInfo {
+    /// Whether a prompt submitted right now would be taken rather than
+    /// refused `agent_not_ready`.
+    pub fn promptable(&self) -> bool {
+        self.interactive_ready && !self.launch_pending
+    }
 }
 
 impl Client {

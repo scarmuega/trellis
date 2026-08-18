@@ -36,6 +36,57 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
   Same reasoning as the loopback bind default; no `Allow-Credentials`, and no
   `runtime.toml` key, so no root needs editing.
 
+### Fixed
+
+- **Auto dispatch started harnesses and never told them anything**
+  (`decisions/0063-delivery-is-confirmed-not-assumed.md`). Four faults at one
+  seam, none visible from the call that hits it.
+
+  *One — the asking was the problem.* Herdr refuses `agent.prompt` with
+  `agent_not_ready` until its agent can take input, and 0.24.0 waited that out
+  by retrying the submission twice a second. A refused submission is a
+  UI-changing request, and retrying it at that rate holds the pane in the
+  state it is waiting to leave. Measured on herdr 0.8.0, two identical starts:
+  retrying `agent.prompt` at 2Hz, still refusing at sixty seconds; polling
+  `agent.get` instead, promptable in three. *Two — running out counted as
+  success.* After ten seconds of refusals the pool logged a line and returned
+  `Ok`, handing over a session with the prompt unplaced: a clause written when
+  a later tick would resubmit, left behind when 0061 deleted the resubmission.
+  So a pane ran an agent nobody had told anything, over a plan marked
+  `active`, for the whole idle grace and then the whole retry cooldown.
+  *Three — an accepted prompt is not a delivered one*: reproduced outside
+  trellis against herdr 0.8.0 and Claude Code 2.1.234, the injection lands
+  nowhere on some starts with every signal herdr reports being right.
+  *Four — a recycled plan could not be dispatched again*: a session's herdr
+  agent was named after its task alone, and herdr refuses a name another agent
+  holds, exited ones included — so under `retain = "on-failure"`, whose whole
+  point is to leave a stalled session's pane up, the next dispatch of that
+  same plan died at `agent.start` with `agent_name_taken` until somebody
+  closed the pane by hand.
+
+  Placing the prompt is now a precondition of spawning. The runtime polls
+  `agent.get` until herdr says the pane is promptable — `interactive_ready`
+  and no longer `launch_pending` — submits, and confirms the prompt became a
+  turn, reading herdr's own `agent_status` and never the screen. A prompt that
+  started no turn is submitted again; one that never does fails the spawn, so
+  the workspace comes down, the claim goes back to `ready`, and the cooldown
+  paces the retry instead of the grace plus the cooldown. `agent.prompt` is
+  called at most three times per spawn, a hard cap rather than a budget. The
+  agent name is now led by the pane, which is fresh every spawn and is the
+  session's identity anyway. Completion is still read from the plan on disk
+  and nothing here changes that: 0061 stands, and 0063 says why this is its
+  other end rather than its retreat.
+
+### Added
+
+- **`harness.herdr.prompt_deadline_secs`** (default 120): how long a freshly
+  started agent has to become promptable before the spawn is given up.
+  Normally the wait ends in about three seconds and never reaches this; what
+  it sizes is the worst cold start a machine produces, so overshooting costs
+  nothing and undershooting costs the dispatch a retry cooldown. Confirming a
+  submission is a short window of its own, on top of this rather than inside
+  it. `template/runtime.toml` documents it with the rest.
+
 ## [0.24.1] - 2026-08-17
 
 ### Fixed

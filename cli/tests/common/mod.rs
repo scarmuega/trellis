@@ -450,12 +450,33 @@ pub struct FakeHerdr {
 #[cfg(unix)]
 pub type OnPrompt = Box<dyn Fn(&str, &Path) + Send>;
 
+/// The ways a fake server can misbehave, which are the ways the real one has
+/// been seen to. Default is a server that does everything right.
+#[cfg(unix)]
+#[derive(Default)]
+pub struct Quirks {
+    /// Refuse every `agent.start` with this code.
+    pub refuse_start: Option<String>,
+    /// Refuse every `agent.prompt` with this code.
+    pub refuse_prompt: Option<String>,
+    /// Take the first prompt and drop it: no `on_prompt`, and a pane that
+    /// stays `idle` however long it is watched, until a second arrives.
+    pub drop_first_prompt: bool,
+}
+
 #[cfg(unix)]
 impl FakeHerdr {
     /// `statuses` feeds each pane's `agent.get`, front to back, sticking on
     /// the last; `agents` is what `agent.list` reports (adoption seeds).
     pub fn start(socket: PathBuf, statuses: &[&str], agents: Vec<serde_json::Value>) -> FakeHerdr {
-        Self::start_full(socket, statuses, agents, PathBuf::new(), None, None)
+        Self::start_full(
+            socket,
+            statuses,
+            agents,
+            PathBuf::new(),
+            None,
+            Quirks::default(),
+        )
     }
 
     /// A server whose sessions write their own verdicts: `on_prompt` runs
@@ -472,7 +493,7 @@ impl FakeHerdr {
             Vec::new(),
             root.to_path_buf(),
             Some(on_prompt),
-            None,
+            Quirks::default(),
         )
     }
 
@@ -489,7 +510,7 @@ impl FakeHerdr {
             Vec::new(),
             root.to_path_buf(),
             on_prompt,
-            None,
+            Quirks::default(),
         )
     }
 
@@ -502,7 +523,50 @@ impl FakeHerdr {
             Vec::new(),
             PathBuf::new(),
             None,
-            Some(code.to_string()),
+            Quirks {
+                refuse_start: Some(code.to_string()),
+                ..Quirks::default()
+            },
+        )
+    }
+
+    /// A server whose agent takes the first prompt and drops it — the live
+    /// seam decision 0063 confirms delivery against. Its pane stays `idle`
+    /// however long it is watched until a second prompt arrives; from then
+    /// on it behaves like any other, script and `on_prompt` hook included.
+    pub fn start_dropping_the_first_prompt(
+        socket: PathBuf,
+        statuses: &[&str],
+        root: &Path,
+        on_prompt: OnPrompt,
+    ) -> FakeHerdr {
+        Self::start_full(
+            socket,
+            statuses,
+            Vec::new(),
+            root.to_path_buf(),
+            Some(on_prompt),
+            Quirks {
+                drop_first_prompt: true,
+                ..Quirks::default()
+            },
+        )
+    }
+
+    /// A server whose agent starts but never becomes promptable — the
+    /// startup seam `agent_not_ready` names, held open forever. It reports
+    /// itself unpromptable *and* refuses, which is the real pairing.
+    pub fn start_never_promptable(socket: PathBuf) -> FakeHerdr {
+        Self::start_full(
+            socket,
+            &["idle"],
+            Vec::new(),
+            PathBuf::new(),
+            None,
+            Quirks {
+                refuse_prompt: Some("agent_not_ready".to_string()),
+                ..Quirks::default()
+            },
         )
     }
 
@@ -512,10 +576,15 @@ impl FakeHerdr {
         agents: Vec<serde_json::Value>,
         root: PathBuf,
         on_prompt: Option<OnPrompt>,
-        refuse_start: Option<String>,
+        quirks: Quirks,
     ) -> FakeHerdr {
+        let Quirks {
+            refuse_start,
+            refuse_prompt,
+            drop_first_prompt,
+        } = quirks;
         use serde_json::json;
-        use std::collections::{HashMap, VecDeque};
+        use std::collections::{HashMap, HashSet, VecDeque};
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
@@ -537,6 +606,10 @@ impl FakeHerdr {
             // One status queue per pane: a retry is a new pane and starts
             // the script over.
             let mut panes: HashMap<String, VecDeque<String>> = HashMap::new();
+            // Agent names herdr has handed out, which it never hands out twice.
+            let mut names: HashSet<String> = HashSet::new();
+            // Prompts submitted, so a server told to drop the first can.
+            let mut prompts = 0u32;
             loop {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
@@ -561,12 +634,17 @@ impl FakeHerdr {
                     );
                 };
 
+                // A server that refuses every prompt reports why, the way the
+                // real one does: an agent still launching is not promptable,
+                // whatever its screen shows.
+                let promptable = refuse_prompt.is_none();
                 let agent_at = |pane: &str, status: &str, seq: u64| {
                     json!({
                         "pane_id": pane, "workspace_id": "w-fake", "tab_id": "t1",
                         "terminal_id": "term1", "focused": false, "revision": 1,
                         "agent_status": status, "state_change_seq": seq,
-                        "interactive_ready": true,
+                        "interactive_ready": promptable,
+                        "launch_pending": !promptable,
                     })
                 };
 
@@ -593,6 +671,19 @@ impl FakeHerdr {
                             refuse(code, "fake herdr refuses to start this agent");
                             continue;
                         }
+                        // The real server's other name rule: a name in use
+                        // is refused, and an agent keeps its name for as
+                        // long as its pane exists — a retained workspace's
+                        // included. A session naming itself after its task
+                        // alone made the second dispatch of a plan
+                        // undispatchable (observed live, 2026-08-17).
+                        if !names.insert(params["name"].as_str().unwrap_or("").to_string()) {
+                            refuse(
+                                "agent_name_taken",
+                                "agent name is already used by another agent",
+                            );
+                            continue;
+                        }
                         // The real server's name rule, enforced here so the
                         // hermetic tests catch what the live one refuses.
                         let name = params["name"].as_str().unwrap_or("");
@@ -614,10 +705,19 @@ impl FakeHerdr {
                         })
                     }
                     "agent.prompt" => {
+                        if let Some(code) = &refuse_prompt {
+                            refuse(code, "fake herdr's agent cannot take a prompt yet");
+                            continue;
+                        }
+                        prompts += 1;
                         // The session, such as it is: whatever the test says
-                        // this prompt makes it write.
+                        // this prompt makes it write — unless this server
+                        // drops the first one, in which case nothing about
+                        // it reaches the agent at all.
                         if let Some(act) = &on_prompt {
-                            act(params["text"].as_str().unwrap_or(""), &root);
+                            if !(drop_first_prompt && prompts == 1) {
+                                act(params["text"].as_str().unwrap_or(""), &root);
+                            }
                         }
                         json!({
                             "type": "agent_prompted",
@@ -627,6 +727,20 @@ impl FakeHerdr {
                     "agent.get" => {
                         seq += 1;
                         let pane = params["target"].as_str().unwrap_or("p?").to_string();
+                        // A dropped prompt leaves the pane exactly as it
+                        // was: idle, for as long as anybody cares to look.
+                        if drop_first_prompt && prompts < 2 {
+                            let mut writer = &stream;
+                            let _ = writeln!(
+                                writer,
+                                "{}",
+                                json!({"id": id, "result": {
+                                    "type": "agent_info",
+                                    "agent": agent_at(&pane, "idle", seq),
+                                }})
+                            );
+                            continue;
+                        }
                         let queue = panes
                             .entry(pane.clone())
                             .or_insert_with(|| script.iter().cloned().collect());
@@ -704,8 +818,11 @@ impl FakeHerdr {
 /// that sees it rather than two minutes later.
 #[cfg(unix)]
 pub fn herdr_config(socket: &Path) -> String {
+    // `prompt_deadline_secs = 0` is one submission, one look, and no waiting:
+    // a fake herdr is ready the moment it answers, and a test that has to
+    // wait out a real cold start is a test nobody runs.
     format!(
-        "[harness.herdr]\nsocket = \"{}\"\nidle_grace_secs = 0\n",
+        "[harness.herdr]\nsocket = \"{}\"\nidle_grace_secs = 0\nprompt_deadline_secs = 0\n",
         socket.display()
     )
 }

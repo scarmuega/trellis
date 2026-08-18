@@ -161,6 +161,23 @@ pub struct HerdrHarness {
     /// is set to. What the grace buys is the benefit of the doubt for a
     /// session between turns.
     pub idle_grace_secs: u64,
+    /// Seconds a freshly started agent has to become promptable before the
+    /// spawn is given up (decision 0063).
+    ///
+    /// Herdr refuses `agent.prompt` with `agent_not_ready` until its agent
+    /// can take input, and this bounds that wait. What it is really sizing is
+    /// the worst cold start this machine produces: a big repository, a slow
+    /// MCP endpoint, a harness competing with the operator's own sessions for
+    /// the CPU. Normally the wait ends in about three seconds, at the first
+    /// acceptance, never here. Overshooting costs nothing; undershooting
+    /// costs the session, because a spawn that gives up is a dispatch that
+    /// has to wait out `retry_cooldown_secs`.
+    ///
+    /// Confirming that an accepted prompt became a turn is a short window of
+    /// its own per submission, and is not drawn from this — so a slow start
+    /// that spends the whole budget getting promptable still has something
+    /// left to notice a dropped prompt with.
+    pub prompt_deadline_secs: u64,
 }
 
 /// Below this, the grace is short enough that a slow turn boundary could be
@@ -194,6 +211,7 @@ impl Default for HerdrHarness {
             retain: Retain::OnFailure,
             on_shutdown: OnShutdown::Detach,
             idle_grace_secs: 120,
+            prompt_deadline_secs: 120,
         }
     }
 }
@@ -663,12 +681,14 @@ mod tests {
     #[test]
     fn the_herdr_knobs_parse() {
         let cfg = parse(
-            "[harness.herdr]\nretain = \"always\"\non_shutdown = \"stop\"\nidle_grace_secs = 30\n",
+            "[harness.herdr]\nretain = \"always\"\non_shutdown = \"stop\"\nidle_grace_secs = 30\n\
+             prompt_deadline_secs = 45\n",
         )
         .unwrap();
         assert_eq!(cfg.harness.herdr.retain, Retain::Always);
         assert_eq!(cfg.harness.herdr.on_shutdown, OnShutdown::Stop);
         assert_eq!(cfg.harness.herdr.idle_grace_secs, 30);
+        assert_eq!(cfg.harness.herdr.prompt_deadline_secs, 45);
     }
 
     /// The keys that used to choose a backend are refused by name rather

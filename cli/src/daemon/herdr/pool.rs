@@ -11,14 +11,17 @@
 //! daemon's and the panes stay this file's.
 //!
 //! What that buys is the absence of a machine: no prompt-echo matching, no
-//! status-footer parsing, no settle debounce, no resubmission budget. Every
-//! one of those existed to manufacture a completion event this pool no
-//! longer needs, and each was a reading of another program's screen.
+//! status-footer parsing, no settle debounce. Every one of those existed to
+//! manufacture a completion event this pool no longer needs, and each was a
+//! reading of another program's screen.
 //!
-//! What it costs is latency. A session whose prompt was dropped at startup
-//! looks exactly like one that stalled, and is recovered the same way —
-//! after the idle grace, and then the retry cooldown — rather than in the
-//! seconds a resubmission took. Decision 0061 takes that trade deliberately.
+//! **Delivery, though, is confirmed** (decision 0063). That is the other end
+//! of a session's life and a different question: not "did the work happen"
+//! but "did the prompt arrive". A pane whose agent never took the prompt is
+//! not a session that did nothing — it is a spawn that failed, and it fails
+//! here, before a plan is left claimed by a pane nobody told anything. The
+//! confirmation is herdr's own `agent_status`, asked once, about a pane this
+//! file has just created; nothing reads the screen.
 //!
 //! The session is a pane: attachable, visible in herdr's sidebar, and alive
 //! across a daemon restart, where `connect` re-adopts anything carrying this
@@ -66,11 +69,30 @@ const BLOCKED_STREAK: u32 = 2;
 /// so this is acknowledgment, not abandonment.
 const SERVER_PATIENCE: u32 = 3;
 
-/// A freshly started agent may take a beat to register as promptable —
-/// observed live: `agent.start` returns ready and an immediate prompt is
-/// still refused `agent_not_ready`. Retry over ten seconds before giving up.
-const PROMPT_RETRIES: u32 = 20;
-const PROMPT_BACKOFF: Duration = Duration::from_millis(500);
+/// How long a freshly created pane has to finish coming up before its agent
+/// can be started. The seam `agent_pane_busy` names, and the same medicine.
+const PANE_READY: Duration = Duration::from_secs(30);
+
+/// How long a submitted prompt has to become a turn before it is submitted
+/// again, and how many times a prompt is submitted at all. Herdr accepting
+/// the prompt means it injected the text; whether the agent *took* it is a
+/// second question, and one that has to be asked — observed live 2026-08-18,
+/// with everything herdr reports being right (promptable, an accepted
+/// `agent.prompt`), Claude Code still drops the injection on some starts and
+/// sits at an empty composer. A landed prompt is a turn within a beat, so
+/// this window is long enough to be sure and short enough that the fix costs
+/// seconds where the alternative costs the idle grace plus a cooldown.
+///
+/// `SUBMISSIONS` is a hard cap on `agent.prompt` calls per spawn, and it is a
+/// cap rather than a budget on purpose: submitting into an agent that is not
+/// promptable is not merely useless, it is *harmful* — see `await_promptable`.
+const TAKEN: Duration = Duration::from_secs(10);
+const TAKEN_BEAT: Duration = Duration::from_millis(250);
+const SUBMISSIONS: u32 = 3;
+
+/// Beat between looks at a pane that is not ready yet, and between retries of
+/// a call herdr is refusing over a startup seam.
+const RETRY_BEAT: Duration = Duration::from_millis(500);
 
 /// Lines of scrollback copied into the session's log at retirement.
 const TAIL: u32 = 500;
@@ -299,6 +321,7 @@ impl HerdrPool {
         writeln!(file, "# prompt: {}", prompt.replace('\n', "\n# "))?;
 
         let (workspace_id, pane_id) = self.client.workspace_create(&self.root, label)?;
+        let budget = Duration::from_secs(self.cfg.prompt_deadline_secs);
 
         // Everything after the workspace exists tears it down on failure: a
         // half-started session left on screen would look like work.
@@ -315,27 +338,19 @@ impl HerdrPool {
             // Observed live: a freshly created pane can refuse `agent.start`
             // with `agent_pane_busy` while its shell is still coming up —
             // the same startup seam `agent_not_ready` is on the prompt side.
-            // Same medicine: retry over the backoff window before failing.
-            retry_while("agent_pane_busy", || {
-                self.client
-                    .agent_start(&agent_name(key), &self.cfg.kind, &pane_id, args, START)
+            // Same medicine: retry over the window before failing.
+            let started = retry_while("agent_pane_busy", PANE_READY, || {
+                self.client.agent_start(
+                    &agent_name(key, &pane_id),
+                    &self.cfg.kind,
+                    &pane_id,
+                    args,
+                    START,
+                )
             })?;
-            // The prompt is submitted once. If the TUI drops it — which a
-            // cold start can still do — the pane simply sits idle over a
-            // claimed plan, and the idle grace recovers it (decision 0061).
-            match retry_while("agent_not_ready", || {
-                self.client.agent_prompt(&pane_id, prompt)
-            }) {
-                Ok(_) => Ok(()),
-                Err(e) if e.code() == Some("agent_not_ready") => {
-                    note(&format!(
-                        "{label}: the agent never became promptable — the session will be \
-                         recycled once its idle grace runs out"
-                    ));
-                    Ok(())
-                }
-                Err(e) => Err(e.into()),
-            }
+            // The prompt is the session, so placing it is a precondition of
+            // spawning rather than an attempt at it (decision 0063).
+            self.deliver(&pane_id, prompt, &started, budget, label)
         })();
 
         if let Err(e) = started {
@@ -364,6 +379,143 @@ impl HerdrPool {
             },
         );
         Ok(log)
+    }
+
+    /// Put the prompt in, and do not return until a turn has started.
+    ///
+    /// Two failures live at this seam and neither is observable from the
+    /// call that hits it. Herdr refuses `agent.prompt` with
+    /// `agent_not_ready` until its agent can take input, which is a wait.
+    /// And an accepted prompt is not a delivered one: the text is injected
+    /// into another program's TUI, and a start that is still assembling
+    /// itself swallows it, leaving a pane at an empty composer over a
+    /// claimed plan. So delivery is confirmed rather than assumed, and the
+    /// confirmation is herdr's own `agent_status` — a turn, or the agent's
+    /// own dialog — never a reading of what is on the screen. Decision 0061
+    /// stands: this says nothing about when a session is *done*, which is
+    /// still only ever read from the plan.
+    ///
+    /// Everything here is bounded, and every exit is honest: the prompt goes
+    /// in and starts a turn, or the spawn fails and the caller hands the plan
+    /// back.
+    fn deliver(
+        &self,
+        pane_id: &str,
+        prompt: &str,
+        started: &AgentInfo,
+        budget: Duration,
+        label: &str,
+    ) -> anyhow::Result<()> {
+        // The budget bounds the *wait*: an agent that will not take input.
+        // Confirming what it did take is a separate, small window per
+        // submission, deliberately not drawn from the same purse — a slow
+        // cold start that spends the whole budget getting promptable would
+        // otherwise leave nothing to notice a drop with, which is the case
+        // this exists for. Never longer than the budget, so a runtime told
+        // to wait no time at all waits none.
+        let window = TAKEN.min(budget);
+        let deadline = Instant::now() + budget;
+        let mut ready = started.promptable();
+        let mut submitted = 0;
+        while submitted < SUBMISSIONS {
+            if !ready {
+                self.await_promptable(pane_id, deadline, budget)?;
+            }
+            match self.client.agent_prompt(pane_id, prompt) {
+                Ok(_) => {}
+                // Herdr changed its mind between the look and the
+                // submission. Answered by looking again rather than by
+                // trying again — which is the whole rule here — and never
+                // charged against the submission cap, because nothing was
+                // submitted. The beat and the deadline are what bound it.
+                Err(e) if e.code() == Some("agent_not_ready") => {
+                    if Instant::now() >= deadline {
+                        return Err(never_promptable(budget));
+                    }
+                    ready = false;
+                    std::thread::sleep(RETRY_BEAT);
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+            submitted += 1;
+            if self.took_it(pane_id, window)? {
+                return Ok(());
+            }
+            ready = false;
+            if submitted < SUBMISSIONS {
+                note(&format!(
+                    "{label}: the prompt was accepted and no turn started — submitting it again"
+                ));
+            }
+        }
+        anyhow::bail!(
+            "the prompt was submitted {submitted} times and never became a turn — the agent \
+             is running but was never told anything, so nothing is started"
+        )
+    }
+
+    /// Wait until herdr will take a prompt for this pane, by *asking* rather
+    /// than by trying.
+    ///
+    /// This distinction is the fix, not a style preference. Herdr refuses
+    /// `agent.prompt` with `agent_not_ready` while an agent is still
+    /// launching, and a refused submission is not free: it is a UI-changing
+    /// request, and a caller that retries one every half second holds the
+    /// pane in that state indefinitely. Measured 2026-08-18 on herdr 0.8.0 —
+    /// retrying the prompt at 2Hz, the agent was still refusing at sixty
+    /// seconds; polling `agent.get` instead, the same start was promptable in
+    /// three. The runtime spent months believing the harness was slow to come
+    /// up when it was the asking that kept it down.
+    fn await_promptable(
+        &self,
+        pane_id: &str,
+        deadline: Instant,
+        budget: Duration,
+    ) -> anyhow::Result<()> {
+        loop {
+            // Unreachable is not "not ready": it says nothing about the pane,
+            // and the deadline still bounds the wait.
+            if let Ok(agent) = self.client.agent_get(pane_id) {
+                if agent.promptable() {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(never_promptable(budget));
+            }
+            std::thread::sleep(RETRY_BEAT);
+        }
+    }
+
+    /// Whether the pane took the prompt just submitted: it is working, or it
+    /// is at its own dialog, which is a turn that has begun and stopped to
+    /// ask. A pane still idle when the window runs out never took it.
+    fn took_it(&self, pane_id: &str, window: Duration) -> anyhow::Result<bool> {
+        let deadline = Instant::now() + window;
+        let mut seen = false;
+        loop {
+            match self.client.agent_get(pane_id) {
+                Ok(agent) if matches!(agent.agent_status.as_str(), "working" | "blocked") => {
+                    return Ok(true)
+                }
+                Ok(_) => seen = true,
+                // Herdr took the prompt and then went silent. Unobservable
+                // is not the same as undelivered, and the two mistakes are
+                // not the same size: resubmitting into a session that did
+                // start doubles a turn, while believing this one costs
+                // nothing the reap does not already handle — an unreachable
+                // server is a fleet fact there, with its own patience.
+                Err(e) if e.is_unreachable() => {}
+                // Herdr answered and does not know the pane: it is gone, and
+                // there is nothing left to submit to.
+                Err(e) => return Err(e.into()),
+            }
+            if Instant::now() >= deadline {
+                return Ok(!seen);
+            }
+            std::thread::sleep(TAKEN_BEAT);
+        }
     }
 
     /// One `agent.get` per session, judged against what `judge` reads from
@@ -533,6 +685,17 @@ impl HerdrPool {
     }
 }
 
+/// The one way delivery gives up before anything was submitted, said the
+/// same way wherever it is reached.
+fn never_promptable(budget: Duration) -> anyhow::Error {
+    anyhow::anyhow!(
+        "the agent never became promptable within {}s — nothing was submitted, so nothing was \
+         started; raise harness.herdr.prompt_deadline_secs if this machine's cold start is \
+         simply slower than that",
+        budget.as_secs()
+    )
+}
+
 /// Advance one session from one sighting. `Some(reason)` means it should be
 /// retired.
 ///
@@ -598,31 +761,45 @@ fn observe(
     }
 }
 
-/// Retry a herdr call while it keeps refusing with one named code. Both
-/// codes this guards are startup seams — a pane whose shell is still coming
-/// up, an agent that is not promptable yet — and both clear within seconds.
+/// Retry a herdr call while it keeps refusing with one named code, until the
+/// deadline. Both codes this guards are startup seams — a pane whose shell is
+/// still coming up, an agent that is not promptable yet — and the deadline is
+/// how long that seam is allowed to last before it is a failure rather than a
+/// wait. The first call happens whatever the deadline, so a zero window is a
+/// single attempt rather than none.
 fn retry_while<T>(
     code: &str,
+    window: Duration,
     mut call: impl FnMut() -> super::client::Result<T>,
 ) -> super::client::Result<T> {
-    let mut attempt = 0;
+    let deadline = Instant::now() + window;
     loop {
         match call() {
-            Err(e) if e.code() == Some(code) && attempt < PROMPT_RETRIES => {
-                attempt += 1;
-                std::thread::sleep(PROMPT_BACKOFF);
+            Err(e) if e.code() == Some(code) && Instant::now() < deadline => {
+                std::thread::sleep(RETRY_BEAT);
             }
             other => break other,
         }
     }
 }
 
-/// A herdr-legal agent name for a task key: lowercase letters, digits, `-`
+/// A herdr-legal agent name for a session: lowercase letters, digits, `-`
 /// and `_`, starting with a letter, at most 32 characters — herdr refuses
-/// anything else. A display label, not an identity: the pane is the identity.
-fn agent_name(key: &str) -> String {
+/// anything else, and refuses a name another agent already holds, *including
+/// one that has exited*. So the pane leads the name. A display label, not an
+/// identity — the pane is the identity (see `target`) — but a label keyed on
+/// the task alone outlives the session that wore it: a retained workspace
+/// (`retain = "on-failure"`) keeps its agent, and the next dispatch of that
+/// same plan was refused `agent_name_taken` at `agent.start`, every time,
+/// until an operator closed the pane by hand (observed live, 2026-08-17).
+/// A fresh workspace always brings a fresh pane, so this cannot collide.
+fn agent_name(key: &str, pane_id: &str) -> String {
     let mut name = String::from("t-");
-    for c in key.chars() {
+    for c in pane_id
+        .chars()
+        .chain(std::iter::once('-'))
+        .chain(key.chars())
+    {
         name.push(match c {
             'a'..='z' | '0'..='9' | '-' | '_' => c,
             'A'..='Z' => c.to_ascii_lowercase(),
@@ -662,6 +839,7 @@ mod tests {
             agent_status: status.into(),
             state_change_seq: 9,
             interactive_ready: true,
+            launch_pending: false,
             name: None,
             tokens: Default::default(),
         }
@@ -790,7 +968,20 @@ mod tests {
 
     #[test]
     fn an_agent_name_is_herdr_legal_however_ugly_the_key() {
-        assert_eq!(agent_name("plan:plans/x.md"), "t-plan-plans-x-md");
-        assert!(agent_name(&"plan:plans/".repeat(20)).len() <= 32);
+        assert_eq!(
+            agent_name("plan:plans/x.md", "w7:p1"),
+            "t-w7-p1-plan-plans-x-md"
+        );
+        assert!(agent_name(&"plan:plans/".repeat(20), "w7:p1").len() <= 32);
+    }
+
+    /// The name a retained workspace's agent keeps must not be the name the
+    /// next dispatch of that plan needs: herdr refuses a name in use — an
+    /// exited agent's included — and the plan would be undispatchable until
+    /// somebody closed the pane (observed live, 2026-08-17).
+    #[test]
+    fn two_spawns_of_one_plan_never_ask_for_the_same_agent_name() {
+        let key = "plan:plans/x.md";
+        assert_ne!(agent_name(key, "w7:p1"), agent_name(key, "w8:p1"));
     }
 }
