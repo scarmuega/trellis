@@ -98,8 +98,7 @@ const RETRY_BEAT: Duration = Duration::from_millis(500);
 const TAIL: u32 = 500;
 
 /// What the caller knows, from disk, about the task behind a session key.
-/// The pool asks this only about a pane it has just seen settled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Disposition {
     /// The plan has been accounted for: moved, retired, blocked, passed on,
     /// or parked behind a declared `handoff:`. A settled pane over one of
@@ -108,6 +107,11 @@ pub enum Disposition {
     /// The plan is still claimed with no verdict. A settled pane over one of
     /// these is a stall: graced, then recycled.
     Held,
+    /// The session declared a wait that has not run out — it is minding work
+    /// that outlives its turn and will come back to it. Held with a clock on
+    /// it: when the lease lapses this becomes `Held`, and the grace it was
+    /// already spending is spent, so the recycle follows at once.
+    Waiting(String),
     /// There is no plan behind this key — a ritual. Settling is all the
     /// completion such a session has.
     NoPlan,
@@ -132,6 +136,9 @@ struct Session {
     blocked_streak: u32,
     /// Whether the blocked toast has already gone out for this spell.
     toasted: bool,
+    /// What the session last declared it is waiting on, if the lease is still
+    /// live. Carried only so the fleet can say why a slot is spent.
+    waiting: Option<String>,
 }
 
 impl Session {
@@ -145,6 +152,12 @@ impl Session {
     /// is real, and hiding it would misreport the fleet.
     fn is_blocked(&self) -> bool {
         self.blocked_streak >= BLOCKED_STREAK
+    }
+
+    /// Same, for a declared wait — the slot is spent either way, and the one
+    /// thing owed the operator is that it says so.
+    fn is_waiting(&self) -> bool {
+        self.waiting.is_some()
     }
 
     fn working(&mut self) {
@@ -254,6 +267,7 @@ impl HerdrPool {
                     // Confirmed by this pass's own sighting, like any other.
                     blocked_streak: u32::from(agent.agent_status == "blocked"),
                     toasted: false,
+                    waiting: None,
                 },
             );
         }
@@ -278,14 +292,15 @@ impl HerdrPool {
             .iter()
             .map(|(key, s)| InFlightView {
                 key: key.clone(),
-                label: if s.is_blocked() {
-                    format!("{} [blocked]", s.label)
-                } else {
-                    s.label.clone()
+                label: match (s.is_blocked(), &s.waiting) {
+                    (true, _) => format!("{} [blocked]", s.label),
+                    (false, Some(what)) => format!("{} [waiting: {what}]", s.label),
+                    (false, None) => s.label.clone(),
                 },
                 log: s.log.clone(),
                 started: s.started.clone(),
                 token: s.token.clone(),
+                waiting: s.waiting.clone(),
                 // The pane is the session's identity here (see `target`),
                 // and the one thing an operator needs to go look at it.
                 pane: Some(s.pane_id.clone()),
@@ -376,6 +391,7 @@ impl HerdrPool {
                 idle_streak: 0,
                 blocked_streak: 0,
                 toasted: false,
+                waiting: None,
             },
         );
         Ok(log)
@@ -573,23 +589,28 @@ impl HerdrPool {
 
     /// Wait the fleet out — what `--once` owes its caller. Sessions that
     /// reach a verdict retire; sessions that stall are recycled once their
-    /// grace runs out; sessions blocked at their own UI are announced and
-    /// left running, because a drain has nobody to unblock them and the next
-    /// daemon adopts them.
+    /// grace runs out; sessions blocked at their own UI, or minding work
+    /// under a declared wait, are announced and left running, because a
+    /// drain has nobody to unblock them and no reason to outlast a build the
+    /// next daemon can adopt.
     pub fn drain(&mut self, judge: &dyn Fn(&str) -> Disposition) -> Vec<Finished> {
         let mut done = Vec::new();
         let deadline = Instant::now() + DRAIN_DEADLINE;
         loop {
             done.extend(self.reap(judge));
-            let waiting = self.in_flight.values().filter(|s| !s.is_blocked()).count();
-            if waiting == 0 || Instant::now() >= deadline {
+            let pending = self
+                .in_flight
+                .values()
+                .filter(|s| !s.is_blocked() && !s.is_waiting())
+                .count();
+            if pending == 0 || Instant::now() >= deadline {
                 break;
             }
             std::thread::sleep(DRAIN_BEAT);
         }
-        // Whatever is still here is blocked, or outlasted the deadline.
-        // Either way it keeps its marker line: it is running, and the next
-        // daemon adopts it rather than judging its plan abandoned.
+        // Whatever is still here is blocked, waiting, or outlasted the
+        // deadline. Either way it keeps its marker line: it is running, and
+        // the next daemon adopts it rather than judging its plan abandoned.
         for key in self.in_flight.keys().cloned().collect::<Vec<_>>() {
             let session = self.in_flight.get(&key).expect("still tracked");
             let (line, body) = if session.is_blocked() {
@@ -599,6 +620,14 @@ impl HerdrPool {
                         session.label
                     ),
                     "left running — attach in herdr to unblock it",
+                )
+            } else if let Some(what) = session.waiting.clone() {
+                (
+                    format!(
+                        "{} is waiting on {what} — left running; the next daemon adopts it",
+                        session.label
+                    ),
+                    "left running — it declared a wait a one-shot pass cannot sit out",
                 )
             } else {
                 (
@@ -656,7 +685,7 @@ impl HerdrPool {
             // Keep the scene of an unaccounted end for attach; clear the
             // ones whose plan says what happened.
             Retain::OnFailure => !reason.is_failure(),
-        };
+        } || reason.must_close();
         self.finish_closing(key, reason, close)
     }
 
@@ -708,6 +737,14 @@ fn observe(
     disposition: Disposition,
     grace: Duration,
 ) -> Option<Reason> {
+    // The declared wait is the session's own statement about itself, so it is
+    // recorded whatever the screen says — a pane that is working while its
+    // lease runs still holds a slot the operator should be able to account
+    // for.
+    session.waiting = match &disposition {
+        Disposition::Waiting(what) => Some(what.clone()),
+        _ => None,
+    };
     match agent.agent_status.as_str() {
         "working" => {
             session.working();
@@ -738,6 +775,12 @@ fn observe(
                 // The plan says what happened. Nothing on the screen could
                 // add to that, so the session is done.
                 Disposition::Verdict => Some(Reason::Verdict),
+                // It said it would be quiet, and said until when. Believed —
+                // and note the grace clock is *not* reset, for the same
+                // reason the `unknown` arm does not reset it: when the lease
+                // lapses this reads `Held` with its grace already spent, so
+                // the lease is the whole of the extra patience.
+                Disposition::Waiting(_) => None,
                 // Nothing to read a verdict from: settling is the end.
                 Disposition::NoPlan if since.elapsed() >= grace => Some(Reason::Settled),
                 // Claimed, unaccounted for, and nobody is typing. Give it
@@ -829,6 +872,7 @@ mod tests {
             idle_streak: 0,
             blocked_streak: 0,
             toasted: false,
+            waiting: None,
         }
     }
 
@@ -913,6 +957,76 @@ mod tests {
 
     /// A ritual has no plan to read, so settling is all it has — but it is
     /// still graced, because a dropped prompt looks the same as a fast run.
+    /// The whole of the fix, at this level: the same settled sighting that
+    /// recycles a plan nobody accounted for is held when the session said it
+    /// would be quiet. The screen is identical in both; the difference is
+    /// something the session declared.
+    #[test]
+    fn a_declared_wait_holds_a_settle_the_plan_alone_would_recycle() {
+        let waiting = Disposition::Waiting("cargo build".into());
+        let mut s = session();
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), waiting.clone(), NOW),
+            None
+        );
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), waiting.clone(), NOW),
+            None
+        );
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), waiting, NOW),
+            None,
+            "and it keeps holding — the lease is what runs out, not the patience"
+        );
+        assert_eq!(s.waiting.as_deref(), Some("cargo build"));
+
+        let mut stalled = session();
+        observe(&mut stalled, &sighting("idle"), Disposition::Held, NOW);
+        assert_eq!(
+            observe(&mut stalled, &sighting("idle"), Disposition::Held, NOW),
+            Some(Reason::Recycled),
+            "the same two sightings, with nothing declared"
+        );
+    }
+
+    /// The lease is the extra patience, so a lapse does not buy a fresh
+    /// grace: the clock the wait was suspending has been running all along.
+    #[test]
+    fn a_lapsed_wait_recycles_on_the_next_sighting() {
+        let grace = Duration::from_secs(3600);
+        let mut s = session();
+        let waiting = Disposition::Waiting("a long download".into());
+        observe(&mut s, &sighting("idle"), waiting.clone(), grace);
+        observe(&mut s, &sighting("idle"), waiting, grace);
+        assert!(s.is_waiting());
+        // The lease lapses between ticks: the caller now reads `Held`.
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), Disposition::Held, Duration::ZERO),
+            Some(Reason::Recycled)
+        );
+        assert!(
+            !s.is_waiting(),
+            "and the fleet stops claiming it is waiting"
+        );
+    }
+
+    /// A wait says nothing about a plan that has been accounted for. A
+    /// verdict is still a verdict, and still ungraced.
+    #[test]
+    fn a_wait_never_outranks_a_verdict() {
+        let mut s = session();
+        observe(
+            &mut s,
+            &sighting("idle"),
+            Disposition::Waiting("x".into()),
+            NOW,
+        );
+        assert_eq!(
+            observe(&mut s, &sighting("idle"), Disposition::Verdict, NOW),
+            Some(Reason::Verdict)
+        );
+    }
+
     #[test]
     fn a_ritual_settles_on_its_own_since_there_is_no_plan_to_read() {
         let mut s = session();

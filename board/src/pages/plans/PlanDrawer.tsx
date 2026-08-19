@@ -198,6 +198,12 @@ function ErrandStatus({
               direction; approvals stay yours
             </p>
           )}
+          {session?.waiting && (
+            <p className="mt-0.5 opacity-80">
+              waiting on {session.waiting} — the runtime is holding off on
+              judging this session a stall
+            </p>
+          )}
           {session?.pane && (
             <p className="mt-0.5 font-mono text-[11px] opacity-70">
               herdr pane {session.pane}

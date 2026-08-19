@@ -418,14 +418,25 @@ completion. The gate uses it to distinguish a mandated generator refreshing a
   passed on, or parked behind a declared `handoff:` — retires the session. No
   verdict and the pane is a stall: after `harness.herdr.idle_grace_secs` it is
   *recycled* — the plan goes back to `ready` (`plan_ops::relinquish`), the
-  workspace closes, and the retry cooldown, re-stamped at the recycle, paces
-  the next attempt. A settle is believed at the second consecutive sighting,
-  so a dialog rendering mid-turn costs a tick rather than a workspace.
-- Work that outlives a turn must be *declared*. A session parking a long
-  build or a background monitor writes `trellis plan handoff`; the runtime
-  reads that off the plan and retires the pane, freeing the slot. Undeclared
-  background work is lost with the recycled session — the runtime infers
-  nothing from what the pane's status line says.
+  workspace closes whatever `retain` says, and the retry cooldown, re-stamped
+  at the recycle, paces the next attempt. The close is not a retention
+  preference: the plan has just been handed to somebody else, and a pane left
+  running would be a second agent writing to it (decision 0064). The
+  scrollback reaches the session log first, so attach is what is lost, not
+  evidence. A settle is believed at the second consecutive sighting, so a
+  dialog rendering mid-turn costs a tick rather than a workspace.
+- Work that outlives a turn must be *declared*, and which declaration depends
+  on who comes back to it (decision 0064). Work **somebody else** moves — a PR
+  awaiting its owner — is `trellis plan handoff`: the plan stays `active` and
+  out of the queue, and the pane is retired, freeing the slot. Work **this
+  session** returns to — a long build, a monitor — is
+  `trellis plan waiting <plan> --for 30m --on "…"`: a lease under
+  `.trellis/runtime/`, which suspends the recycle and keeps the pane, the
+  plan, and the slot. The lease expires, and `harness.herdr.max_wait_secs`
+  caps it from the moment it was written; when it lapses the plan is judged as
+  it always was, with no fresh grace. Undeclared background work is still lost
+  with the recycled session — the runtime infers nothing from what the pane's
+  status line says.
 - **Delivery is confirmed, not assumed** (decision 0063). Placing the prompt
   is a precondition of a session existing, not an attempt made on the way to
   one. The runtime waits for herdr to report the pane promptable — by asking,

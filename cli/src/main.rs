@@ -23,6 +23,7 @@ use trellis::root::Root;
 use trellis::scaffold;
 use trellis::tree::{Kind, Tree};
 use trellis::views;
+use trellis::waits;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Format {
@@ -238,6 +239,25 @@ enum PlanCmd {
         reference: Option<String>,
         /// Drop the handoff instead — the plan is nobody's to wait on
         #[arg(long, conflicts_with = "reference")]
+        clear: bool,
+    },
+    /// Declare that an active plan's session is minding work that outlives
+    /// its turn — a build, a monitor — so it is not judged a stall
+    Waiting {
+        plan: String,
+        /// How long to be believed: 90s, 5m, 2h (bare numbers are seconds).
+        /// The operator's `max_wait_secs` caps it whatever this says.
+        #[arg(
+            long = "for",
+            value_name = "DURATION",
+            required_unless_present = "clear"
+        )]
+        for_: Option<String>,
+        /// What is being waited on, in your own words — for the operator
+        #[arg(long, value_name = "WHAT")]
+        on: Option<String>,
+        /// Drop the wait instead: the session is done waiting
+        #[arg(long, conflicts_with_all = ["for_", "on"])]
         clear: bool,
     },
     /// active|ready → ready under a new owner: the mandated relay hand-off
@@ -1314,6 +1334,39 @@ fn plan_cmd(root_arg: Option<&Path>, format: Format, cmd: PlanCmd) -> anyhow::Re
                 ),
                 None => println!("{rel}: handoff cleared"),
             }
+            Ok(ok)
+        }
+
+        PlanCmd::Waiting {
+            plan,
+            for_,
+            on,
+            clear,
+        } => {
+            let rel = to_rel(&tree.root, &plan);
+            let abs = tree.root.path.join(&rel);
+            // Guarded to `active` for the same reason a handoff is: a wait on
+            // a plan nobody holds is a claim about work that is not happening.
+            let current = plan_ops::current_status(&abs)?;
+            if current != PlanStatus::Active {
+                anyhow::bail!(
+                    "{rel} is {} — a wait declares what an active plan's session is minding",
+                    current.as_str()
+                );
+            }
+            if clear {
+                waits::clear(&tree.root.path, &rel)?;
+                println!("{rel}: wait cleared — the plan is judged by its own status again");
+                return Ok(ok);
+            }
+            let secs = waits::parse_duration(for_.as_deref().expect("required unless --clear"))?;
+            let what = on.as_deref().unwrap_or("work that outlives this turn");
+            waits::set(&tree.root.path, &rel, waits::now_secs(), secs, what)?;
+            println!(
+                "{rel}: waiting {secs}s on {what} — the runtime will not judge this session a \
+                 stall until that runs out, and your pane stays up. This is not a handoff: a \
+                 handoff parks the plan on something *someone else* moves and ends your session."
+            );
             Ok(ok)
         }
 

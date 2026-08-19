@@ -29,6 +29,7 @@ pub mod scaffold;
 pub mod skills;
 pub mod tree;
 pub mod views;
+pub mod waits;
 
 /// Spec version embedded at build time from `spec/model.md`'s title.
 pub fn spec_version() -> u32 {

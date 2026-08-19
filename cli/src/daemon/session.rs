@@ -38,6 +38,11 @@ pub struct InFlightView {
     /// from an older `status.json` may not carry one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pane: Option<String>,
+    /// What this session declared it is waiting on, while its lease is live.
+    /// A held slot the operator cannot account for is the complaint decision
+    /// 0052 raised against the old `Waiting` phase, so the wait says itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<String>,
 }
 
 /// Why a session left the fleet. This is the whole of what retirement
@@ -81,10 +86,24 @@ impl Reason {
         }
     }
 
-    /// Whether the session ended without the plan being accounted for, which
-    /// is what `Retain::OnFailure` keeps a workspace open for.
+    /// Whether the session ended without the plan being accounted for.
     pub fn is_failure(self) -> bool {
         matches!(self, Reason::Recycled | Reason::Gone | Reason::ServerLost)
+    }
+
+    /// Whether the workspace must come down whatever `retain` says.
+    ///
+    /// Only a recycle, and it is not a retention preference — it is the other
+    /// half of handing the plan back. A recycled session is one the runtime
+    /// has just judged nobody to be on: its claim is released and the plan
+    /// requeued, so within one cooldown a *second* session is dispatched to
+    /// the same plan. Leaving the first pane running makes two agents writing
+    /// to one artifact, which is the exact strand `active` means somebody is
+    /// on it exists to prevent (decision 0052), arriving by another road.
+    /// The scrollback is copied into the session log before the close either
+    /// way, so this costs live attach, not evidence.
+    pub fn must_close(self) -> bool {
+        matches!(self, Reason::Recycled)
     }
 }
 
@@ -113,16 +132,9 @@ pub fn timestamp(today: Date) -> String {
 }
 
 /// Filesystem-safe form of a task key (`plan:plans/x.md` → `plan-plans-x.md`).
-pub fn slug(key: &str) -> String {
-    let s: String = key
-        .chars()
-        .map(|c| match c {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_' => c,
-            _ => '-',
-        })
-        .collect();
-    s.trim_matches('-').to_string()
-}
+/// The kernel names the same shape for wait leases, and one spelling of it is
+/// enough — the daemon may depend on the kernel, never the other way round.
+pub use crate::waits::slug;
 
 /// A copy-pasteable rendering of the argv for the log header. Never parsed —
 /// the daemon runs the array, not this string.

@@ -194,13 +194,9 @@ impl State {
 }
 
 /// Wall-clock unix seconds. The cooldown compares two of these, so the only
-/// property that matters is monotonicity-in-practice between ticks.
-pub fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
+/// property that matters is monotonicity-in-practice between ticks — the same
+/// clock a wait lease is measured against, so it is the kernel's one.
+pub use crate::waits::now_secs;
 
 #[cfg(test)]
 mod tests {

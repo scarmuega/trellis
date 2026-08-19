@@ -66,6 +66,9 @@ export interface InFlight {
   // The herdr pane to attach to; absent under the process backend, whose
   // sessions are headless children with only a log.
   pane?: string;
+  // What this session declared it is waiting on, while its lease is live. A
+  // waiting session holds its slot, so the fleet says why.
+  waiting?: string;
 }
 
 export interface SessionTier {

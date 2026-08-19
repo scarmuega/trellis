@@ -427,7 +427,7 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
 
     let mut state = State::load_dispatch(&root);
     let mut backend = connect_pool(&root, &rt.cfg, opts.once, "plan:")?;
-    let judge = |key: &str| disposition(&rt.root, key);
+    let judge = |key: &str| disposition(&rt, key);
 
     // A crash removed no marker lines and adopted sessions should keep
     // theirs: reconcile `.trellis/acting-role` against what is actually in
@@ -551,7 +551,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
 
     let mut state = State::load_rituals(&root);
     let mut backend = connect_pool(&root, &rt.cfg, true, "ritual:")?;
-    let judge = |key: &str| disposition(&rt.root, key);
+    let judge = |key: &str| disposition(&rt, key);
     if !rt.dry_run {
         let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
         if let Err(e) = marker::reconcile(&root, "ritual:", &live) {
@@ -708,7 +708,7 @@ fn dispatch_pass(
     backend: &mut HerdrPool,
     reported: &mut Reported,
 ) -> anyhow::Result<Pass> {
-    for done in backend.reap(&|key: &str| disposition(&rt.root, key)) {
+    for done in backend.reap(&|key: &str| disposition(rt, key)) {
         conclude(rt, state, &done);
     }
 
@@ -932,7 +932,7 @@ fn rituals_pass(
     backend: &mut HerdrPool,
     first: bool,
 ) -> anyhow::Result<Pass> {
-    for done in backend.reap(&|key: &str| disposition(&rt.root, key)) {
+    for done in backend.reap(&|key: &str| disposition(rt, key)) {
         conclude(rt, state, &done);
     }
 
@@ -1191,6 +1191,11 @@ fn claim_to_dispatch(rt: &Runtime, key: &str, errand: &str) -> Option<PathBuf> {
     if crate::plan_ops::current_status(&path).ok()? != PlanStatus::Ready {
         return None;
     }
+    // A claim is a fresh attempt, so a spent wait is cleared with the spent
+    // handoff `flip` drops — same rule, and the same reason: a lease left
+    // over from the last taker would buy this session a patience it never
+    // asked for.
+    clear_wait(rt, key);
     match crate::plan_ops::flip(&path, &[PlanStatus::Ready], PlanStatus::Active) {
         Ok(_) => Some(path),
         // Said, not fatal: the session is still the one that does the work,
@@ -1202,6 +1207,18 @@ fn claim_to_dispatch(rt: &Runtime, key: &str, errand: &str) -> Option<PathBuf> {
             ));
             None
         }
+    }
+}
+
+/// Drop any wait lease behind a session key. Said, never fatal, and a no-op
+/// for a ritual: the lease is a liveness claim, and the plan's own status is
+/// what the runtime falls back on when there is none.
+fn clear_wait(rt: &Runtime, key: &str) {
+    let Some(rel) = key.strip_prefix("plan:") else {
+        return;
+    };
+    if let Err(e) = crate::waits::clear(&rt.root, rel) {
+        note(&format!("{rel}: could not clear the wait ({e})"));
     }
 }
 
@@ -1256,14 +1273,19 @@ fn connect_pool(
 /// act is usually the very write being judged. It is one small read per
 /// settled pane per tick.
 ///
-/// The one soft edge is deliberate: frontmatter that will not parse reads as
+/// Two soft edges, both deliberate. Frontmatter that will not parse reads as
 /// `Held`, so a session caught mid-write is never retired out from under
-/// itself. The grace still bounds it.
+/// itself; the grace still bounds it. And a plan that would read `Held` is
+/// checked for a declared wait first — the session's own statement that it is
+/// minding work outliving its turn — which suspends the recycle for as long
+/// as the lease is live, capped by `max_wait_secs` from the moment it was
+/// written.
 #[cfg(unix)]
-fn disposition(root: &Path, key: &str) -> Disposition {
+fn disposition(rt: &Runtime, key: &str) -> Disposition {
     let Some(rel) = key.strip_prefix("plan:") else {
         return Disposition::NoPlan;
     };
+    let root = &rt.root;
     let path = root.join(rel);
     if !path.exists() {
         // Retired into the terminal tier, or renamed: either way the session
@@ -1276,11 +1298,33 @@ fn disposition(root: &Path, key: &str) -> Disposition {
             // that frees the slot, because a pane waiting on a PR is a pane
             // nobody is typing in.
             Ok(Some(_)) => Disposition::Verdict,
-            _ => Disposition::Held,
+            // No verdict — but a session minding its own build is not a
+            // stall, and it is the only one that can say so. A handoff is
+            // the wrong word for it: that parks the plan on something
+            // *somebody else* moves, and closes the pane the build is
+            // running in.
+            _ => match held_or_waiting(rt, rel) {
+                Some(what) => Disposition::Waiting(what),
+                None => Disposition::Held,
+            },
         },
         Ok(_) => Disposition::Verdict,
         Err(_) => Disposition::Held,
     }
+}
+
+/// The live wait a session declared on this plan, if any. Absent, lapsed, and
+/// unreadable are one answer: no wait, and the plan's own status decides —
+/// which is never worse than half a lease.
+#[cfg(unix)]
+fn held_or_waiting(rt: &Runtime, rel: &str) -> Option<String> {
+    let cap = rt.cfg.harness.herdr.max_wait_secs;
+    let wait = crate::waits::live(&rt.root, rel, crate::waits::now_secs(), cap)?;
+    Some(if wait.what.is_empty() {
+        "work that outlives the turn".to_string()
+    } else {
+        wait.what
+    })
 }
 
 /// Everything a session's end owes the rest of the runtime: say so, record
@@ -1310,6 +1354,10 @@ fn conclude(rt: &Runtime, state: &mut State, done: &Finished) {
     if done.reason == Reason::Detached {
         return;
     }
+    // A wait outlives its turn, never its session: whatever the lease still
+    // said, the session that took it is over. Expiry would get here on its
+    // own; this is so the next taker never inherits one.
+    clear_wait(rt, &done.key);
     if let Err(e) = marker::remove(&rt.root, &done.key) {
         note(&format!(
             "{}: acting-role marker removal failed: {e}",

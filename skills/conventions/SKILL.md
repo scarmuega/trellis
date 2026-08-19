@@ -201,7 +201,10 @@ readiness share), `claim` (ready → active, refused while held), `block`
 (→ blocked, writing the escalation record the status owes), `unblock`
 (blocked → ready), `pass --to <role>` (the mandated relay hand-off: a new
 `owner:` and `ready` in one guarded move — the owner moves; `handoff <pr>`
-parks an active plan on a proposal and the owner keeps it), `retire` (the
+parks an active plan on a proposal and the owner keeps it; `waiting --for 30m
+--on "…"` declares that an active plan's own session is minding work outliving
+its turn, so the runtime does not read it as a stall — a handoff is what
+somebody else moves, a wait is what you come back to), `retire` (the
 owner's verdict). `trellis plan list` and
 `trellis readiness <plan>` are the reads. Hand-edit the `status:` field only
 where the binary is absent.

@@ -601,8 +601,9 @@ fn the_budget_reaches_the_prompt_even_though_it_can_never_be_a_flag() {
 
 /// The recycle is not a dead end: the plan goes back to `ready`, the
 /// cooldown paces the retry, and the next attempt is a *fresh* pane. The
-/// first pane is left open on purpose (`retain = "on-failure"`) — it is the
-/// scene of the stall, and an operator may want to read it.
+/// first pane comes down with the claim it gave up, whatever `retain` says —
+/// this pass hands the plan to somebody else, and two agents writing to one
+/// plan is what that would mean. Its scrollback is in the session log.
 #[test]
 fn a_recycled_plan_is_retried_in_a_pane_of_its_own() {
     let (f, herdr) = herdr_fixture(
@@ -630,8 +631,128 @@ fn a_recycled_plan_is_retried_in_a_pane_of_its_own() {
         .collect();
     assert_ne!(panes[0], panes[1], "a retry is a new session, not a nudge");
     assert!(
+        herdr.calls().iter().any(|c| c == "workspace.close"),
+        "and the stalled pane goes: nobody may be left writing to a plan it gave back"
+    );
+}
+
+/// The bug the wait exists for: a session minding a build it started reads
+/// `idle` to herdr and is indistinguishable from a dead one, so it used to be
+/// recycled and re-dispatched under itself. A declared wait is the session
+/// saying which it is — and it keeps the plan, the pane, and its slot. Note
+/// `idle_grace_secs = 0` in the fixture: without the lease this is a recycle
+/// on the first settled sighting.
+#[test]
+fn a_declared_wait_is_not_a_stall() {
+    let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_acting(
+        socket.clone(),
+        &["working", "idle"],
+        f.root(),
+        common::waiting_session(f.root(), 0, 600, "cargo build"),
+    );
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[scheduler]\nretry_cooldown_secs = 0\n\n{}act_args = [\"{{plan}}\"]\nritual_args = [\"{{ritual}}\"]\n",
+            common::herdr_config(&socket)
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert!(
+        f.read("plans/ship-it.md").contains("status: active"),
+        "the plan stays claimed by the session that is still on it: {out}"
+    );
+    assert!(out.contains("waiting on cargo build"), "{out}");
+    assert_eq!(
+        dispatched(&herdr).len(),
+        1,
+        "and no second session is sent to the same plan: {out}"
+    );
+    assert!(
         !herdr.calls().iter().any(|c| c == "workspace.close"),
-        "and the stalled pane stays up for attach"
+        "the pane the build is running in stays up"
+    );
+}
+
+/// A wait is a lease, not a promise: it expires, and the moment it does the
+/// plan is judged the way it always was. No fresh grace is handed out — the
+/// lease *was* the extra patience.
+#[test]
+fn a_lapsed_wait_recycles_at_once() {
+    let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_acting(
+        socket.clone(),
+        &["working", "idle"],
+        f.root(),
+        // Ten minutes' patience, asked for an hour ago.
+        common::waiting_session(f.root(), 3_600, 600, "cargo build"),
+    );
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[scheduler]\nretry_cooldown_secs = 0\n\n{}act_args = [\"{{plan}}\"]\nritual_args = [\"{{ritual}}\"]\n",
+            common::herdr_config(&socket)
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "a spent lease is no lease: {out}"
+    );
+    assert!(
+        trellis::waits::get(f.root(), "plans/ship-it.md").is_none(),
+        "and it does not outlive the session that took it"
+    );
+    assert!(
+        herdr.calls().iter().any(|c| c == "workspace.close"),
+        "the recycled pane comes down with the claim it gave back"
+    );
+}
+
+/// The ceiling is the operator's, and it binds from the moment the session
+/// asked — otherwise a session could buy itself an unbounded slot by naming a
+/// long enough wait, which is exactly the hold decision 0061 removed.
+#[test]
+fn the_operator_caps_a_wait_a_session_names() {
+    let f = Fixture::healthy();
+    let socket = f.root().join(".trellis/herdr.sock");
+    let herdr = FakeHerdr::start_acting(
+        socket.clone(),
+        &["working", "idle"],
+        f.root(),
+        // A day, asked for ten minutes ago — the ask is live, the cap is not.
+        common::waiting_session(f.root(), 600, 86_400, "a very long download"),
+    );
+    f.write(
+        "runtime.toml",
+        &format!(
+            "[scheduler]\nretry_cooldown_secs = 0\n\n{}max_wait_secs = 60\nact_args = [\"{{plan}}\"]\nritual_args = [\"{{ritual}}\"]\n",
+            common::herdr_config(&socket)
+        ),
+    );
+    f.write(
+        "plans/ship-it.md",
+        &format!("{FM}status: ready\ntype: initiative\n---\n# Ship\n"),
+    );
+
+    let out = f.dispatch_once(ANCHOR, &[]);
+    let _ = &herdr;
+    assert!(
+        f.read("plans/ship-it.md").contains("status: ready"),
+        "the cap wins over the ask: {out}"
     );
 }
 

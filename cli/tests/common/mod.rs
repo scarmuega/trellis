@@ -943,6 +943,22 @@ pub fn wire_herdr_split(
 /// exactly the moment a real session starts, so it is the moment at which
 /// what the runtime handed over can be read (decision 0053).
 #[cfg(unix)]
+/// A session that declares a wait instead of a verdict — what an agent
+/// minding a build it started does before it goes quiet. `written_ago` backs
+/// the lease's own timestamp up, which is how a lapsed or capped one is
+/// tested without sleeping.
+pub fn waiting_session(root: &Path, written_ago: u64, for_secs: u64, what: &str) -> OnPrompt {
+    let root = root.to_path_buf();
+    let what = what.to_string();
+    Box::new(move |prompt: &str, _: &Path| {
+        let Some(rel) = plan_in_prompt(prompt) else {
+            return;
+        };
+        let now = trellis::waits::now_secs().saturating_sub(written_ago);
+        let _ = trellis::waits::set(&root, &rel, now, for_secs, &what);
+    })
+}
+
 pub fn session(root: &Path, verdict: Option<(&str, Option<&str>)>) -> OnPrompt {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);

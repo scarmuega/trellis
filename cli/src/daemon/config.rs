@@ -117,11 +117,17 @@ impl Default for Scheduler {
 }
 
 /// What a finished herdr session's workspace does.
+///
+/// None of these keeps a *recycled* session's pane: handing the plan back and
+/// leaving the session that held it running is what put two agents on one
+/// plan, so a recycle always closes (`Reason::must_close`). What is left to
+/// retain is a session herdr lost — whose workspace is already gone — so in
+/// practice these differ only for the ends that are not failures at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Retain {
-    /// Keep the scene of an unaccounted end — a recycled or lost session —
-    /// for attach; close the ones whose plan says what happened.
+    /// Keep the scene of an unaccounted end — a lost session — for attach;
+    /// close the ones whose plan says what happened.
     OnFailure,
     Always,
     Never,
@@ -161,6 +167,17 @@ pub struct HerdrHarness {
     /// is set to. What the grace buys is the benefit of the doubt for a
     /// session between turns.
     pub idle_grace_secs: u64,
+    /// Ceiling on a wait a session declares for itself with
+    /// `trellis plan waiting` — the operator's answer to a session that says
+    /// it is minding a build.
+    ///
+    /// A declared wait suspends the recycle, so without a ceiling it would be
+    /// the old `Waiting` phase again: a slot held forever on a session's own
+    /// say-so, which is what decision 0061 removed. This is that clock. It is
+    /// measured from the moment the wait was *written*, so tightening it also
+    /// binds leases already standing, and a session that needs longer says so
+    /// again — which is cheap, and is the session proving it is still there.
+    pub max_wait_secs: u64,
     /// Seconds a freshly started agent has to become promptable before the
     /// spawn is given up (decision 0063).
     ///
@@ -211,6 +228,7 @@ impl Default for HerdrHarness {
             retain: Retain::OnFailure,
             on_shutdown: OnShutdown::Detach,
             idle_grace_secs: 120,
+            max_wait_secs: 7200,
             prompt_deadline_secs: 120,
         }
     }
@@ -282,10 +300,15 @@ pub fn default_prompts() -> std::collections::HashMap<String, String> {
              hand-off is mandated — park it on that proposal (`trellis plan handoff \
              {{plan}} <pr>`). The runtime reads completion from the plan itself, \
              not from your session: a plan left active with no handoff is returned \
-             to ready once you go idle, and dispatched again. That includes work \
-             you park in the background — a long build, a monitor, anything that \
-             outlives the turn: declare it with `trellis plan handoff` or it is \
-             lost with the session.\n\
+             to ready once you go idle, and dispatched again — by a second session, \
+             while yours is closed. So say which of the two you are doing. Work \
+             somebody *else* moves — a PR, a review — is a handoff: it parks the \
+             plan and ends your session. Work *you* will come back to in this \
+             session — a long build, a monitor, anything running in the background \
+             — is a wait: `trellis plan waiting {{plan}} --for 30m --on \"cargo \
+             build\"` before you go quiet, and say it again if it runs long. A \
+             wait keeps your pane and your background work alive; a handoff would \
+             close both.\n\
              \n\
              {{mandate}}\n\
              \n\

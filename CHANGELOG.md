@@ -16,6 +16,43 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ### Added
 
+- **A wait is declared, and it expires**
+  (`decisions/0064-a-wait-is-declared-and-it-expires.md`). A session minding
+  work it started — a build, a monitor — reads `idle` to herdr and was
+  indistinguishable from a dead one, so it was recycled and its plan
+  re-dispatched under it. `trellis plan waiting <plan> --for 30m --on "cargo
+  build"` is the session saying which it is: a lease under
+  `.trellis/runtime/waiting/`, which suspends the recycle and keeps the pane,
+  the plan, and the slot. It is a liveness claim, never a completion claim —
+  completion is still only ever the plan's own status. Unlike 0052's `Waiting`
+  phase it has a clock: the session names a duration and
+  `[harness.herdr] max_wait_secs` (default 7200) caps it, measured from when
+  the lease was written, so tightening the cap also binds leases already
+  standing. When it lapses the plan is judged as it always was, with no fresh
+  grace — the lease *was* the extra patience. Cleared at the claim and at the
+  conclusion, alongside the spent `handoff:` that a claim already drops.
+- `[harness.herdr] max_wait_secs` (default 7200): the ceiling on a wait a
+  session declares for itself.
+
+### Fixed
+
+- **A recycled session's pane comes down with the claim it gave up.**
+  `retain = "on-failure"` kept the workspace of an "unaccounted end" for
+  attach, and a recycle is one — so the runtime handed the plan back to the
+  queue and then dispatched a *second* session to it while the first was still
+  running in its pane. Two agents, one artifact. A recycle now closes its
+  workspace whatever `retain` says; the pane's scrollback still reaches the
+  session log first, so what is lost is live attach, not evidence.
+  `spec/runtime.md` had described the recycle this way since 0061 — the code
+  now matches it.
+- **The act prompt no longer sends a session to its death for declaring
+  background work.** It said to declare anything outliving the turn with
+  `trellis plan handoff`; a handoff reads as a verdict, which closes the pane —
+  killing the build being waited on — and parks the plan for an owner who was
+  never coming. The prompt now distinguishes the two by who comes back: a
+  handoff is work somebody else moves and ends your session, a wait is work
+  you return to and keeps it alive.
+
 - **The board is one window onto many domains**
   (`decisions/0062-the-board-is-one-window-onto-many-domains.md`). A domain is
   a sovereign root with its own daemon on its own port, so working across a
