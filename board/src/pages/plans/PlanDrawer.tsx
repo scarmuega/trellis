@@ -20,10 +20,12 @@ function ErrandMenu({
   rel,
   complexity,
   onRequested,
+  onDraftChange,
 }: {
   rel: string;
   complexity?: string;
   onRequested: (outcome: ErrandOutcome) => void;
+  onDraftChange: (drafting: boolean) => void;
 }) {
   const queryClient = useQueryClient();
   const { api, key } = useDomain();
@@ -39,8 +41,14 @@ function ErrandMenu({
     refetchInterval: 10_000,
   });
   const dispatcherUp = status?.dispatch_running === true;
+  // A session already on this plan is no longer a reason to refuse the ask
+  // (decision 0065) — it queues behind it — but it is worth saying, so the
+  // operator knows why nothing starts immediately.
   const inFlight = (status?.dispatch?.in_flight ?? []).some(
     (s) => s.key === `plan:${rel}`,
+  );
+  const queued = (status?.errands ?? []).filter(
+    (e) => e.plan === rel && e.state !== "dispatched",
   );
 
   const tiers = status?.session_tiers ?? {};
@@ -61,18 +69,17 @@ function ErrandMenu({
       setOpen(false);
       setText("");
       setError(null);
+      onDraftChange(false);
       onRequested(outcome);
       queryClient.invalidateQueries({ queryKey: key("status") });
     },
     onError: (e: Error) => setError(e.message),
   });
 
-  const disabled = !dispatcherUp || inFlight || mutation.isPending;
+  const disabled = !dispatcherUp || mutation.isPending;
   const disabledReason = !dispatcherUp
     ? "dispatcher not running — start `trellis dispatch run`"
-    : inFlight
-      ? "a session is already running on this plan"
-      : undefined;
+    : undefined;
 
   return (
     <div className="relative">
@@ -88,7 +95,12 @@ function ErrandMenu({
         <div className="absolute right-0 z-10 mt-1 w-80 rounded-md border border-neutral-200 bg-white p-2 shadow-lg">
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              // The drawer closes on a backdrop click or Escape, which used to
+              // unmount this and take a half-written ask with it.
+              onDraftChange(e.target.value.trim().length > 0);
+            }}
             rows={4}
             autoFocus
             placeholder="what should this plan's owner do?"
@@ -130,10 +142,90 @@ function ErrandMenu({
           <p className="mt-1.5 text-[10px] leading-snug text-neutral-400">
             Spawns a session as this plan's owner, which will write to the
             repo{status?.budget_enforced === false ? " with no budget cap" : ""}.
+            {inFlight
+              ? " A session is running on this plan, so this one queues behind it."
+              : ""}
           </p>
           {error && <p className="mt-1 text-[11px] text-red-600">{error}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+/// The asks this plan still owes (decision 0065). The queue is durable, so it
+/// outlives the tab that made it — and an ask nobody can see is an ask the
+/// operator assumes was lost and types again.
+function QueuedErrands({ rel }: { rel: string }) {
+  const queryClient = useQueryClient();
+  const { api, key } = useDomain();
+  const { data: status } = useQuery({
+    queryKey: key("status"),
+    queryFn: api.status,
+    refetchInterval: 5_000,
+  });
+  const mutation = useMutation({
+    mutationFn: ({ id, action }: { id: number; action: "confirm" | "discard" }) =>
+      api.resolveErrand(rel, id, action),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key("status") }),
+  });
+
+  const queued = (status?.errands ?? []).filter((e) => e.plan === rel);
+  if (queued.length === 0) return null;
+
+  const since = (secs: number) => {
+    const mins = Math.max(0, Math.round(Date.now() / 1000 - secs) / 60);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${Math.round(mins)}m ago`;
+    return `${Math.round(mins / 60)}h ago`;
+  };
+
+  return (
+    <div className="mb-4 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+      <p className="text-[11px] font-medium text-neutral-500">
+        queued errand{queued.length > 1 ? "s" : ""}
+      </p>
+      <ul className="mt-1 space-y-1.5">
+        {queued.map((e) => (
+          <li key={e.id} className="text-xs">
+            <div className="flex items-start gap-2">
+              <span className="min-w-0 grow whitespace-pre-wrap break-words text-neutral-700">
+                {e.instruction}
+              </span>
+              <span className="shrink-0 text-[10px] text-neutral-400">
+                {since(e.asked_at)}
+              </span>
+            </div>
+            {e.state === "dispatched" && (
+              <p className="text-[10px] text-emerald-700">running</p>
+            )}
+            {e.state === "stale" && (
+              <div className="mt-0.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-1">
+                <p className="text-[10px] leading-snug text-amber-900">
+                  the plan changed since this was asked — held, so it is yours to
+                  rule on rather than the runtime's to guess
+                </p>
+                <div className="mt-1 flex gap-2">
+                  <button
+                    onClick={() => mutation.mutate({ id: e.id, action: "confirm" })}
+                    disabled={mutation.isPending}
+                    className="rounded bg-neutral-900 px-1.5 py-0.5 text-[10px] text-white disabled:opacity-40"
+                  >
+                    still stands
+                  </button>
+                  <button
+                    onClick={() => mutation.mutate({ id: e.id, action: "discard" })}
+                    disabled={mutation.isPending}
+                    className="rounded border border-neutral-300 px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+                  >
+                    discard
+                  </button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -180,8 +272,8 @@ function ErrandStatus({
         <div className="min-w-0 grow">
           <p className="font-medium">
             errand {phase}
-            {outcome.outcome === "replaced" && phase === "queued"
-              ? " — replaced the ask already waiting on this plan"
+            {typeof outcome.ahead === "number" && outcome.ahead > 0 && phase === "queued"
+              ? ` — behind ${outcome.ahead} other ask${outcome.ahead > 1 ? "s" : ""} on this plan`
               : ""}
           </p>
           <p className="mt-0.5 opacity-80">
@@ -399,19 +491,29 @@ export default function PlanDrawer() {
   const { rel, open, close } = usePlanDrawer();
   const { api, key, href } = useDomain();
   const [errand, setErrand] = useState<ErrandOutcome | null>(null);
+  // A half-written ask lives in `ErrandMenu`'s own state, and closing the
+  // drawer unmounts it. Nothing persists a draft, so closing over one is the
+  // last remaining way the operator loses their typing.
+  const [drafting, setDrafting] = useState(false);
 
   // The status row belongs to the plan it was requested on, not to the
   // drawer — switching plans must not show one plan's session under another.
   useEffect(() => setErrand(null), [rel]);
+  useEffect(() => setDrafting(false), [rel]);
+
+  const closeUnlessDrafting = useCallback(() => {
+    if (drafting) return;
+    close();
+  }, [drafting, close]);
 
   useEffect(() => {
     if (!rel) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") closeUnlessDrafting();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rel, close]);
+  }, [rel, closeUnlessDrafting]);
 
   const { data, error, isPending } = useQuery({
     queryKey: key("artifact", rel),
@@ -428,7 +530,10 @@ export default function PlanDrawer() {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/20" onClick={close} />
+      <div
+        className="fixed inset-0 z-40 bg-black/20"
+        onClick={closeUnlessDrafting}
+      />
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-neutral-200 bg-white shadow-xl">
         <header className="flex items-start justify-between gap-4 border-b border-neutral-100 px-5 py-4">
           <div className="min-w-0">
@@ -453,6 +558,7 @@ export default function PlanDrawer() {
                     : undefined
                 }
                 onRequested={setErrand}
+                onDraftChange={setDrafting}
               />
             )}
             <Link
@@ -481,6 +587,9 @@ export default function PlanDrawer() {
               onDismiss={() => setErrand(null)}
             />
           )}
+          {/* Read from the daemon rather than remembered by this tab, so it
+              survives a reload and a different operator's session. */}
+          <QueuedErrands rel={rel} />
           {data && (
             <>
               <div className="mb-5 rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2.5">

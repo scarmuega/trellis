@@ -284,8 +284,12 @@ fn refusals_speak_the_tree_vocabulary_and_spawn_nothing() {
     );
 }
 
+/// A session already on the plan used to be a 409 telling the operator to
+/// "retry in a moment" — with nothing held server-side, so retrying meant
+/// typing it again. It queues now (decision 0065): one plan still carries one
+/// session, the ask simply waits its turn, and it is visible while it waits.
 #[test]
-fn a_second_request_while_the_first_runs_is_refused() {
+fn a_second_request_while_the_first_runs_is_queued_behind_it() {
     let f = Fixture::healthy();
     // A harness that outlives both requests, so the first session is still
     // in flight when the second ask arrives: a pane that never settles.
@@ -308,8 +312,194 @@ fn a_second_request_while_the_first_runs_is_refused() {
     });
 
     let (code, v) = errand(daemon.port, "reshape-me", "split it differently");
-    assert_eq!(code, 409, "{v}");
-    assert_eq!(v["outcome"], "in-flight");
+    assert_eq!(code, 200, "{v}");
+    assert_eq!(v["outcome"], "requested");
+    assert_eq!(v["ahead"], 1, "it waits behind the session already running");
+
+    // And the operator can see it waiting rather than guessing.
+    let (_, status) = get(daemon.port, "/api/status");
+    let queued = status["errands"].as_array().expect("errands on the wire");
+    assert!(
+        queued
+            .iter()
+            .any(|e| e["instruction"] == "split it differently" && e["state"] == "pending"),
+        "{status}"
+    );
+}
+
+/// The loss that sent the operator back to the keyboard: no free slot. The ask
+/// used to be logged "deferred, still due" and thrown away in the same breath.
+#[test]
+fn an_ask_with_no_free_slot_waits_instead_of_vanishing() {
+    let f = Fixture::healthy();
+    // One slot, held by a session that never settles.
+    let _herdr = common::wire_herdr(&f, "", "[scheduler]\nmax_concurrent = 1\n\n", &["working"], None);
+    f.write(
+        "plans/reshape-me.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n",
+    );
+    f.write(
+        "plans/other.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Other\n",
+    );
+    let daemon = Daemon::dispatch(&f);
+
+    let (code, _) = errand(daemon.port, "reshape-me", "split the scope");
+    assert_eq!(code, 200);
+    until("the first session to take the only slot", || {
+        let (_, status) = get(daemon.port, "/api/status");
+        (!status["in_flight"].as_array()?.is_empty()).then_some(())
+    });
+
+    let (code, _) = errand(daemon.port, "other", "look at this one too");
+    assert_eq!(code, 200);
+    // Polled rather than slept: the ask is briefly marked dispatched before
+    // `fire` is asked (the crash ordering — an ask must be attributable to a
+    // key if the daemon dies mid-spawn), and settles back to pending when
+    // `fire` defers it for want of a slot. What matters is where it lands.
+    until("the unplaceable ask to settle back into the queue", || {
+        let (_, status) = get(daemon.port, "/api/status");
+        status["errands"]
+            .as_array()?
+            .iter()
+            .any(|e| e["plan"] == "plans/other.md" && e["state"] == "pending")
+            .then_some(())
+    });
+    // And it is on disk, so it outlives the process as well as the pass.
+    let queued: serde_json::Value =
+        serde_json::from_str(&f.read(".trellis/runtime/errands.json")).unwrap();
+    assert!(
+        queued["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["plan"] == "plans/other.md"),
+        "{queued}"
+    );
+}
+
+/// The loss the operator actually hit: the dispatcher died with the queue
+/// inside it. The ask outlives the process that took it, and the next
+/// dispatcher runs it.
+#[test]
+fn an_ask_outlives_the_dispatcher_that_took_it() {
+    let f = Fixture::healthy();
+    // One slot, held by a session that never settles, so the ask cannot run
+    // before we take the daemon down.
+    let _blocker = common::wire_herdr(
+        &f,
+        "",
+        "[scheduler]\nmax_concurrent = 1\n\n",
+        &["working"],
+        None,
+    );
+    f.write(
+        "plans/reshape-me.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n",
+    );
+    f.write(
+        "plans/blocker.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Blocker\n",
+    );
+
+    {
+        let daemon = Daemon::dispatch(&f);
+        assert_eq!(errand(daemon.port, "blocker", "hold the slot").0, 200);
+        until("the blocker to take the only slot", || {
+            let (_, status) = get(daemon.port, "/api/status");
+            (!status["in_flight"].as_array()?.is_empty()).then_some(())
+        });
+        assert_eq!(errand(daemon.port, "reshape-me", "split the scope").0, 200);
+        until("the ask to settle into the queue on disk", || {
+            let queued: serde_json::Value =
+                serde_json::from_str(&f.read(".trellis/runtime/errands.json")).ok()?;
+            queued["entries"]
+                .as_array()?
+                .iter()
+                .any(|e| e["plan"] == "plans/reshape-me.md" && e["state"] == "pending")
+                .then_some(())
+        });
+        // `daemon` drops here: SIGTERM, the queue's process gone.
+    }
+
+    // A new dispatcher, and a fleet with room this time.
+    let herdr = common::wire_herdr(&f, "", "", &["working", "idle"], None);
+    let daemon = Daemon::dispatch(&f);
+    let prompts = until("the surviving ask to be run by the next dispatcher", || {
+        let seen = herdr.prompts();
+        seen.iter()
+            .any(|p| p.contains("split the scope"))
+            .then_some(seen)
+    });
+    assert!(
+        prompts.iter().any(|p| p.contains("split the scope")),
+        "{prompts:?}"
+    );
+    let _ = &daemon;
+}
+
+/// An ask is written about a plan, and stops being certainly about it when the
+/// plan is rewritten. It is held for its author rather than fired or dropped.
+#[test]
+fn an_ask_whose_plan_changed_is_held_for_its_author() {
+    let f = Fixture::healthy();
+    let herdr = common::wire_herdr(&f, "", "[scheduler]\nmax_concurrent = 1\n\n", &["working"], None);
+    f.write(
+        "plans/reshape-me.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n",
+    );
+    f.write(
+        "plans/blocker.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Blocker\n",
+    );
+    let daemon = Daemon::dispatch(&f);
+
+    // Hold the only slot so the ask cannot fire before we rewrite its plan.
+    let (code, _) = errand(daemon.port, "blocker", "hold the slot");
+    assert_eq!(code, 200);
+    until("the blocker to take the only slot", || {
+        let (_, status) = get(daemon.port, "/api/status");
+        (!status["in_flight"].as_array()?.is_empty()).then_some(())
+    });
+
+    let (code, _) = errand(daemon.port, "reshape-me", "tighten the scope");
+    assert_eq!(code, 200);
+    f.write(
+        "plans/reshape-me.md",
+        "---\nprovenance: authored\nowner: org/founder\nstatus: draft\ntype: initiative\n---\n# Reshape me\n\nA paragraph the ask was never about.\n",
+    );
+
+    let entry = until("the ask to be held as stale", || {
+        let (_, status) = get(daemon.port, "/api/status");
+        status["errands"]
+            .as_array()?
+            .iter()
+            .find(|e| e["plan"] == "plans/reshape-me.md" && e["state"] == "stale")
+            .cloned()
+    });
+    assert_eq!(entry["instruction"], "tighten the scope", "it is kept whole");
+
+    // The author rules on it: confirmed, it is judged against the plan they
+    // have just read.
+    let id = entry["id"].as_u64().unwrap();
+    let (code, text) = post(
+        daemon.port,
+        &format!("/api/plans/reshape-me/errand/{id}"),
+        "{\"action\": \"confirm\"}",
+    );
+    assert_eq!(code, 200, "{text}");
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["outcome"], "confirmed");
+    let (_, status) = get(daemon.port, "/api/status");
+    assert!(
+        status["errands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == id && e["state"] == "pending"),
+        "{status}"
+    );
+    let _ = &herdr;
 }
 
 #[test]

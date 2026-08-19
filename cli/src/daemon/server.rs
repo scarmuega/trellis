@@ -231,6 +231,15 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
             if let Some(slug) = rest.strip_suffix("/errand").map(str::to_string) {
                 return errand(request, shared, &slug);
             }
+            // `/{slug}/errand/{id}` rules on one queued ask: an ask whose plan
+            // changed under it is held rather than dropped, and only its
+            // author can say whether it survived the rewrite (decision 0065).
+            if let Some((slug, id)) = rest
+                .split_once("/errand/")
+                .map(|(slug, id)| (slug.to_string(), id.to_string()))
+            {
+                return resolve_errand(request, shared, &slug, &id);
+            }
             if let Some(slug) = rest.strip_suffix("/status").map(str::to_string) {
                 return status_flip(request, shared, &slug);
             }
@@ -300,6 +309,14 @@ fn handle(request: Request, shared: &Shared) -> std::io::Result<()> {
                         "deep": tier(&shared.sessions.deep),
                     }),
                 );
+                // Same reason as `sessions` and `pending` above, and the
+                // reason the queue was invisible before it was durable: an ask
+                // made between ticks has to be *seen* before the next one, or
+                // the operator assumes it was lost and types it again.
+                obj.insert(
+                    "errands".into(),
+                    serde_json::to_value(shared.errand_view()).unwrap(),
+                );
                 obj.insert("budget_enforced".into(), shared.budget_enforced.into());
             }
             json(request, &value)
@@ -356,6 +373,65 @@ fn answer(mut request: Req, shared: &Shared, ticket: &str) -> std::io::Result<()
             "no such open question — it was answered already, or its session ended",
         )
     }
+}
+
+/// `POST /api/plans/{slug}/errand/{id}` with `{"action": "confirm"|"discard"}`
+/// — the operator ruling on an ask whose plan moved under it.
+///
+/// Confirming re-pins the entry to what the plan says *now*, so it is judged
+/// against the plan its author has just read rather than the one they wrote it
+/// against. Discarding is the only way an ask leaves the queue unfired at a
+/// human's word, which is the point: nothing else may throw one away.
+fn resolve_errand(mut request: Req, shared: &Shared, slug: &str, id: &str) -> std::io::Result<()> {
+    let Ok(id) = id.parse::<u64>() else {
+        return error(request, 404, "no such errand");
+    };
+    let mut body = String::new();
+    if request.as_reader().read_to_string(&mut body).is_err() {
+        return error(request, 400, "could not read the request body");
+    }
+    let action = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("action").and_then(|a| a.as_str()).map(str::to_string));
+    let rel = format!("plans/{}.md", slug.trim_end_matches(".md"));
+
+    if shared.dispatches {
+        let confirm = match action.as_deref() {
+            Some("confirm") => Some(
+                crate::plan_ops::fingerprint(&shared.root.join(&rel)).unwrap_or_default(),
+            ),
+            Some("discard") => None,
+            _ => return error(request, 400, "action must be \"confirm\" or \"discard\""),
+        };
+        let confirming = confirm.is_some();
+        let Some(entry) = shared.resolve_errand(id, confirm) else {
+            return error(request, 404, "no such errand — it may have already run");
+        };
+        if confirming {
+            shared
+                .nudge
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        return json(
+            request,
+            &serde_json::json!({
+                "plan": entry.plan,
+                "id": entry.id,
+                "outcome": if confirming { "confirmed" } else { "discarded" },
+            }),
+        );
+    }
+
+    if shared.overlay_status {
+        let forward = serde_json::json!({ "action": action });
+        return relay_to_dispatcher(
+            request,
+            shared,
+            &format!("/api/plans/{slug}/errand/{id}"),
+            &forward.to_string(),
+        );
+    }
+    error(request, 404, "this surface does not carry errands")
 }
 
 /// `POST /api/plans/{slug}/errand` — an operator asks the plan's `owner:` to
@@ -426,51 +502,47 @@ fn errand(mut request: Req, shared: &Shared, slug: &str) -> std::io::Result<()> 
                 );
             }
         };
-        let key = super::state::key_plan(&rel);
-        let in_flight = shared
-            .status
-            .lock()
-            .unwrap()
-            .in_flight
-            .iter()
-            .any(|s| s.key == key);
-        if in_flight {
-            // The snapshot is only as fresh as the last pass. Nudge one now:
-            // if that session actually ended, the pass reaps it and a retry
-            // succeeds in a second instead of a tick.
-            shared
-                .nudge
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            let body = serde_json::json!({
-                "plan": rel,
-                "outcome": "in-flight",
-                "error": format!(
-                    "{rel} already has a session running — one plan, one session; \
-                     if it just finished, retry in a moment"
-                ),
-            })
-            .to_string();
-            return request.respond(
-                Response::from_string(body)
-                    .with_status_code(409)
-                    .with_header(json_header()),
-            );
-        }
+        // A session already on this plan is no longer a refusal (decision
+        // 0065). One plan still carries one session — the ask simply waits its
+        // turn — and the operator keeps their typing, which the 409 did not:
+        // "retry in a moment" meant "type it again later", with nothing held.
+        // The nudge stays, so an ask lands within a second when the running
+        // session has in fact just ended.
+        shared
+            .nudge
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let (complexity, session) =
             crate::dispatch::plan_session(&tree, &shared.sessions, &rel);
-        let replaced = shared.request_errand(super::ErrandRequest {
-            plan: rel.clone(),
-            instruction,
-            model: model.clone(),
-            effort: effort.clone(),
-        });
+        // Pinned to what the plan says now, so a later rewrite is something
+        // the drain can notice and the operator can rule on.
+        let fingerprint = crate::plan_ops::fingerprint(&shared.root.join(&rel)).unwrap_or_default();
+        let entry = shared.request_errand(
+            super::ErrandRequest {
+                plan: rel.clone(),
+                instruction,
+                model: model.clone(),
+                effort: effort.clone(),
+            },
+            fingerprint,
+        );
+        // How many asks on this plan run before this one — including the one
+        // already in a session, which is what it is waiting behind.
+        let ahead = shared
+            .errand_view()
+            .iter()
+            .filter(|e| e.plan == rel && e.id < entry.id)
+            .count();
         // What will actually be spawned, resolved the same way the drain
         // pass resolves it — the operator's choice over the plan's tier.
         return json(
             request,
             &serde_json::json!({
                 "plan": rel,
-                "outcome": if replaced { "replaced" } else { "requested" },
+                "outcome": "requested",
+                "id": entry.id,
+                // What it is waiting behind on this plan, so the board can say
+                // "queued" and mean it rather than inferring from absence.
+                "ahead": ahead,
                 "owner": owner,
                 "complexity": complexity.as_str(),
                 "model": model.unwrap_or_else(|| session.model.clone()),
@@ -483,43 +555,52 @@ fn errand(mut request: Req, shared: &Shared, slug: &str) -> std::io::Result<()> 
     }
 
     if shared.overlay_status {
-        // Serve relays to the process chartered to spawn, and decides
-        // nothing — not even the refusals, which come back verbatim.
-        let addr_path = super::config::RuntimeConfig::runtime_dir(&shared.root)
-            .join(super::DISPATCH_ADDRFILE);
-        let Ok(addr) = std::fs::read_to_string(&addr_path) else {
-            return error(
-                request,
-                503,
-                "no dispatcher is running on this root — start `trellis dispatch run`",
-            );
-        };
         let forward = serde_json::json!({
             "instruction": instruction,
             "model": model,
             "effort": effort,
         })
         .to_string();
-        return match super::client::raw(
-            addr.trim(),
-            "POST",
+        return relay_to_dispatcher(
+            request,
+            shared,
             &format!("/api/plans/{slug}/errand"),
-            Some(&forward),
-        ) {
-            Ok((code, body)) => request.respond(
-                Response::from_string(body)
-                    .with_status_code(code)
-                    .with_header(json_header()),
-            ),
-            Err(e) => error(
-                request,
-                503,
-                &format!("the dispatcher did not answer: {e} — is `trellis dispatch run` up?"),
-            ),
-        };
+            &forward,
+        );
     }
 
     error(request, 405, "this process runs no dispatch loop")
+}
+
+/// Serve relays to the process chartered to spawn, and decides nothing — not
+/// even the refusals, which come back verbatim.
+fn relay_to_dispatcher(
+    request: Req,
+    shared: &Shared,
+    path: &str,
+    body: &str,
+) -> std::io::Result<()> {
+    let addr_path = super::config::RuntimeConfig::runtime_dir(&shared.root)
+        .join(super::DISPATCH_ADDRFILE);
+    let Ok(addr) = std::fs::read_to_string(&addr_path) else {
+        return error(
+            request,
+            503,
+            "no dispatcher is running on this root — start `trellis dispatch run`",
+        );
+    };
+    match super::client::raw(addr.trim(), "POST", path, Some(body)) {
+        Ok((code, body)) => request.respond(
+            Response::from_string(body)
+                .with_status_code(code)
+                .with_header(json_header()),
+        ),
+        Err(e) => error(
+            request,
+            503,
+            &format!("the dispatcher did not answer: {e} — is `trellis dispatch run` up?"),
+        ),
+    }
 }
 
 /// `POST /api/plans/{slug}/status` — the operator's lifecycle verbs behind

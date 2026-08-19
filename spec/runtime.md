@@ -277,8 +277,21 @@ request <plan> "<instruction>" [--model M] [--effort E]`, or `POST
 answers only as a relay — and the loop, still the only spawner, validates
 against a fresh tree and fires one session through the same seam as
 dispatch, in the same per-plan keyspace so an errand and an advance never
-overlap. A queued ask displaced by a later one for the same plan is reported
-as such, never silently. Interactively, the same shape is plane 1's
+overlap.
+
+The queue an ask waits in is durable and never loses one (decision 0065):
+`.trellis/runtime/errands.json`, written on every change, owned solely by the
+dispatch process. An ask is never refused for timing and never displaced — a
+full fleet defers it, a plan that already has a session queues it behind that
+session, a second ask joins the first and they fire in order, and a dispatcher
+restart is survived (an ask whose session died with the daemon is reconciled
+back into the queue at startup, beside the acting-role marker). It is pinned to
+`plan_ops::fingerprint` — the plan's body plus the declared fields the ask
+depends on, deliberately excluding the `status:` and `handoff:` the runtime
+writes itself — and when that moves the ask is marked stale: held, never fired,
+and shown to its author to confirm or discard. `/api/status` carries `errands`,
+merged live like `sessions` and `pending`, because an ask nobody can see is an
+ask that gets typed again. Interactively, the same shape is plane 1's
 `/trellis:refine` (a procedure a human runs, not a type the daemon offers).
 A
 human-held owner refuses nothing here (v22; decision 0057): the request is

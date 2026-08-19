@@ -16,6 +16,41 @@ between spec bumps. Every bump is a release: it closes `## [Unreleased]` into a
 
 ### Added
 
+- **An ask is owed until it is answered**
+  (`decisions/0065-an-ask-is-owed-until-it-is-answered.md`). The errand queue is
+  durable — `.trellis/runtime/errands.json`, one writer, saved on every change —
+  and it never loses an ask. A full fleet defers rather than drops it; a plan
+  that already has a session **queues** the ask behind it instead of refusing
+  with 409; a second ask **joins** the first rather than replacing it, and they
+  fire in order; a dispatcher restart is survived, with an ask whose session
+  died reconciled back into the queue at startup. `/api/status` now carries
+  `errands`, merged live like `sessions` and `pending`, and the plan drawer
+  lists what a plan still owes.
+- **Asks are pinned to the plan they were written about.**
+  `plan_ops::fingerprint` hashes a plan's body plus the declared fields an ask
+  depends on (`owner`, `type`, `complexity`, `awaits`, `contexts`, `subdomains`,
+  `metrics`, `tags`) — and deliberately not `status:` or `handoff:`, which the
+  runtime writes itself. When it moves, the ask is marked `stale`: held, never
+  fired, and shown to its author to confirm (re-pinning it to the plan they have
+  just read) or discard via `POST /api/plans/{slug}/errand/{id}`. Hand-rolled
+  FNV-1a, because the value is persisted and `DefaultHasher` is not stable
+  across Rust releases.
+
+### Fixed
+
+- **An errand deferred for capacity is no longer thrown away.** `fire` logged
+  "deferred, still due" and the request had already been taken out of the queue;
+  nothing put it back. A plan stays `ready` and is re-scanned, but an errand had
+  no such backing store. The wait leases added above make this more likely to
+  bite, since a waiting session holds a slot for as long as its lease runs.
+- **The `replaced` outcome is gone**, from the route, the CLI, and the board.
+  Reporting a displacement was the wrong end of the problem: the commonest
+  reason to ask twice is not changing your mind, it is not being able to tell
+  whether the first ask survived.
+- **The plan drawer no longer closes over a half-written errand.** A backdrop
+  click or Escape unmounted the composer and dropped the draft, with no
+  persistence anywhere.
+
 - **A wait is declared, and it expires**
   (`decisions/0064-a-wait-is-declared-and-it-expires.md`). A session minding
   work it started — a build, a monitor — reads `idle` to herdr and was

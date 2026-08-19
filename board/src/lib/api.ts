@@ -83,6 +83,10 @@ export interface DaemonStatus {
     in_flight?: InFlight[];
     [key: string]: unknown;
   } | null;
+  // The operator's queue, merged live rather than read from the tick's
+  // snapshot: an ask made between ticks has to be visible before the next
+  // one, or it reads as lost and gets typed again.
+  errands?: QueuedErrand[];
   // The complexity tiers this root resolved — the domain's own model/effort
   // vocabulary, so sizing an errand offers configured values rather than a
   // list baked into this client (decision 0060).
@@ -92,11 +96,30 @@ export interface DaemonStatus {
   [key: string]: unknown;
 }
 
+// One ask in the daemon's durable queue (decision 0065). Nothing displaces an
+// ask and nothing drops one for timing, so what is queued is what is owed.
+export interface QueuedErrand {
+  id: number;
+  plan: string;
+  instruction: string;
+  // Unix seconds, so the drawer can say how long it has been waiting.
+  asked_at: number;
+  // "pending" — waiting its turn; "stale" — the plan changed since it was
+  // written, so it is held for its author to confirm or discard; "dispatched"
+  // — a session is running for it.
+  state: "pending" | "stale" | "dispatched";
+  model?: string | null;
+  effort?: string | null;
+}
+
 export interface ErrandOutcome {
   plan: string;
-  // "requested", or "replaced" when this ask displaced one already queued
-  // for the same plan (decision 0060).
+  // Always "requested": an ask is never refused for timing and never
+  // displaced (decision 0065).
   outcome: string;
+  id?: number;
+  // How many asks on this plan run before this one.
+  ahead?: number;
   owner?: string;
   complexity?: string;
   model?: string;
@@ -163,6 +186,28 @@ export function createApi(origin: string) {
     const body = await res.json().catch(() => null);
     if (!res.ok)
       throw new Error(body?.error ?? `the errand was refused (${res.status})`);
+    return body;
+  },
+  // Rule on one queued ask whose plan changed under it (decision 0065).
+  // "confirm" re-pins it to what the plan says now; "discard" is the only way
+  // an ask leaves the queue unfired at a human's word.
+  resolveErrand: async (
+    rel: string,
+    id: number,
+    action: "confirm" | "discard",
+  ): Promise<{ outcome: string }> => {
+    const slug = rel.replace(/^plans\//, "").replace(/\.md$/, "");
+    const res = await fetch(
+      at(`/api/plans/${encodeURIComponent(slug)}/errand/${id}`),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      },
+    );
+    const body = await res.json().catch(() => null);
+    if (!res.ok)
+      throw new Error(body?.error ?? `the errand was not resolved (${res.status})`);
     return body;
   },
   // Flip a plan's lifecycle status (decision 0049) — the same guarded move

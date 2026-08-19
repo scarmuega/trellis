@@ -105,6 +105,93 @@ pub fn handoff(path: &Path) -> anyhow::Result<Option<String>> {
     Ok(fmedit::get(path, HANDOFF)?.filter(|h| !h.trim().is_empty()))
 }
 
+/// The frontmatter an errand's instruction depends on, in a fixed order.
+///
+/// Deliberately *not* every key. The runtime writes to a plan constantly —
+/// `flip` moves `status:` and clears `handoff:`, `relinquish` moves it back —
+/// so a fingerprint over the whole file would go stale the first time anything
+/// dispatched, which is the opposite of what it is for. What is left is what an
+/// operator was looking at when they wrote the ask: the substance, plus the
+/// fields that decide *who* would act on it and *how big* that session is.
+const FINGERPRINTED: &[&str] = &[
+    "owner",
+    "type",
+    "complexity",
+    "awaits",
+    "contexts",
+    "subdomains",
+    "metrics",
+    "tags",
+];
+
+/// FNV-1a 64. Hand-rolled because this value is *persisted*: an errand queued
+/// under one binary is judged under the next one, and
+/// `std::collections::hash_map::DefaultHasher` is explicitly not stable across
+/// Rust releases — an upgrade would silently invalidate every standing ask.
+/// Eight lines and a fixed constant is the whole cost of never having to think
+/// about that again. Not a security hash and never used as one.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// What a plan *said* when an ask was written about it.
+///
+/// An errand is free text an operator wrote while reading one plan, and it
+/// stays coherent only for as long as that plan does. This is the cheapest
+/// honest answer to "is this still the same plan": its body, plus the declared
+/// fields the ask depends on (`FINGERPRINTED`), hashed to one stable number.
+///
+/// It is a proxy and not a guarantee — an ask pointing at something outside the
+/// plan ("check the CI failure on PR #1228") goes stale while this stays
+/// green — so it bounds the queue rather than authorising it.
+pub fn fingerprint(path: &Path) -> anyhow::Result<u64> {
+    let text = std::fs::read_to_string(path)?;
+    let fm = crate::frontmatter::extract(&text);
+    // The body is everything after the closing fence; a file with no
+    // frontmatter at all is all body.
+    let body: String = match &fm {
+        Some(fm) => text
+            .lines()
+            .skip(fm.close_line as usize)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None => text.clone(),
+    };
+    let mut canonical = String::new();
+    if let Some(fm) = &fm {
+        for key in FINGERPRINTED {
+            // Rendered the same whichever way it was read, because the rest of
+            // the kernel already treats `tags: dolos` and `tags: [dolos]` as
+            // one thing (`get_list` normalises a scalar into a one-element
+            // list) — so an author reflowing that spelling has not changed the
+            // plan an ask was written about. `get_str` is the fallback for
+            // frontmatter too broken for `get_list`'s block scan.
+            let value = fm
+                .get_list(key)
+                .filter(|items| !items.is_empty())
+                .or_else(|| fm.get_str(key).map(|v| vec![v]))
+                .map(|items| {
+                    items
+                        .iter()
+                        .map(|i| i.trim())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                });
+            if let Some(value) = value {
+                canonical.push_str(&format!("{key}={value}\n"));
+            }
+        }
+    }
+    canonical.push_str("---\n");
+    canonical.push_str(body.trim_end());
+    Ok(fnv1a(canonical.as_bytes()))
+}
+
 /// What a plan was left in when the session dispatched to advance it ended.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Relinquished {
@@ -152,6 +239,80 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    /// The test the naive design fails. The runtime moves `status:` and
+    /// `handoff:` on its own — claiming, parking, relinquishing — so a
+    /// fingerprint that noticed would invalidate every queued ask the first
+    /// time anything dispatched, which is the opposite of the point.
+    #[test]
+    fn the_runtimes_own_writes_do_not_change_a_plans_fingerprint() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = plan(dir.path(), "status: ready\nowner: org/coder\n");
+        let before = fingerprint(&p).unwrap();
+
+        flip(&p, &[PlanStatus::Ready], PlanStatus::Active).unwrap();
+        assert_eq!(fingerprint(&p).unwrap(), before, "a claim is not a rewrite");
+
+        set_handoff(&p, Some("https://forge/pr/7")).unwrap();
+        assert_eq!(fingerprint(&p).unwrap(), before, "nor is a park");
+
+        relinquish(&p).unwrap();
+        assert_eq!(fingerprint(&p).unwrap(), before, "nor is being handed back");
+    }
+
+    /// What it *must* notice: the substance the ask was written against, and
+    /// the fields that decide who would act on it.
+    #[test]
+    fn a_rewrite_changes_it_and_so_does_a_new_owner() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = plan(dir.path(), "status: ready\nowner: org/coder\n");
+        let before = fingerprint(&p).unwrap();
+
+        let text = std::fs::read_to_string(&p).unwrap();
+        std::fs::write(&p, format!("{text}\nA paragraph the ask was not about.\n")).unwrap();
+        let after_body = fingerprint(&p).unwrap();
+        assert_ne!(after_body, before, "the body is the substance");
+
+        crate::fmedit::set_scalar(&p, "owner", "org/founder", false).unwrap();
+        assert_ne!(
+            fingerprint(&p).unwrap(),
+            after_body,
+            "a different owner is a different act"
+        );
+    }
+
+    /// It is written to disk and read back under a later binary, so the value
+    /// is pinned rather than merely deterministic-for-now.
+    #[test]
+    fn the_hash_is_pinned_not_merely_deterministic() {
+        assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a(b"foobar"), 0x85944171f73967e8);
+    }
+
+    /// Reflowing a field's spelling is not a rewrite. The kernel already reads
+    /// `tags: dolos` and `tags: [dolos]` as one thing, so an ask written
+    /// against either is still an ask about the same plan.
+    #[test]
+    fn a_scalar_and_its_one_element_list_are_the_same_plan() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+        std::fs::write(&a, "---\ntags: [dolos]\n---\n# Plan\n").unwrap();
+        std::fs::write(&b, "---\ntags: dolos\n---\n# Plan\n").unwrap();
+        assert_eq!(fingerprint(&a).unwrap(), fingerprint(&b).unwrap());
+    }
+
+    /// But a field the ask does depend on, changing value, is.
+    #[test]
+    fn a_different_value_in_a_fingerprinted_field_is_a_different_plan() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+        std::fs::write(&a, "---\ntags: [dolos]\n---\n# Plan\n").unwrap();
+        std::fs::write(&b, "---\ntags: [dolos, governance]\n---\n# Plan\n").unwrap();
+        assert_ne!(fingerprint(&a).unwrap(), fingerprint(&b).unwrap());
     }
 
     #[test]

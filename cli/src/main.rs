@@ -921,8 +921,9 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                         .get("budget_usd")
                         .and_then(serde_json::Value::as_f64)
                         .unwrap_or(0.0);
-                    // "replaced" is the queue displacing an earlier ask on
-                    // this plan, and worth saying out loud (decision 0060).
+                    // Always "requested" now: an ask is never refused for
+                    // timing and never displaced (decision 0065), so the only
+                    // thing left to report is what it will run as.
                     println!(
                         "{}: errand {} → {} ({}, {} / {} / ${budget}{})",
                         get("outcome"),

@@ -15,6 +15,7 @@
 pub mod channels;
 pub mod client;
 pub mod config;
+pub mod errands;
 pub mod marker;
 #[cfg(unix)]
 pub mod herdr;
@@ -125,10 +126,11 @@ pub struct Shared {
     /// requests locally (decisions 0048, 0051); everywhere else the route
     /// relays or refuses.
     pub dispatches: bool,
-    /// Errand sessions an operator asked for, drained by the next pass. The
-    /// queue is memory only — a request is one-shot and best-effort, and the
-    /// loop stays the only spawner.
-    pub errands: Mutex<Vec<ErrandRequest>>,
+    /// Errand sessions an operator asked for. Durable (decision 0065):
+    /// `.trellis/runtime/errands.json`, saved on every mutation, because the
+    /// ask is typed by a human and losing it sends them back to the keyboard.
+    /// The loop stays the only spawner; this is what it spawns from.
+    pub errands: Mutex<errands::Queue>,
     /// Whether a session's budget cap is actually enforced. Always false
     /// since sessions became interactive panes (`--max-budget-usd` only
     /// works with `--print`), and reported all the same: a number the
@@ -137,10 +139,10 @@ pub struct Shared {
     /// field, and because a budget expression that works outside print mode
     /// is one of 0043's named pull-triggers.
     pub budget_enforced: bool,
-    /// Ask the loop to pass now without queueing anything. Set when a request
-    /// is refused as in-flight: `status.in_flight` is only as fresh as the
-    /// last pass, so if that session actually ended, the nudged pass reaps it
-    /// and the operator's retry succeeds within a second instead of a tick.
+    /// Ask the loop to pass now. Set when an errand is queued for a plan that
+    /// already has a session: `status.in_flight` is only as fresh as the last
+    /// pass, so if that session actually ended, the nudged pass reaps it and
+    /// the ask starts within a second instead of a tick.
     pub nudge: std::sync::atomic::AtomicBool,
 }
 
@@ -163,30 +165,62 @@ pub struct ErrandRequest {
 }
 
 impl Shared {
-    /// Queue an errand, reporting whether it displaced one already waiting.
+    /// Queue an errand and return the entry it became.
     ///
-    /// A second request for the same plan replaces the first: the operator
-    /// changed their mind, not their target, and one plan carries one
-    /// session either way. The caller is told so it can say so — a
-    /// replacement that looks identical to a fresh ask is how an operator
-    /// loses an instruction without noticing.
-    pub fn request_errand(&self, request: ErrandRequest) -> bool {
+    /// Nothing is displaced (decision 0065): a second ask on the same plan
+    /// joins the first and they fire in order. The old behaviour replaced it
+    /// and reported the replacement, on the reading that an operator who asks
+    /// twice changed their mind — which cost real instructions, because the
+    /// commonest reason to ask twice is not knowing whether the first ask
+    /// survived.
+    pub fn request_errand(&self, request: ErrandRequest, fingerprint: u64) -> errands::Entry {
         let mut queue = self.errands.lock().unwrap();
-        if let Some(existing) = queue.iter_mut().find(|r| r.plan == request.plan) {
-            *existing = request;
-            true
-        } else {
-            queue.push(request);
-            false
-        }
+        let entry = queue.push(
+            &request.plan,
+            &request.instruction,
+            request.model,
+            request.effort,
+            crate::waits::now_secs(),
+            fingerprint,
+        );
+        self.save_errands(&queue);
+        entry
     }
 
-    pub fn take_errands(&self) -> Vec<ErrandRequest> {
-        std::mem::take(&mut *self.errands.lock().unwrap())
+    /// Resolve one ask an operator has looked at: `confirm` re-pins a stale
+    /// entry to what the plan says now, `discard` drops it.
+    pub fn resolve_errand(&self, id: u64, confirm: Option<u64>) -> Option<errands::Entry> {
+        let mut queue = self.errands.lock().unwrap();
+        let resolved = match confirm {
+            Some(fingerprint) => {
+                queue.confirm(id, fingerprint);
+                queue.get(id).cloned()
+            }
+            None => queue.remove(id),
+        }?;
+        self.save_errands(&queue);
+        Some(resolved)
+    }
+
+    pub fn errand_view(&self) -> Vec<errands::Entry> {
+        self.errands.lock().unwrap().entries.clone()
     }
 
     pub fn has_errands(&self) -> bool {
-        !self.errands.lock().unwrap().is_empty()
+        self.errands.lock().unwrap().has_pending()
+    }
+
+    /// Persist the queue. Said, never fatal — a queue the daemon can still
+    /// serve from memory is better than a pass that refuses to run — but said
+    /// loudly, because unlike the state files this one cannot be reconstructed
+    /// from the tree.
+    pub fn save_errands(&self, queue: &errands::Queue) {
+        if let Err(e) = queue.save(&self.root) {
+            note(&format!(
+                "the errand queue could not be written ({e:#}) — asks are held in memory only \
+                 until this clears, and would not survive a restart"
+            ));
+        }
     }
 }
 
@@ -317,7 +351,7 @@ pub fn run_serve(opts: ServeOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: true,
         dispatches: false,
-        errands: Mutex::new(Vec::new()),
+        errands: Mutex::new(errands::Queue::default()),
         budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
@@ -383,7 +417,9 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: false,
         dispatches: true,
-        errands: Mutex::new(Vec::new()),
+        // The dispatch process is the sole owner of this file (serve relays
+        // to it), so it is the only one that reads it back.
+        errands: Mutex::new(errands::Queue::load(&root)),
         budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
@@ -438,7 +474,22 @@ pub fn run_dispatch(opts: DispatchOpts) -> anyhow::Result<ExitCode> {
     // because the retire never came.
     if !rt.dry_run {
         let live: Vec<String> = backend.in_flight().iter().map(|s| s.key.clone()).collect();
-        match marker::reconcile(&root, "plan:", &live) {
+        // The errand half of the same repair: an ask marked dispatched whose
+    // session is not in flight belongs back in the queue (decision 0065). The
+    // daemon died between the spawn and the conclusion, and the operator is
+    // owed the ask rather than an explanation.
+    {
+        let mut queue = rt.shared.errands.lock().unwrap();
+        let requeued = queue.reconcile(&live);
+        if !requeued.is_empty() {
+            note(&format!(
+                "{} queued errand(s) outlived the session started for them — back in the queue",
+                requeued.len()
+            ));
+            rt.shared.save_errands(&queue);
+        }
+    }
+    match marker::reconcile(&root, "plan:", &live) {
             Ok(dropped) => {
                 for key in &dropped {
                     relinquish_key(&rt, &state, key);
@@ -521,7 +572,7 @@ pub fn run_rituals(opts: RitualsOpts) -> anyhow::Result<ExitCode> {
         inbox: mcp::Inbox::default(),
         overlay_status: false,
         dispatches: false,
-        errands: Mutex::new(Vec::new()),
+        errands: Mutex::new(errands::Queue::default()),
         budget_enforced: false,
         nudge: std::sync::atomic::AtomicBool::new(false),
     });
@@ -688,6 +739,7 @@ struct Pass {
 }
 
 /// Whether one task got a session this pass.
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum Outcome {
     Started,
     /// Already in flight, or no free slot — still due.
@@ -766,15 +818,49 @@ fn dispatch_pass(
     // dropped with its reason, never carried to a later pass. No cooldown:
     // the cooldown throttles unattended respawns, and this is the attended
     // case.
+    // The queue is drained by *reading* it, never by taking it (decision
+    // 0065). An ask leaves only three ways: it starts a session, its plan
+    // refuses it outright, or its author discards it. A full fleet, a busy
+    // plan, and a dispatcher restart all leave it exactly where it is.
     let errand_prompt = config::errand_prompt();
-    for req in rt.shared.take_errands() {
+    let queued: Vec<errands::Entry> = rt
+        .shared
+        .errands
+        .lock()
+        .unwrap()
+        .pending()
+        .into_iter()
+        .cloned()
+        .collect();
+    for req in queued {
         let owner = match validate_errand(&tree, &req.plan) {
             Ok(owner) => owner,
             Err(refusal) => {
+                // Structural refusals are terminal — the plan is gone,
+                // archived, or unowned, and no later pass changes that.
                 note(&format!("{ERRAND} dropped — {}", refusal.describe(&req.plan)));
+                drop_errand(rt, req.id);
                 continue;
             }
         };
+        // The ask was written about a plan. If that plan no longer says what
+        // it said, the ask is held rather than fired or dropped: only its
+        // author can say whether it survived the rewrite.
+        match crate::plan_ops::fingerprint(&rt.root.join(&req.plan)) {
+            Ok(current) if current != req.fingerprint => {
+                note(&format!(
+                    "{ERRAND} {} — the plan changed since this was asked; held for review",
+                    req.plan
+                ));
+                let mut queue = rt.shared.errands.lock().unwrap();
+                queue.mark_stale(req.id);
+                rt.shared.save_errands(&queue);
+                continue;
+            }
+            // Unreadable reads as unchanged: a plan caught mid-write must not
+            // cost the operator their ask.
+            Ok(_) | Err(_) => {}
+        }
         let owner_short = owner.strip_prefix("org/").unwrap_or(&owner).to_string();
         // The tier the plan's `complexity:` resolves to is the default; what
         // the operator chose at the call wins over it (decision 0060), which
@@ -798,6 +884,14 @@ fn dispatch_pass(
             .set("mandate", crate::org::mandate_block(&tree, &owner))
             .set("holder", crate::org::holder_block(&tree, &owner))
             .set("procedure", rt.procedure.clone());
+        // Marked before the spawn, and saved, for the reason `fire` orders its
+        // own writes that way: a crash during `agent.start` must leave a
+        // record a later startup can reconcile, not an ask nobody owns.
+        {
+            let mut queue = rt.shared.errands.lock().unwrap();
+            queue.mark_dispatched(req.id, &key);
+            rt.shared.save_errands(&queue);
+        }
         let started = fire(
             rt,
             state,
@@ -811,6 +905,19 @@ fn dispatch_pass(
             vars,
             today,
         );
+        // Deferred is the case this whole change exists for: no free slot, or
+        // a session already on this plan. The ask goes back in the queue and
+        // the next pass tries again — where it used to be logged as "still
+        // due" and silently thrown away.
+        if started != Outcome::Started {
+            let mut queue = rt.shared.errands.lock().unwrap();
+            if started == Outcome::Failed {
+                queue.remove(req.id);
+            } else {
+                queue.confirm(req.id, req.fingerprint);
+            }
+            rt.shared.save_errands(&queue);
+        }
         outcome.record(started);
     }
 
@@ -1210,6 +1317,14 @@ fn claim_to_dispatch(rt: &Runtime, key: &str, errand: &str) -> Option<PathBuf> {
     }
 }
 
+/// Drop one ask the tree itself has refused — the plan is gone, archived, or
+/// unowned, and no later pass changes that.
+fn drop_errand(rt: &Runtime, id: u64) {
+    let mut queue = rt.shared.errands.lock().unwrap();
+    queue.remove(id);
+    rt.shared.save_errands(&queue);
+}
+
 /// Drop any wait lease behind a session key. Said, never fatal, and a no-op
 /// for a ritual: the lease is a liveness claim, and the plan's own status is
 /// what the runtime falls back on when there is none.
@@ -1358,6 +1473,15 @@ fn conclude(rt: &Runtime, state: &mut State, done: &Finished) {
     // said, the session that took it is over. Expiry would get here on its
     // own; this is so the next taker never inherits one.
     clear_wait(rt, &done.key);
+    // The ask this session was started for is answered by the session having
+    // happened, whatever it concluded — an errand is one ask, not a standing
+    // order, and a plan handed back is re-scanned as an `act` in any case.
+    {
+        let mut queue = rt.shared.errands.lock().unwrap();
+        if queue.remove_dispatched(&done.key).is_some() {
+            rt.shared.save_errands(&queue);
+        }
+    }
     if let Err(e) = marker::remove(&rt.root, &done.key) {
         note(&format!(
             "{}: acting-role marker removal failed: {e}",
@@ -1691,15 +1815,15 @@ mod tests {
         RuntimeConfig::runtime_dir(root).join(DISPATCH_PIDFILE)
     }
 
-    fn shared_for_queue() -> Shared {
+    fn shared_for_queue(root: &Path) -> Shared {
         Shared {
             status: Mutex::new(Status::default()),
-            root: PathBuf::from("/nonexistent"),
+            root: root.to_path_buf(),
             sessions: SessionMap::default(),
             inbox: mcp::Inbox::default(),
             overlay_status: false,
             dispatches: true,
-            errands: Mutex::new(Vec::new()),
+            errands: Mutex::new(errands::Queue::default()),
             budget_enforced: true,
             nudge: std::sync::atomic::AtomicBool::new(false),
         }
@@ -1714,26 +1838,51 @@ mod tests {
         }
     }
 
-    /// One plan carries one session, so a second ask before the drain
-    /// displaces the first — and the queue says so, because an instruction
-    /// replaced in silence is an instruction lost (decision 0060).
+    /// Nothing an operator types is displaced (decision 0065). A second ask on
+    /// one plan joins the first and they fire in order — the old rule replaced
+    /// it and reported the replacement, which cost real instructions, because
+    /// the commonest reason to ask twice is not knowing whether the first ask
+    /// survived.
     #[test]
-    fn a_second_ask_for_one_plan_replaces_the_first_and_reports_it() {
-        let shared = shared_for_queue();
+    fn a_second_ask_for_one_plan_joins_the_first_rather_than_replacing_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let shared = shared_for_queue(dir.path());
 
-        assert!(!shared.request_errand(ask("plans/a.md", "split the scope")));
-        assert!(!shared.request_errand(ask("plans/b.md", "another plan, another ask")));
-        assert!(
-            shared.request_errand(ask("plans/a.md", "actually, tighten it")),
-            "the same plan twice is a replacement"
+        let first = shared.request_errand(ask("plans/a.md", "split the scope"), 1);
+        shared.request_errand(ask("plans/b.md", "another plan, another ask"), 1);
+        let second = shared.request_errand(ask("plans/a.md", "actually, tighten it"), 1);
+        assert_ne!(first.id, second.id);
+
+        let queued = shared.errand_view();
+        assert_eq!(queued.len(), 3, "three asks were made, so three are owed");
+        let on_a: Vec<_> = queued.iter().filter(|e| e.plan == "plans/a.md").collect();
+        assert_eq!(
+            on_a.iter().map(|e| e.instruction.as_str()).collect::<Vec<_>>(),
+            vec!["split the scope", "actually, tighten it"],
+            "and they run in the order they were asked"
         );
 
-        let drained = shared.take_errands();
-        assert_eq!(drained.len(), 2, "one entry per plan, never two");
-        let a = drained.iter().find(|r| r.plan == "plans/a.md").unwrap();
-        assert_eq!(
-            a.instruction, "actually, tighten it",
-            "the later ask is the one that runs"
+        // And it is on disk the moment it is made, so a restart owes nothing.
+        let reloaded = errands::Queue::load(dir.path());
+        assert_eq!(reloaded.pending().len(), 3);
+    }
+
+    /// The only ways an ask leaves the queue unfired: its author discards it,
+    /// or the tree itself refuses it. `confirm` is what re-pins a held one.
+    #[test]
+    fn an_ask_leaves_the_queue_only_by_running_or_by_being_discarded() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let shared = shared_for_queue(dir.path());
+        let entry = shared.request_errand(ask("plans/a.md", "split the scope"), 7);
+
+        assert!(shared.resolve_errand(entry.id, Some(9)).is_some());
+        assert_eq!(shared.errand_view()[0].fingerprint, 9, "confirm re-pins it");
+
+        assert!(shared.resolve_errand(entry.id, None).is_some());
+        assert!(shared.errand_view().is_empty());
+        assert!(
+            shared.resolve_errand(entry.id, None).is_none(),
+            "and an ask that is already gone is a 404, not a second discard"
         );
     }
 
